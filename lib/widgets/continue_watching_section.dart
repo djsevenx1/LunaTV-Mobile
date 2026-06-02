@@ -245,7 +245,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                     width: 64,
                     height: 64,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFe74c3c).withValues(alpha: 0.1),
+                      color: const Color(0xFFe74c3c).withOpacity( 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -644,7 +644,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Colors.black.withOpacity( 0.1),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),

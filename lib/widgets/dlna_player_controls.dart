@@ -49,7 +49,7 @@ class _HoverButtonState extends State<HoverButton> {
           decoration: _isHovering
               ? BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.grey.withValues(alpha: 0.5),
+                  color: Colors.grey.withOpacity( 0.5),
                 )
               : null,
           child: widget.child,
@@ -101,7 +101,7 @@ class _CapsuleHoverButtonState extends State<CapsuleHoverButton> {
         child: Container(
           decoration: _isHovering
               ? BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
+                  color: Colors.white.withOpacity( 0.1),
                   borderRadius: widget.isLeft
                       ? const BorderRadius.only(
                           topLeft: Radius.circular(22),
@@ -272,7 +272,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
+                  color: Colors.black.withOpacity( 0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -381,7 +381,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
+                color: Colors.black.withOpacity( 0.5),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -433,17 +433,17 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                 ),
                 borderRadius: BorderRadius.circular(22),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withOpacity( 0.2),
                   width: 1,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.5),
+                    color: Colors.black.withOpacity( 0.5),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
                   BoxShadow(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: Colors.white.withOpacity( 0.1),
                     blurRadius: 2,
                     offset: const Offset(0, -1),
                   ),
@@ -462,7 +462,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                         decoration: BoxDecoration(
                           border: Border(
                             right: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.2),
+                              color: Colors.white.withOpacity( 0.2),
                               width: 1,
                             ),
                           ),
@@ -649,7 +649,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(3),
                                       color:
-                                          Colors.white.withValues(alpha: 0.3),
+                                          Colors.white.withOpacity( 0.3),
                                     ),
                                   ),
                                 ),
@@ -694,7 +694,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                                                 boxShadow: [
                                                   BoxShadow(
                                                     color: Colors.black
-                                                        .withValues(alpha: 0.3),
+                                                        .withOpacity( 0.3),
                                                     blurRadius: 4,
                                                     offset: const Offset(0, 2),
                                                   ),
@@ -717,7 +717,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                                               boxShadow: [
                                                 BoxShadow(
                                                   color: Colors.black
-                                                      .withValues(alpha: 0.3),
+                                                      .withOpacity( 0.3),
                                                   blurRadius: 4,
                                                   offset: const Offset(0, 2),
                                                 ),
@@ -804,7 +804,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                                   height: 6,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(3),
-                                    color: Colors.white.withValues(alpha: 0.3),
+                                    color: Colors.white.withOpacity( 0.3),
                                   ),
                                 ),
                               ),
@@ -849,7 +849,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                                               boxShadow: [
                                                 BoxShadow(
                                                   color: Colors.black
-                                                      .withValues(alpha: 0.3),
+                                                      .withOpacity( 0.3),
                                                   blurRadius: 4,
                                                   offset: const Offset(0, 2),
                                                 ),
@@ -871,7 +871,7 @@ class _DLNAPlayerControlsState extends State<DLNAPlayerControls> {
                                             boxShadow: [
                                               BoxShadow(
                                                 color: Colors.black
-                                                    .withValues(alpha: 0.3),
+                                                    .withOpacity( 0.3),
                                                 blurRadius: 4,
                                                 offset: const Offset(0, 2),
                                               ),

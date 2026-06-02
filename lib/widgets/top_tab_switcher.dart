@@ -120,8 +120,8 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
                           boxShadow: [
                             BoxShadow(
                               color: themeService.isDarkMode
-                                  ? Colors.black.withValues(alpha: 0.3)
-                                  : Colors.black.withValues(alpha: 0.1),
+                                  ? Colors.black.withOpacity( 0.3)
+                                  : Colors.black.withOpacity( 0.1),
                               blurRadius: 3,
                               offset: const Offset(0, 1),
                             ),

@@ -65,12 +65,12 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
         builder: (context, themeService, child) {
           final isDark = themeService.isDarkMode;
           final backgroundColor = isDark 
-              ? const Color(0xFF1e1e1e).withValues(alpha: 0.95)
-              : const Color(0xFFffffff).withValues(alpha: 0.95);
+              ? const Color(0xFF1e1e1e).withOpacity( 0.95)
+              : const Color(0xFFffffff).withOpacity( 0.95);
           final textColor = isDark ? Colors.white : const Color(0xFF2c3e50);
           final secondaryTextColor = isDark 
-              ? Colors.white.withValues(alpha: 0.7)
-              : const Color(0xFF2c3e50).withValues(alpha: 0.7);
+              ? Colors.white.withOpacity( 0.7)
+              : const Color(0xFF2c3e50).withOpacity( 0.7);
           return Container(
             decoration: BoxDecoration(
               color: backgroundColor,
@@ -236,8 +236,8 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
               ),
             ),
             backgroundColor: isDark 
-                ? const Color(0xFF1e1e1e).withValues(alpha: 0.9)
-                : const Color(0xFF2c3e50).withValues(alpha: 0.9),
+                ? const Color(0xFF1e1e1e).withOpacity( 0.9)
+                : const Color(0xFF2c3e50).withOpacity( 0.9),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -263,7 +263,7 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
               '图片已保存到相册',
               style: FontUtils.poppins(color: Colors.white),
             ),
-            backgroundColor: Colors.green.withValues(alpha: 0.8),
+            backgroundColor: Colors.green.withOpacity( 0.8),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -276,7 +276,7 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
               '保存失败: ${e.toString()}',
               style: FontUtils.poppins(color: Colors.white),
             ),
-            backgroundColor: Colors.red.withValues(alpha: 0.8),
+            backgroundColor: Colors.red.withOpacity( 0.8),
             duration: const Duration(seconds: 3),
           ),
         );

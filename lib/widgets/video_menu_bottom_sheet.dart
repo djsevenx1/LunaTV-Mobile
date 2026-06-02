@@ -124,7 +124,7 @@ class VideoMenuBottomSheet extends StatefulWidget {
       isScrollControlled: true,
       enableDrag: false,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.5), // 添加半透明的遮罩层
+      barrierColor: Colors.black.withOpacity( 0.5), // 添加半透明的遮罩层
       transitionAnimationController: transitionController,
       builder: (context) => VideoMenuBottomSheet(
         videoInfo: videoInfo,
@@ -609,7 +609,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
+                      color: Colors.black.withOpacity( 0.1),
                       blurRadius: 10,
                       offset: const Offset(0, -2),
                     ),
@@ -699,7 +699,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                               borderRadius: BorderRadius.circular(8),
                                               boxShadow: [
                                                 BoxShadow(
-                                                  color: Colors.black.withValues(alpha: 0.1),
+                                                  color: Colors.black.withOpacity( 0.1),
                                                   blurRadius: 4,
                                                   offset: const Offset(0, 2),
                                                 ),
@@ -968,7 +968,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFB800).withValues(alpha: 0.1),
+                    color: const Color(0xFFFFB800).withOpacity( 0.1),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Row(
@@ -1132,7 +1132,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE91E63).withValues(alpha: 0.1),
+                    color: const Color(0xFFE91E63).withOpacity( 0.1),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Row(
@@ -1641,7 +1641,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.1),
+                  color: iconColor.withOpacity( 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -1772,7 +1772,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
+                  color: Colors.black.withOpacity( 0.1),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

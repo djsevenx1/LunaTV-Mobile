@@ -87,7 +87,7 @@ class _VideoCardState extends State<VideoCard> {
                           borderRadius: BorderRadius.circular(8),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
+                              color: Colors.black.withOpacity( 0.1),
                               blurRadius: 4,
                               offset: const Offset(0, 2),
                             ),
@@ -153,7 +153,7 @@ class _VideoCardState extends State<VideoCard> {
                                 end: Alignment.bottomCenter,
                                 colors: [
                                   Colors.transparent,
-                                  Colors.black.withValues(alpha: 0.6),
+                                  Colors.black.withOpacity( 0.6),
                                 ],
                                 stops: const [0.5, 1.0],
                               ),
@@ -176,7 +176,7 @@ class _VideoCardState extends State<VideoCard> {
                                   horizontal: 7, vertical: 4),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF2c3e50)
-                                    .withValues(alpha: 0.8),
+                                    .withOpacity( 0.8),
                                 borderRadius: BorderRadius.circular(5),
                               ),
                               child: Text(
@@ -256,7 +256,7 @@ class _VideoCardState extends State<VideoCard> {
                           child: Container(
                             height: 3,
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.3),
+                              color: Colors.black.withOpacity( 0.3),
                               borderRadius: const BorderRadius.only(
                                 bottomLeft: Radius.circular(8),
                                 bottomRight: Radius.circular(8),
@@ -389,7 +389,7 @@ class _VideoCardState extends State<VideoCard> {
                                       height: 30,
                                       decoration: BoxDecoration(
                                         color:
-                                            Colors.grey.withValues(alpha: 0.8),
+                                            Colors.grey.withOpacity( 0.8),
                                         shape: BoxShape.circle,
                                       ),
                                       child: Center(
@@ -809,7 +809,7 @@ class _VideoCardState extends State<VideoCard> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
+                  color: Colors.black.withOpacity( 0.1),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

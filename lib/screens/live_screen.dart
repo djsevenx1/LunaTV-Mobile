@@ -322,8 +322,8 @@ class _LiveScreenState extends State<LiveScreen>
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       decoration: BoxDecoration(
         color: themeService.isDarkMode
-            ? const Color(0xFF1e1e1e).withValues(alpha: 0.9)
-            : Colors.white.withValues(alpha: 0.8),
+            ? const Color(0xFF1e1e1e).withOpacity( 0.9)
+            : Colors.white.withOpacity( 0.8),
       ),
       child: Row(
         children: [

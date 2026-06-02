@@ -206,7 +206,7 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
                           Icon(
                             Icons.devices_other,
                             size: 64,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity( 0.5),
                           ),
                           const SizedBox(height: 16),
                           Text(
@@ -222,7 +222,7 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
                               '请确保设备与手机在同一网络下',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity( 0.7),
                               ),
                             ),
                           ],

@@ -195,7 +195,7 @@ class _EpisodePanelItemWithHoverState extends State<_EpisodePanelItemWithHover> 
         child: Container(
           decoration: BoxDecoration(
             color: widget.isCurrentEpisode
-                ? Colors.green.withValues(alpha: 0.2)
+                ? Colors.green.withOpacity( 0.2)
                 : (_isHovering && DeviceUtils.isPC()
                     ? (widget.isDarkMode 
                         ? const Color(0xFF1A3D2E)  // 深色模式下的浅绿色

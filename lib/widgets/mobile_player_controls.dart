@@ -486,7 +486,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   Widget build(BuildContext context) {
     if (widget.isLoadingVideo) {
       return Container(
-        color: Colors.black.withValues(alpha: 0.7),
+        color: Colors.black.withOpacity( 0.7),
         child: const Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -622,7 +622,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withValues(alpha: 0.6),
+                  Colors.black.withOpacity( 0.6),
                   Colors.transparent,
                 ],
               ),
@@ -673,7 +673,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                 begin: Alignment.bottomCenter,
                 end: Alignment.topCenter,
                 colors: [
-                  Colors.black.withValues(alpha: 0.6),
+                  Colors.black.withOpacity( 0.6),
                   Colors.transparent,
                 ],
               ),
@@ -963,7 +963,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.7),
+            color: Colors.black.withOpacity( 0.7),
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -984,7 +984,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: Colors.white.withOpacity( 0.3),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -1028,7 +1028,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.7),
+              color: Colors.black.withOpacity( 0.7),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Column(
@@ -1051,7 +1051,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                     children: [
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.3),
+                          color: Colors.white.withOpacity( 0.3),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -1107,7 +1107,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
               child: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
+                  color: Colors.black.withOpacity( 0.5),
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Icon(
