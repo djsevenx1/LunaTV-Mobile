@@ -2,25 +2,41 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
-    container:
-      image: cirruslabs/flutter:3.16.9
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v1
+
+      - name: Setup Java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 12.x
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v1.5.3
+        with:
+          flutter-version: 3.16.9
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Enable Flutter
+        run: |
+          echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
+          echo "$HOME/.pub-cache" >> $GITHUB_PATH
 
       - name: Build APK
-        run: |
-          flutter pub get
-          flutter build apk --release
+        run: flutter build apk --release
 
       - name: Upload APK
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v1
         with:
           name: app-release.apk
           path: build/app/outputs/flutter-apk/app-release.apk
