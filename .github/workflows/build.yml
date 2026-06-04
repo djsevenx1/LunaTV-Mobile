@@ -2,9 +2,8 @@ name: Build Release APK
 
 on:
   push:
-    branches:
-      - main
-    workflow_dispatch:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build_android:
@@ -24,7 +23,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'
+          channel: 'stable'
 
       - name: Get dependencies
         run: flutter pub get
