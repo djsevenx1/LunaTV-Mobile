@@ -2,7 +2,7 @@ name: Build LunaTV-Mobile APK
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   build:
