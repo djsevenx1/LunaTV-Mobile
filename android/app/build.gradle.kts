@@ -41,7 +41,6 @@ android {
             create("release") {
                 val properties = Properties()
                 properties.load(FileInputStream(keystorePropertiesFile))
-                
                 storeFile = file(properties.getProperty("storeFile")!!)
                 storePassword = properties.getProperty("storePassword")
                 keyAlias = properties.getProperty("keyAlias")
@@ -58,7 +57,6 @@ android {
                 // Fallback to debug signing for local development
                 signingConfig = signingConfigs.getByName("debug")
             }
-            
             // Enable R8 code shrinking, obfuscation, and optimization
             isMinifyEnabled = true
             isShrinkResources = true
@@ -67,7 +65,6 @@ android {
                 "proguard-rules.pro"
             )
         }
-        
         debug {
             // Keep debug builds fast
             isMinifyEnabled = false
