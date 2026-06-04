@@ -18,18 +18,15 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 36
+      - name: Install Android SDK
         run: |
-          sdkmanager "platforms;android-36"
-          sdkmanager "build-tools;36.0.0"
+          sdkmanager "platforms;android-34"
+          sdkmanager "build-tools;34.0.0"
           sdkmanager "platform-tools"
           sdkmanager "ndk;29.0.14033849"
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses > /dev/null
-
-      - name: Set compileSdkVersion to 36
-        run: echo "flutter.compileSdkVersion=36" >> $GITHUB_ENV
 
       - uses: subosito/flutter-action@v2
         with:
