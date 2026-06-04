@@ -21,7 +21,7 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build apk
+      - run: flutter build apk --release
 
       - uses: actions/upload-artifact@v1
         with:
