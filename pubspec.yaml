@@ -21,7 +21,7 @@ dependencies:
   cached_network_image: ^3.3.1
   url_launcher: ^6.3.0
   path_provider: ^2.1.3
-  package_info_plus: ^8.0.0
+  package_info_plus: ^4.0.0
   intl: 0.18.1
   dlna_dart: ^0.0.5
   media_kit: ^1.2.3
