@@ -1,29 +1,39 @@
-name: Build APK
+name: Build Release APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+    workflow_dispatch:
 
 jobs:
-  build:
-    name: Build APK
+  build_android:
+    name: Build Android Release APK
     runs-on: ubuntu-latest
-    container:
-      image: cirruslabs/flutter:stable
     
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build APK
+      - name: Build APK (release)
         run: flutter build apk --release
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v3
         with:
-          name: LunaTV-Mobile-Release
+          name: lunatv-mobile-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-# trigger rebuild
