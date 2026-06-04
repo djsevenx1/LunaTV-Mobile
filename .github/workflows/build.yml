@@ -16,6 +16,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - uses: android-actions/setup-android@v3
+
       - uses: subosito/flutter-action@v2
 
       - run: flutter pub get
