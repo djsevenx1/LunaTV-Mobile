@@ -26,3 +26,4 @@ jobs:
         with:
           name: LunaTV-Mobile-Release
           path: build/app/outputs/flutter-apk/app-release.apk
+# trigger rebuild
