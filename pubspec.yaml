@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.4.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -24,9 +24,9 @@ dependencies:
   package_info_plus: ^8.0.0
   intl: ^0.20.2
   dlna_dart: ^0.0.5
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
-  media_kit_libs_video: ^1.0.5
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
   screen_brightness: ^0.2.2
   volume_controller: ^2.0.0
 
