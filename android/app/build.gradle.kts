@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "org.moontechlab.lunatv"
-    compileSdk = 36
+    compileSdk = flutter.compileSdkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -19,8 +19,8 @@ android {
 
     defaultConfig {
         applicationId = "org.moontechlab.lunatv"
-        minSdk = 24
-        targetSdk = 36
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
         versionCode = 1
         versionName = "1.0.0"
     }
