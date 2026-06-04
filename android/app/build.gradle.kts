@@ -10,8 +10,7 @@ plugins {
 
 android {
     namespace = "org.moontechlab.lunatv"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = "29.0.14033849"
+    compileSdk = 36
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -23,14 +22,11 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "org.moontechlab.lunatv"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode()
-        versionName = flutter.versionName()
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     val keystorePropertiesFile = rootProject.file("key.properties")
@@ -54,10 +50,8 @@ android {
             if (hasSigningConfig) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
-                // Fallback to debug signing for local development
                 signingConfig = signingConfigs.getByName("debug")
             }
-            // Enable R8 code shrinking, obfuscation, and optimization
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -66,7 +60,6 @@ android {
             )
         }
         debug {
-            // Keep debug builds fast
             isMinifyEnabled = false
         }
     }
