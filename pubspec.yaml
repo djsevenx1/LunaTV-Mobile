@@ -24,9 +24,9 @@ dependencies:
   package_info_plus: ^4.0.0
   intl: 0.18.1
   dlna_dart: ^0.0.5
-  media_kit: ^1.2.3
-  media_kit_video: ^1.0.0
-  media_kit_libs_video: ^1.0.7
+  media_kit: ^0.9.0
+  media_kit_video: ^0.9.0
+  media_kit_libs_video: ^0.9.0
   screen_brightness: ^0.2.2
   volume_controller: ^2.0.0
 
