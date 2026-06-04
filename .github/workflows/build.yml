@@ -18,6 +18,12 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platforms;android-34"
+          sdkmanager "build-tools;34.0.0"
+          sdkmanager "platform-tools"
+
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses > /dev/null
 
