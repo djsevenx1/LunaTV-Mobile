@@ -1,46 +1,28 @@
-name: Build and Release APK
+name: Build APK
 
 on:
   push:
     branches: [ main ]
-    paths:
-      - '**.dart'
-      - 'pubspec.yaml'
-      - '.github/workflows/build.yml'
 
 jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+    container:
+      image: cirruslabs/flutter:stable
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.16.9'
-          cache: true
-
-      - name: Get Flutter dependencies
+      - name: Get dependencies
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v3
         with:
           name: LunaTV-Mobile-Release
           path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
