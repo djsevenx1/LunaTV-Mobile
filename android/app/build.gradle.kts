@@ -1,16 +1,8 @@
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("dev.flutter.flutter-gradle-plugin")
 }
-
-apply(plugin = "dev.flutter.flutter-gradle-plugin")
 
 android {
     namespace = "org.moontechlab.lunatv"
