@@ -21,3 +21,11 @@ dependencyResolutionManagement {
 
 rootProject.name = "luna_tv"
 include(":app")
+
+// Include Flutter Gradle Plugin from Flutter SDK
+val flutterSdkPath = System.getenv("FLUTTER_ROOT") ?: throw GradleException("FLUTTER_ROOT not set")
+includeBuild("$flutterSdkPath/packages/flutter_tools/gradle") {
+    dependencySubstitution {
+        substitute(module("dev.flutter:flutter-gradle-plugin")).using(project(":"))
+    }
+}
