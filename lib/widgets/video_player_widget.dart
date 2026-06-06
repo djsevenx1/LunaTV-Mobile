@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:pip/pip.dart';
 import 'mobile_player_controls.dart';
 import 'pc_player_controls.dart';
 import 'video_player_surface.dart';
@@ -77,9 +76,7 @@ class VideoPlayerWidgetController {
   }
 
   Duration? get currentPosition => _state._player?.state.position;
-
   Duration? get duration => _state._player?.state.duration;
-
   bool get isPlaying => _state._player?.state.playing ?? false;
 
   Future<void> pause() async {
@@ -121,8 +118,7 @@ class VideoPlayerWidgetController {
   bool get isPipMode => _state._isPipMode;
 }
 
-class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
-    with WidgetsBindingObserver {
+class _VideoPlayerWidgetState extends State<VideoPlayerWidget> with WidgetsBindingObserver {
   Player? _player;
   VideoController? _videoController;
   bool _isInitialized = false;
@@ -138,7 +134,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   final ValueNotifier<double> _playbackSpeed = ValueNotifier<double>(1.0);
   bool _playerDisposed = false;
   VoidCallback? _exitWebFullscreenCallback;
-  final Pip _pip = Pip();
   bool _isPipMode = false;
 
   @override
@@ -148,8 +143,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _currentUrl = widget.url;
     _currentHeaders = widget.headers;
     _initializePlayer();
-    _setupPip();
-    _registerPipObserver();
     widget.onControllerCreated?.call(VideoPlayerWidgetController._(this));
   }
 
@@ -222,7 +215,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _playingSubscription?.cancel();
     _completedSubscription?.cancel();
     _durationSubscription?.cancel();
-
     _positionSubscription = _player!.stream.position.listen((_) {
       for (final listener in List<VoidCallback>.from(_progressListeners)) {
         try {
@@ -232,33 +224,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
       }
     });
-
     _playingSubscription = _player!.stream.playing.listen((playing) {
       if (!mounted) return;
       if (!playing) {
         setState(() {
           _hasCompleted = false;
         });
-        _pip.setup(const PipOptions(
-          autoEnterEnabled: false,
-          aspectRatioX: 16,
-          aspectRatioY: 9,
-          preferredContentWidth: 480,
-          preferredContentHeight: 270,
-          controlStyle: 2,
-        ));
       } else {
-        _pip.setup(const PipOptions(
-          autoEnterEnabled: true,
-          aspectRatioX: 16,
-          aspectRatioY: 9,
-          preferredContentWidth: 480,
-          preferredContentHeight: 270,
-          controlStyle: 2,
-        ));
+        setState(() {
+          _hasCompleted = false;
+        });
       }
     });
-
     if (!widget.live) {
       _completedSubscription = _player!.stream.completed.listen((completed) {
         if (!mounted) return;
@@ -268,7 +245,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
       });
     }
-
     _durationSubscription = _player!.stream.duration.listen((duration) {
       if (!mounted) return;
       if (duration != Duration.zero) {
@@ -294,16 +270,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (headers != null) {
       _currentHeaders = headers;
     }
-
     if (_player == null) {
       await _initializePlayer();
       return;
     }
-
     setState(() {
       _isLoadingVideo = true;
     });
-
     try {
       final currentSpeed = _player!.state.rate;
       await _player!.open(
@@ -352,70 +325,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _exitWebFullscreenCallback?.call();
   }
 
-  void _setupPip() {
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      return;
-    }
-    _pip.setup(const PipOptions(
-      autoEnterEnabled: true,
-      aspectRatioX: 16,
-      aspectRatioY: 9,
-      preferredContentWidth: 480,
-      preferredContentHeight: 270,
-      controlStyle: 2,
-    ));
-  }
-
-  void _registerPipObserver() {
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      return;
-    }
-    _pip.registerStateChangedObserver(PipStateChangedObserver(
-      onPipStateChanged: (state, error) {
-        if (!mounted) return;
-        switch (state) {
-          case PipState.pipStateStarted:
-            debugPrint('PiP started successfully');
-            if (mounted) {
-              setState(() => _isPipMode = true);
-              widget.onPipModeChanged?.call(true);
-            }
-            break;
-          case PipState.pipStateStopped:
-            debugPrint('PiP stopped');
-            if (mounted) {
-              setState(() {
-                _isPipMode = false;
-              });
-              widget.onPipModeChanged?.call(false);
-            }
-            break;
-          case PipState.pipStateFailed:
-            debugPrint('PiP failed: $error');
-            if (mounted) {
-              setState(() => _isPipMode = false);
-              widget.onPipModeChanged?.call(false);
-            }
-            break;
-        }
-      },
-    ));
-  }
-
   Future<void> _enterPipMode() async {
     debugPrint('_enterPipMode');
-    try {
-      var support = await _pip.isSupported();
-      if (!support) {
-        debugPrint('Device does not support PiP!');
-        return;
-      }
-      await _player?.play();
-      await _pip.start();
-    } catch (e) {
-      debugPrint('Failed to enter PiP mode: $e');
-      _setupPip();
-    }
+    // 当前 build 环境 `pip` 包 API 不兼容，先保持空壳，避免编译失败
   }
 
   Future<void> _externalDispose() async {
@@ -461,10 +373,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    if (Platform.isAndroid || Platform.isIOS) {
-      _pip.unregisterStateChangedObserver();
-      _pip.dispose();
-    }
     _disposePlayer();
     _playbackSpeed.dispose();
     super.dispose();
