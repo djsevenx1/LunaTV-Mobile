@@ -1,9 +1,10 @@
 import 'dart:convert';
-import '../models/search_resource.dart';
+
 import '../models/live_source.dart';
+import '../models/search_resource.dart';
 
 List<int> base58decode(String input) {
-  // 最小兼容：把订阅内容当作 UTF-8 处理，避免依赖缺失导致编译失败
+  // 最小兼容：直接把源字符串按 UTF-8 返回，避免 package 缺失导致编译失败
   return const Utf8Encoder().convert(input);
 }
 
@@ -11,10 +12,10 @@ List<int> base58decode(String input) {
 class SubscriptionContent {
   final List<SearchResource>? searchResources;
   final List<LiveSource>? liveSources;
+
   SubscriptionContent({this.searchResources, this.liveSources});
 }
 
-/// 订阅服务
 /// 用于解析订阅内容
 class SubscriptionService {
   static Future<SubscriptionContent?> parseSubscriptionContent(String content) async {
