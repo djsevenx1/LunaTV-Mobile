@@ -20,7 +20,7 @@ jobs:
 
       - name: Install Android SDK
         run: |
-          sdkmanager "platforms;android-34"
+          sdkmanager "platforms;android-36"
           sdkmanager "build-tools;34.0.0"
           sdkmanager "platform-tools"
           sdkmanager "ndk;29.0.14033849"
