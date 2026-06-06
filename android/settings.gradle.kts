@@ -13,4 +13,5 @@ rootProject.name = "luna_tv"
 include(":app")
 
 // Flutter configuration
-apply(from: "$System.env.FLUTTER_ROOT/packages/flutter_tools/gradle/app_plugin_loader.gradle")
+val flutterRoot = System.getenv("FLUTTER_ROOT") ?: providers.gradleProperty("flutter.sdk").orNull ?: ""
+apply(from = "$flutterRoot/packages/flutter_tools/gradle/app_plugin_loader.gradle")
