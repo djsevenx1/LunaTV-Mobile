@@ -546,8 +546,6 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           children: [
             // Windows 自定义标题栏（透明背景）
-            if (Platform.isWindows) const WindowsTitleBar(forceBlack: true),
-            // 主要内容
             Expanded(
               child: SafeArea(
                 child: Center(
