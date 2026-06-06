@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'dart:io' show Platform;
+import 'package:google_fonts/google_fonts';
 
 class FontUtils {
-  /// 获取 Poppins 字体样式，Windows 下使用微软雅黑
+  /// 获取 Poppins 字体样式，统一使用 Google Fonts
   static TextStyle poppins({
     double? fontSize,
     FontWeight? fontWeight,
@@ -12,18 +11,6 @@ class FontUtils {
     double? height,
     FontStyle? fontStyle,
   }) {
-    if (Platform.isWindows) {
-      return TextStyle(
-        fontFamily: 'Microsoft YaHei',
-        fontSize: fontSize,
-        fontWeight: fontWeight ?? FontWeight.w500,
-        color: color,
-        letterSpacing: letterSpacing,
-        height: height,
-        fontStyle: fontStyle,
-      );
-    }
-
     return GoogleFonts.poppins(
       fontSize: fontSize,
       fontWeight: fontWeight,
@@ -34,7 +21,7 @@ class FontUtils {
     );
   }
 
-  /// 获取 Source Code Pro 字体样式，所有平台都使用 Google Fonts
+  /// 获取 Source Code Pro 字体样式
   static TextStyle sourceCodePro({
     double? fontSize,
     FontWeight? fontWeight,
