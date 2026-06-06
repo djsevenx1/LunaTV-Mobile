@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
-import 'package:volume_controller/volume_controller.dart';
 import 'dlna_device_dialog.dart';
 
 class MobilePlayerControls extends StatefulWidget {

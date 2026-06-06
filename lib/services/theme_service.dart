@@ -4,14 +4,12 @@ ThemeMode ThemeMode2 = ThemeMode.system;
 
 class ThemeService extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
-
   ThemeMode get themeMode => _themeMode;
-  ThemeMode set themeMode(ThemeMode value) {
+
+  set themeMode(ThemeMode value) {
     _themeMode = value;
     notifyListeners();
-    return _themeMode;
   }
-
 
   bool get isDarkMode {
     if (_themeMode == ThemeMode.dark) return true;
@@ -34,14 +32,13 @@ class ThemeService extends ChangeNotifier {
 
   ThemeData get lightTheme {
     final textTheme = ThemeData.light().textTheme.copyWith(
-      bodyLarge: const TextStyle(color: Color(0xFF2c3e50)),
-      bodyMedium: const TextStyle(color: Color(0xFF2c3e50)),
-      bodySmall: const TextStyle(color: Color(0xFF7f8c8d)),
-      titleLarge: const TextStyle(color: Color(0xFF2c3e50)),
-      titleMedium: const TextStyle(color: Color(0xFF2c3e50)),
-      titleSmall: const TextStyle(color: Color(0xFF2c3e50)),
-    );
-
+          bodyLarge: const TextStyle(color: Color(0xFF2c3e50)),
+          bodyMedium: const TextStyle(color: Color(0xFF2c3e50)),
+          bodySmall: const TextStyle(color: Color(0xFF7f8c8d)),
+          titleLarge: const TextStyle(color: Color(0xFF2c3e50)),
+          titleMedium: const TextStyle(color: Color(0xFF2c3e50)),
+          titleSmall: const TextStyle(color: Color(0xFF2c3e50)),
+        );
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
@@ -56,14 +53,13 @@ class ThemeService extends ChangeNotifier {
 
   ThemeData get darkTheme {
     final textTheme = ThemeData.dark().textTheme.copyWith(
-      bodyLarge: const TextStyle(color: Color(0xFFffffff)),
-      bodyMedium: const TextStyle(color: Color(0xFFffffff)),
-      bodySmall: const TextStyle(color: Color(0xFFb0b0b0)),
-      titleLarge: const TextStyle(color: Color(0xFFffffff)),
-      titleMedium: const TextStyle(color: Color(0xFFffffff)),
-      titleSmall: const TextStyle(color: Color(0xFFffffff)),
-    );
-
+          bodyLarge: const TextStyle(color: Color(0xFFffffff)),
+          bodyMedium: const TextStyle(color: Color(0xFFffffff)),
+          bodySmall: const TextStyle(color: Color(0xFFb0b0b0)),
+          titleLarge: const TextStyle(color: Color(0xFFffffff)),
+          titleMedium: const TextStyle(color: Color(0xFFffffff)),
+          titleSmall: const TextStyle(color: Color(0xFFffffff)),
+        );
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,

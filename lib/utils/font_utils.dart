@@ -1,42 +1,31 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts';
 
 class FontUtils {
-  /// 获取 Poppins 字体样式，统一使用 Google Fonts
-  static TextStyle poppins({
-    double? fontSize,
-    FontWeight? fontWeight,
-    Color? color,
-    double? letterSpacing,
-    double? height,
-    FontStyle? fontStyle,
-  }) {
-    return GoogleFonts.poppins(
-      fontSize: fontSize,
-      fontWeight: fontWeight,
-      color: color,
-      letterSpacing: letterSpacing,
-      height: height,
-      fontStyle: fontStyle,
+  static const _fontFamily = 'Microsoft YaHei';
+
+  static TextStyle poppins(BuildContext context, {double? fontSize, FontWeight? fontWeight, Color? color}) {
+    return TextStyle(
+      fontFamily: _fontFamily,
+      fontSize: fontSize ?? 14,
+      fontWeight: fontWeight ?? FontWeight.w400,
+      color: color ?? Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black87,
     );
   }
 
-  /// 获取 Source Code Pro 字体样式
-  static TextStyle sourceCodePro({
-    double? fontSize,
-    FontWeight? fontWeight,
-    Color? color,
-    double? letterSpacing,
-    double? height,
-    FontStyle? fontStyle,
-  }) {
-    return GoogleFonts.sourceCodePro(
-      fontSize: fontSize,
-      fontWeight: fontWeight,
-      color: color,
-      letterSpacing: letterSpacing,
-      height: height,
-      fontStyle: fontStyle,
+  static TextStyle sourceCodePro(BuildContext context, {double? fontSize, FontWeight? fontWeight, Color? color}) {
+    return TextStyle(
+      fontFamily: _fontFamily,
+      fontSize: fontSize ?? 14,
+      fontWeight: fontWeight ?? FontWeight.w400,
+      color: color ?? Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black87,
     );
+  }
+
+  static TextStyle getTitleStyle(BuildContext context) {
+    return poppins(context, fontSize: 18, fontWeight: FontWeight.w600);
+  }
+
+  static TextStyle getBodyStyle(BuildContext context) {
+    return poppins(context, fontSize: 14);
   }
 }
