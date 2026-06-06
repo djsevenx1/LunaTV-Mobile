@@ -11,11 +11,12 @@ buildscript {
 
 apply plugin: "com.android.application"
 apply plugin: "kotlin-android"
-apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
+def flutterSdk = rootProject.ext.find("FLUTTER_ROOT") ?: System.getenv("FLUTTER_ROOT") ?: ""
+apply from: "$flutterSdk/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace "org.moontechlab.lunatv"
-    compileSdk flutter.compileSdkVersion
+    compileSdk 36
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11

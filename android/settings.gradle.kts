@@ -1,17 +1,17 @@
-buildscript {
+pluginManagement {
     repositories {
         google()
         mavenCentral()
-    }
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.1.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0")
     }
 }
 
 rootProject.name = "luna_tv"
 include(":app")
 
-// Flutter configuration
-val flutterRoot = System.getenv("FLUTTER_ROOT") ?: providers.gradleProperty("flutter.sdk").orNull ?: ""
-apply(from = "$flutterRoot/packages/flutter_tools/gradle/app_plugin_loader.gradle")
+val flutterSdk = providers.gradleProperty("flutter.sdk").orNull
+    ?: System.getenv("FLUTTER_ROOT")
+    ?: ""
+
+if (flutterSdk.isNotBlank()) {
+    apply(from = "$flutterSdk/packages/flutter_tools/gradle/app_plugin_loader.gradle")
+}
