@@ -106,13 +106,13 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _initSystemControls() {
-    VolumeController.instance.showSystemUI = false;
-    VolumeController.instance.getVolume().then((value) {
+    VolumeController().showSystemUI = false;
+    VolumeController().getVolume().then((value) {
       if (mounted) {
         setState(() => _currentVolume = value);
       }
     }).catchError((_) {});
-    ScreenBrightness().application.then((value) {
+    ScreenBrightness().(value) {
       if (mounted) {
         setState(() => _currentBrightness = value);
       }
@@ -156,7 +156,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     _volumeHideTimer?.cancel();
     _brightnessHideTimer?.cancel();
     _timeUpdateTimer?.cancel();
-    VolumeController.instance.showSystemUI = true;
+    VolumeController().showSystemUI = true;
     super.dispose();
   }
 
@@ -288,7 +288,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
       _currentVolume = (_currentVolume + volumeChange).clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
-    VolumeController.instance.setVolume(_currentVolume);
+    VolumeController().setVolume(_currentVolume);
     _startVolumeHideTimer();
   }
 
@@ -521,7 +521,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     if (_isFullscreen) {
       content = PopScope(
         canPop: !_isLocked,
-        onPopInvokedWithResult: (didPop, result) async {
+        onPopInvoked: (didPop) async {
           if (!didPop && _isLocked) {
             setState(() {
               _isLocked = false;
