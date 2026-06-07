@@ -10,7 +10,7 @@ import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/video_card.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/utils/font_utils.dart';
-import 'package:luna_tv/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/shimmer_effect.dart';
 
 /// 继续观看组件

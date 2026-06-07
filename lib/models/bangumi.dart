@@ -1,4 +1,4 @@
-import 'package:luna_tv/video_info.dart';
+import 'package:luna_tv/models/video_info.dart';
 
 /// HTML 实体解码工具函数
 String _decodeHtmlEntities(String text) {

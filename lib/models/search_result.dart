@@ -1,4 +1,4 @@
-import 'package:luna_tv/video_info.dart';
+import 'package:luna_tv/models/video_info.dart';
 
 /// 搜索结果数据模型
 class SearchResult {

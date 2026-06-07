@@ -22,7 +22,7 @@ class _FilterSettingsScreenState extends State<FilterSettingsScreen> {
 
   Future<void> _load() async {
     final enabled = await ContentFilterService.isEnabled();
-    final rules = await ContentFilterService.getRules();
+    final rules = await ContentFilterService.getUserRules();
     if (mounted) {
       setState(() {
         _enabled = enabled;
@@ -40,14 +40,14 @@ class _FilterSettingsScreenState extends State<FilterSettingsScreen> {
   Future<void> _addRule(String rule) async {
     if (rule.trim().isEmpty) return;
     final newRules = List<String>.from(_rules)..add(rule.trim());
-    await ContentFilterService.setRules(newRules);
+    await ContentFilterService.setUserRules(newRules);
     if (mounted) setState(() => _rules = newRules);
     _controller.clear();
   }
 
   Future<void> _removeRule(String rule) async {
     final newRules = List<String>.from(_rules)..remove(rule);
-    await ContentFilterService.setRules(newRules);
+    await ContentFilterService.setUserRules(newRules);
     if (mounted) setState(() => _rules = newRules);
   }
 

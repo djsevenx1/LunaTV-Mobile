@@ -7,7 +7,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
-import 'package:luna_tv/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/shimmer_effect.dart';
 
 class FavoritesGrid extends StatefulWidget {

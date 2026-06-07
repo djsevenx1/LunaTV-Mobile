@@ -4,7 +4,7 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/bangumi_service.dart';
 import 'package:luna_tv/recommendation_section.dart';
-import 'package:luna_tv/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 
 /// 新番放送组件
 class BangumiSection extends StatefulWidget {
