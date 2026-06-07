@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:luna_tv/services/user_data_service.dart';
-import 'package:luna_tv/screens/login_screen.dart';
+// removed scripted import from api service; add one back if needed
+import 'package:luna_tv/services/login_screen_service.dart';
+
 import 'package:luna_tv/models/favorite_item.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/play_record.dart';

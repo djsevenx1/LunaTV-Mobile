@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/api_service.dart';
-import 'package:luna_tv/douban_cache_service.dart';
-import 'package:luna_tv/user_data_service.dart';
+import 'package:luna_tv/services/douban_cache_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 
 /// 豆瓣推荐数据请求参数
 class DoubanRecommendsParams {

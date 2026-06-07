@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/search_resource.dart';
-import 'package:luna_tv/user_data_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/api_service.dart';
 import 'package:luna_tv/downstream_service.dart';
 import 'package:luna_tv/local_mode_storage_service.dart';

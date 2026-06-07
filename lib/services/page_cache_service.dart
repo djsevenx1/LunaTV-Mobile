@@ -5,7 +5,7 @@ import 'package:luna_tv/models/favorite_item.dart';
 import 'package:luna_tv/api_service.dart';
 import 'package:luna_tv/douban_service.dart';
 import 'package:luna_tv/data_operation_interface.dart';
-import 'package:luna_tv/user_data_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/local_mode_storage_service.dart';
 
 /// 页面缓存服务 - 单例模式

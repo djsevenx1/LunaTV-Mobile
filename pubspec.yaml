@@ -32,7 +32,7 @@ dependencies:
   # macos_window_utils: ^1.0.4
   # bitsdojo_window: ^0.1.5
   # bs58check: ^1.0.0
-  # lucide_icons_flutter: ^0.352.0
+  lucide_icons_flutter: ^0.352.0
   # gpt_markdown: ^1.0.0
   # gal: ^2.0.1
   # app_settings: ^4.1.1
