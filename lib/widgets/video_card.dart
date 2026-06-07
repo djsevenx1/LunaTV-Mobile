@@ -181,7 +181,7 @@ class _VideoCardState extends State<VideoCard> {
                               ),
                               child: Text(
                                 widget.videoInfo.year,
-                                style: FontUtils.poppins(
+                                style: FontUtils.poppins(context,
                                   color: Colors.white,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -211,7 +211,7 @@ class _VideoCardState extends State<VideoCard> {
                               child: Center(
                                 child: Text(
                                   widget.videoInfo.rate!,
-                                  style: FontUtils.poppins(
+                                  style: FontUtils.poppins(context,
                                     color: Colors.white,
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
@@ -238,7 +238,7 @@ class _VideoCardState extends State<VideoCard> {
                               ),
                               child: Text(
                                 episodeText,
-                                style: FontUtils.poppins(
+                                style: FontUtils.poppins(context,
                                   color: Colors.white,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -395,7 +395,7 @@ class _VideoCardState extends State<VideoCard> {
                                       child: Center(
                                         child: Text(
                                           '${widget.originalResults!.length}',
-                                          style: FontUtils.poppins(
+                                          style: FontUtils.poppins(context,
                                             color: Colors.white,
                                             fontSize: 12,
                                             fontWeight: FontWeight.bold,
@@ -524,7 +524,7 @@ class _VideoCardState extends State<VideoCard> {
                         // 标题
                         Text(
                           widget.videoInfo.title,
-                          style: FontUtils.poppins(
+                          style: FontUtils.poppins(context,
                             fontSize: width < 100 ? 12 : 13, // 根据宽度调整字体大小，调大字体
                             fontWeight: FontWeight.w500,
                             color: isPC && _isHovered
@@ -564,7 +564,7 @@ class _VideoCardState extends State<VideoCard> {
                                   ? _getAggregatedSourceText(
                                       widget.videoInfo.sourceName)
                                   : widget.videoInfo.sourceName,
-                              style: FontUtils.poppins(
+                              style: FontUtils.poppins(context,
                                 fontSize:
                                     width < 100 ? 11 : 12, // 根据宽度调整字体大小，调大字体
                                 color: isPC && _isHovered
@@ -823,7 +823,7 @@ class _VideoCardState extends State<VideoCard> {
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                   child: Text(
                     '可用播放源',
-                    style: FontUtils.poppins(
+                    style: FontUtils.poppins(context,
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                       color: themeService.isDarkMode
@@ -855,7 +855,7 @@ class _VideoCardState extends State<VideoCard> {
                                   children: [
                                     Text(
                                       source.sourceName,
-                                      style: FontUtils.poppins(
+                                      style: FontUtils.poppins(context,
                                         fontSize: 16,
                                         fontWeight: FontWeight.w500,
                                       ),
@@ -864,7 +864,7 @@ class _VideoCardState extends State<VideoCard> {
                                     if (source.episodes.length > 1)
                                       Text(
                                         '${source.episodes.length}集',
-                                        style: FontUtils.poppins(
+                                        style: FontUtils.poppins(context,
                                           fontSize: 14,
                                           color: themeService.isDarkMode
                                               ? Colors.white70
