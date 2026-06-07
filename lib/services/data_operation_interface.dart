@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/play_record.dart';
-import '../models/favorite_item.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/favorite_item.dart';
 
 /// 数据操作类型枚举
 enum DataType {

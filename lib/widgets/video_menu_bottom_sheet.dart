@@ -4,16 +4,16 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../models/video_info.dart';
-import '../models/douban_movie.dart';
-import '../models/bangumi.dart';
-import '../services/theme_service.dart';
-import '../services/douban_service.dart';
-import '../services/bangumi_service.dart';
-import '../utils/image_url.dart';
-import 'fullscreen_image_viewer.dart';
-import '../models/search_result.dart';
-import '../utils/font_utils.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/models/douban_movie.dart';
+import 'package:luna_tv/models/bangumi.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/douban_service.dart';
+import 'package:luna_tv/services/bangumi_service.dart';
+import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/fullscreen_image_viewer.dart';
+import 'package:luna_tv/models/search_result.dart';
+import 'package:luna_tv/utils/font_utils.dart';
 
 /// 判断是否为iOS平台
 bool get _isIOS {

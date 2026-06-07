@@ -3,14 +3,14 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/services/search_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
-import '../services/theme_service.dart';
-import '../services/api_service.dart';
-import '../utils/device_utils.dart';
-import '../utils/font_utils.dart';
-import 'user_menu.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/user_menu.dart';
 import 'dart:io' show Platform;
 import 'dart:async';
-import 'windows_title_bar.dart';
+import 'package:luna_tv/windows_title_bar.dart';
 
 class MainLayout extends StatefulWidget {
   final Widget content;
@@ -64,6 +64,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   // 用于跟踪主题切换按钮的 hover 状态
   bool _isThemeButtonHovered = false;
+  bool _isSettingsButtonHovered = false;
 
   // 用于跟踪用户按钮的 hover 状态
   bool _isUserButtonHovered = false;
@@ -820,6 +821,53 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ),
         const SizedBox(width: 12),
+// 设置按钮
+MouseRegion(
+  cursor: DeviceUtils.isPC() ? SystemMouseCursors.click : MouseCursor.defer,
+  onEnter: DeviceUtils.isPC()
+      ? (_) {
+          setState(() {
+            _isSettingsButtonHovered = true;
+          });
+        }
+      : null,
+  onExit: DeviceUtils.isPC()
+      ? (_) {
+          setState(() {
+            _isSettingsButtonHovered = false;
+          });
+        }
+      : null,
+  child: GestureDetector(
+    onTap: () {
+      Navigator.of(context, rootNavigator: true).pushNamed('/settings');
+    },
+    behavior: HitTestBehavior.opaque,
+    child: Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: DeviceUtils.isPC() && _isSettingsButtonHovered
+            ? (themeService.isDarkMode
+                ? const Color(0xFF333333)
+                : const Color(0xFFe0e0e0))
+            : Colors.transparent,
+      ),
+      child: Center(
+        child: Icon(
+          LucideIcons.settings,
+          color: themeService.isDarkMode
+              ? const Color(0xFFffffff)
+              : const Color(0xFF2c3e50),
+          size: 24,
+          weight: 1.0,
+        ),
+      ),
+    ),
+  ),
+),
+const SizedBox(width: 12),
         // 用户按钮
         MouseRegion(
           cursor:

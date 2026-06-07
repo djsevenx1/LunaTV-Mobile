@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../models/douban_movie.dart';
-import '../utils/device_utils.dart';
-import 'video_card.dart';
-import 'video_menu_bottom_sheet.dart';
-import '../models/video_info.dart';
-import '../utils/font_utils.dart';
-import 'shimmer_effect.dart';
+import 'package:luna_tv/models/douban_movie.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/video_card.dart';
+import 'package:luna_tv/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/shimmer_effect.dart';
 
 class DoubanMoviesGrid extends StatelessWidget {
   final List<DoubanMovie>? movies;

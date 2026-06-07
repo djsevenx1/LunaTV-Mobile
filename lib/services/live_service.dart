@@ -3,11 +3,11 @@ import 'dart:convert';
 import 'package:luna_tv/services/local_mode_storage_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 
-import '../models/live_channel.dart';
-import '../models/live_source.dart';
-import '../models/epg_program.dart';
-import '../models/m3u_content.dart';
-import 'api_service.dart';
+import 'package:luna_tv/models/live_channel.dart';
+import 'package:luna_tv/models/live_source.dart';
+import 'package:luna_tv/models/epg_program.dart';
+import 'package:luna_tv/models/m3u_content.dart';
+import 'package:luna_tv/api_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml_events.dart';
 import 'package:gbk_codec/gbk_codec.dart';

@@ -1,4 +1,4 @@
-import 'play_record.dart';
+import 'package:luna_tv/play_record.dart';
 
 /// 视频信息数据模型，用于VideoCard展示
 class VideoInfo {

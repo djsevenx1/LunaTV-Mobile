@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/theme_service.dart';
-import '../widgets/capsule_tab_switcher.dart';
-import '../widgets/custom_refresh_indicator.dart';
-import '../widgets/douban_movies_grid.dart';
-import '../services/douban_service.dart';
-import '../models/douban_movie.dart';
-import '../models/video_info.dart';
-import '../widgets/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/widgets/capsule_tab_switcher.dart';
+import 'package:luna_tv/widgets/custom_refresh_indicator.dart';
+import 'package:luna_tv/widgets/douban_movies_grid.dart';
+import 'package:luna_tv/services/douban_service.dart';
+import 'package:luna_tv/models/douban_movie.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../widgets/pulsing_dots_indicator.dart';
-import 'player_screen.dart';
-import '../widgets/filter_pill_hover.dart';
-import '../utils/device_utils.dart';
-import '../utils/font_utils.dart';
-import '../widgets/filter_options_selector.dart';
+import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
+import 'package:luna_tv/player_screen.dart';
+import 'package:luna_tv/widgets/filter_pill_hover.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/widgets/filter_options_selector.dart';
 
 class TvScreen extends StatefulWidget {
   const TvScreen({super.key});
@@ -479,7 +479,15 @@ class _TvScreenState extends State<TvScreen> {
         _onVideoTap(videoInfo);
         break;
       case VideoMenuAction.doubanDetail:
-        _launchURL('https://movie.douban.com/subject/${videoInfo.id}/');
+        Navigator.of(context, rootNavigator: true).pushNamed(
+          '/douban-detail',
+          arguments: {
+            'id': videoInfo.id,
+            'kind': 'tv',
+            'title': videoInfo.title,
+            'poster': videoInfo.cover,
+          },
+        );
         break;
       default:
         break;

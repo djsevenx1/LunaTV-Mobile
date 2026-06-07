@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../utils/font_utils.dart';
+import 'package:luna_tv/utils/font_utils.dart';
 
 class SelectorOption {
   final String label;

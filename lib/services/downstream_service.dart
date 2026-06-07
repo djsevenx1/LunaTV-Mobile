@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:gbk_codec/gbk_codec.dart';
-import '../models/search_resource.dart';
-import '../models/search_result.dart';
-import 'content_filter_service.dart';
-import 'local_search_cache_service.dart';
+import 'package:luna_tv/models/search_resource.dart';
+import 'package:luna_tv/models/search_result.dart';
+import 'package:luna_tv/content_filter_service.dart';
+import 'package:luna_tv/local_search_cache_service.dart';
 
 /// 分页搜索结果
 class SearchPageResult {

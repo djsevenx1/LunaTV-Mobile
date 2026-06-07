@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../models/search_result.dart';
-import '../models/douban_movie.dart';
-import '../utils/image_url.dart';
+import 'package:luna_tv/models/search_result.dart';
+import 'package:luna_tv/models/douban_movie.dart';
+import 'package:luna_tv/utils/image_url.dart';
 
 class PlayerDetailsPanel extends StatelessWidget {
   final ThemeData theme;

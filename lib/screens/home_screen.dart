@@ -1,30 +1,30 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import '../widgets/continue_watching_section.dart';
-import '../widgets/hot_movies_section.dart';
-import '../widgets/hot_tv_section.dart';
-import '../widgets/hot_show_section.dart';
-import '../widgets/bangumi_section.dart';
-import '../widgets/main_layout.dart';
-import '../widgets/top_tab_switcher.dart';
-import '../widgets/favorites_grid.dart';
-import '../widgets/history_grid.dart';
-import 'search_screen.dart';
-import '../widgets/video_menu_bottom_sheet.dart';
-import '../widgets/custom_refresh_indicator.dart';
-import '../models/play_record.dart';
-import '../models/video_info.dart';
-import '../utils/font_utils.dart';
-import '../services/page_cache_service.dart';
-import '../services/version_service.dart';
-import '../widgets/update_dialog.dart';
-import 'movie_screen.dart';
-import 'tv_screen.dart';
-import 'anime_screen.dart';
-import 'show_screen.dart';
-import 'player_screen.dart';
-import 'live_screen.dart';
+import 'package:luna_tv/widgets/continue_watching_section.dart';
+import 'package:luna_tv/widgets/hot_movies_section.dart';
+import 'package:luna_tv/widgets/hot_tv_section.dart';
+import 'package:luna_tv/widgets/hot_show_section.dart';
+import 'package:luna_tv/widgets/bangumi_section.dart';
+import 'package:luna_tv/widgets/main_layout.dart';
+import 'package:luna_tv/widgets/top_tab_switcher.dart';
+import 'package:luna_tv/widgets/favorites_grid.dart';
+import 'package:luna_tv/widgets/history_grid.dart';
+import 'package:luna_tv/search_screen.dart';
+import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/widgets/custom_refresh_indicator.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/version_service.dart';
+import 'package:luna_tv/widgets/update_dialog.dart';
+import 'package:luna_tv/movie_screen.dart';
+import 'package:luna_tv/tv_screen.dart';
+import 'package:luna_tv/anime_screen.dart';
+import 'package:luna_tv/show_screen.dart';
+import 'package:luna_tv/player_screen.dart';
+import 'package:luna_tv/live_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -460,23 +460,29 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // 同步 PageView 的页面切换
-    int pageIndex;
+    int? pageIndex;
     switch (tab) {
       case '首页':
         pageIndex = 0;
         break;
       case '播放历史':
-        pageIndex = 1;
+        // 独立页面
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pushNamed('/history');
+        }
         break;
       case '收藏夹':
-        pageIndex = 2;
+        // 独立页面
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pushNamed('/favorites');
+        }
         break;
       default:
         pageIndex = 0;
     }
 
-    // 使用动画切换到对应页面
-    if (_pageController.hasClients) {
+    // 使用动画切换到对应页面（仅首页）
+    if (pageIndex != null && _pageController.hasClients) {
       _pageController.animateToPage(
         pageIndex,
         duration: const Duration(milliseconds: 300),

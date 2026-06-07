@@ -1,13 +1,13 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../models/search_result.dart';
-import '../models/aggregated_search_result.dart';
-import '../models/video_info.dart';
-import '../services/theme_service.dart';
-import '../utils/device_utils.dart';
-import '../utils/font_utils.dart';
-import 'video_card.dart';
-import 'video_menu_bottom_sheet.dart';
+import 'package:luna_tv/models/search_result.dart';
+import 'package:luna_tv/models/aggregated_search_result.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/video_card.dart';
+import 'package:luna_tv/video_menu_bottom_sheet.dart';
 
 /// 聚合搜索结果网格组件
 class SearchResultAggGrid extends StatefulWidget {

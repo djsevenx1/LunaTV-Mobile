@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import '../services/live_service.dart';
-import '../models/live_channel.dart';
-import '../models/live_source.dart';
-import '../utils/font_utils.dart';
-import '../utils/device_utils.dart';
-import '../services/theme_service.dart';
+import 'package:luna_tv/services/live_service.dart';
+import 'package:luna_tv/models/live_channel.dart';
+import 'package:luna_tv/models/live_source.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/services/theme_service.dart';
 import 'package:provider/provider.dart';
-import 'live_player_screen.dart';
-import '../widgets/filter_pill_hover.dart';
-import '../widgets/filter_options_selector.dart';
+import 'package:luna_tv/live_player_screen.dart';
+import 'package:luna_tv/widgets/filter_pill_hover.dart';
+import 'package:luna_tv/widgets/filter_options_selector.dart';
 
 class LiveScreen extends StatefulWidget {
   const LiveScreen({super.key});

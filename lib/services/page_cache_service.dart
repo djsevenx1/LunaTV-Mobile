@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import '../models/douban_movie.dart';
-import '../models/play_record.dart';
-import '../models/favorite_item.dart';
-import 'api_service.dart';
-import 'douban_service.dart';
-import 'data_operation_interface.dart';
-import 'user_data_service.dart';
-import 'local_mode_storage_service.dart';
+import 'package:luna_tv/models/douban_movie.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/favorite_item.dart';
+import 'package:luna_tv/api_service.dart';
+import 'package:luna_tv/douban_service.dart';
+import 'package:luna_tv/data_operation_interface.dart';
+import 'package:luna_tv/user_data_service.dart';
+import 'package:luna_tv/local_mode_storage_service.dart';
 
 /// 页面缓存服务 - 单例模式
 class PageCacheService

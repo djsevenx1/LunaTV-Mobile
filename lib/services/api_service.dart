@@ -1,16 +1,16 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'user_data_service.dart';
-import '../screens/login_screen.dart';
-import '../models/favorite_item.dart';
-import '../models/search_result.dart';
-import '../models/play_record.dart';
-import '../models/search_resource.dart';
-import '../models/live_source.dart';
-import '../models/live_channel.dart';
-import '../models/epg_program.dart';
-import '../models/search_suggestion.dart';
+import 'package:luna_tv/user_data_service.dart';
+import 'package:luna_tv/screens/login_screen.dart';
+import 'package:luna_tv/models/favorite_item.dart';
+import 'package:luna_tv/models/search_result.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/search_resource.dart';
+import 'package:luna_tv/models/live_source.dart';
+import 'package:luna_tv/models/live_channel.dart';
+import 'package:luna_tv/models/epg_program.dart';
+import 'package:luna_tv/models/search_suggestion.dart';
 
 /// API响应结果类
 class ApiResponse<T> {

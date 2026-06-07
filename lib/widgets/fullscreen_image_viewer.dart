@@ -4,9 +4,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
-import '../utils/image_url.dart';
-import '../utils/font_utils.dart';
-import '../services/theme_service.dart';
+import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/services/theme_service.dart';
 
 /// 全屏图片查看器
 class FullscreenImageViewer extends StatefulWidget {

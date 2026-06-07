@@ -1,4 +1,4 @@
-import 'live_channel.dart';
+import 'package:luna_tv/live_channel.dart';
 
 /// M3U 内容
 class M3uContent {

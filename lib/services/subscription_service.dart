@@ -1,7 +1,7 @@
 import 'dart:convert';
 
-import '../models/live_source.dart';
-import '../models/search_resource.dart';
+import 'package:luna_tv/models/live_source.dart';
+import 'package:luna_tv/models/search_resource.dart';
 
 List<int> base58decode(String input) {
   // 最小兼容：直接把源字符串按 UTF-8 返回，避免 package 缺失导致编译失败

@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import '../models/bangumi.dart';
-import 'api_service.dart';
-import 'douban_cache_service.dart';
+import 'package:luna_tv/models/bangumi.dart';
+import 'package:luna_tv/api_service.dart';
+import 'package:luna_tv/douban_cache_service.dart';
 
 /// Bangumi 数据服务（函数级缓存，一天过期）
 class BangumiService {

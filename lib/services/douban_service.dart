@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math';
-import '../models/douban_movie.dart';
-import 'api_service.dart';
-import 'douban_cache_service.dart';
-import 'user_data_service.dart';
+import 'package:luna_tv/models/douban_movie.dart';
+import 'package:luna_tv/api_service.dart';
+import 'package:luna_tv/douban_cache_service.dart';
+import 'package:luna_tv/user_data_service.dart';
 
 /// 豆瓣推荐数据请求参数
 class DoubanRecommendsParams {

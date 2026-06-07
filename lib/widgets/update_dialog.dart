@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
-import '../services/version_service.dart';
-import '../services/theme_service.dart';
-import '../utils/font_utils.dart';
+import 'package:luna_tv/services/version_service.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/utils/font_utils.dart';
 
 class UpdateDialog extends StatelessWidget {
   final VersionInfo versionInfo;

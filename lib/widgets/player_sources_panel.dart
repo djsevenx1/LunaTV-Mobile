@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../models/search_result.dart';
-import '../utils/device_utils.dart';
+import 'package:luna_tv/models/search_result.dart';
+import 'package:luna_tv/utils/device_utils.dart';
 
 class SourceSpeed {
   String quality = '';

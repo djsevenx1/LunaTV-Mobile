@@ -3,16 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../services/user_data_service.dart';
-import '../screens/login_screen.dart';
-import '../services/douban_cache_service.dart';
-import '../services/page_cache_service.dart';
-import '../services/live_service.dart';
-import '../services/local_search_cache_service.dart';
-import '../services/version_service.dart';
-import '../utils/device_utils.dart';
-import '../utils/font_utils.dart';
-import 'update_dialog.dart';
+import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/screens/login_screen.dart';
+import 'package:luna_tv/services/douban_cache_service.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/live_service.dart';
+import 'package:luna_tv/services/local_search_cache_service.dart';
+import 'package:luna_tv/services/version_service.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/update_dialog.dart';
 
 class UserMenu extends StatefulWidget {
   final bool isDarkMode;

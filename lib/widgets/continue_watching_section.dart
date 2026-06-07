@@ -1,17 +1,17 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/play_record.dart';
-import '../models/video_info.dart';
-import '../services/api_service.dart';
-import '../services/page_cache_service.dart';
-import '../services/theme_service.dart';
-import '../utils/device_utils.dart';
-import 'video_card.dart';
-import '../utils/image_url.dart';
-import '../utils/font_utils.dart';
-import 'video_menu_bottom_sheet.dart';
-import 'shimmer_effect.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/video_card.dart';
+import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/shimmer_effect.dart';
 
 /// 继续观看组件
 class ContinueWatchingSection extends StatefulWidget {

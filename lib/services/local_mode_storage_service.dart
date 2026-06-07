@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/search_resource.dart';
-import '../models/live_source.dart';
-import '../models/play_record.dart';
-import '../models/favorite_item.dart';
+import 'package:luna_tv/models/search_resource.dart';
+import 'package:luna_tv/models/live_source.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/favorite_item.dart';
 
 /// 本地模式存储服务
 /// 用于持久化存储本地模式下的订阅信息、播放记录、收藏夹和搜索记录

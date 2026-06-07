@@ -1,4 +1,4 @@
-import 'video_info.dart';
+import 'package:luna_tv/video_info.dart';
 
 /// 豆瓣推荐项目数据模型
 class DoubanRecommendItem {

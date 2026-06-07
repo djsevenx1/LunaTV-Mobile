@@ -3,13 +3,13 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:async';
-import '../services/user_data_service.dart';
-import '../services/local_mode_storage_service.dart';
-import '../services/subscription_service.dart';
-import '../utils/device_utils.dart';
-import '../utils/font_utils.dart';
-import '../widgets/windows_title_bar.dart';
-import 'home_screen.dart';
+import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/local_mode_storage_service.dart';
+import 'package:luna_tv/services/subscription_service.dart';
+import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/widgets/windows_title_bar.dart';
+import 'package:luna_tv/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

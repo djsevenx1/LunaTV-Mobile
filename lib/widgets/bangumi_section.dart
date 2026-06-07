@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../models/bangumi.dart';
-import '../models/play_record.dart';
-import '../models/video_info.dart';
-import '../services/bangumi_service.dart';
-import 'recommendation_section.dart';
-import 'video_menu_bottom_sheet.dart';
+import 'package:luna_tv/models/bangumi.dart';
+import 'package:luna_tv/models/play_record.dart';
+import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/services/bangumi_service.dart';
+import 'package:luna_tv/recommendation_section.dart';
+import 'package:luna_tv/video_menu_bottom_sheet.dart';
 
 /// 新番放送组件
 class BangumiSection extends StatefulWidget {

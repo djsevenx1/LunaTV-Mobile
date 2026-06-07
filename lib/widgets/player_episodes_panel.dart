@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../utils/device_utils.dart';
+import 'package:luna_tv/utils/device_utils.dart';
 
 class PlayerEpisodesPanel extends StatefulWidget {
   final ThemeData theme;
