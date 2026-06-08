@@ -572,7 +572,7 @@ class _VideoCardState extends State<VideoCard> {
                                     : (widget.from == 'agg'
                                         ? const Color(0xFF9b59b6) // 聚合模式用紫色文字
                                         : const Color(0xFF7f8c8d)), // 其他模式用灰色文字
-                                height: 1.0, // 进一步减少行高
+                               
                               ),
                               textAlign: TextAlign.center,
                               maxLines: 1,

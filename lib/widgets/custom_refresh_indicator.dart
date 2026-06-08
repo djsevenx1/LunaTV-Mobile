@@ -80,7 +80,7 @@ class CustomRefreshIndicatorContent extends StatelessWidget {
               ],
               Text(
                 text ?? '下拉刷新',
-                style: FontUtils.poppins(
+                style: FontUtils.poppins(context, context,
                   color: Colors.white,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
