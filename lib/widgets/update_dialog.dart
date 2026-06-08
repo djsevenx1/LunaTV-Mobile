@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
+
 import 'package:luna_tv/services/version_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -167,7 +167,7 @@ class UpdateDialog extends StatelessWidget {
                           child: SingleChildScrollView(
                             child: Padding(
                               padding: const EdgeInsets.all(12),
-                              child: GptMarkdown(
+                              child: Text(
                                 versionInfo.releaseNotes,
                                 style: FontUtils.poppins(context, context,
                                   fontSize: 14,

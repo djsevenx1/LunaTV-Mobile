@@ -1,3 +1,11 @@
+import 'package:luna_tv/screens/player_screen.dart';
+import 'package:luna_tv/screens/search_screen.dart';
+import 'package:luna_tv/screens/live_screen.dart';
+import 'package:luna_tv/screens/show_screen.dart';
+import 'package:luna_tv/screens/anime_screen.dart';
+import 'package:luna_tv/screens/tv_screen.dart';
+import 'package:luna_tv/screens/movie_screen.dart';
+import 'package:luna_tv/screens/login_screen.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;

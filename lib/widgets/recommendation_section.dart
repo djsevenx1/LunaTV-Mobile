@@ -1,3 +1,5 @@
+import 'package:luna_tv/widgets/shimmer_effect.dart';
+import 'package:luna_tv/widgets/video_card.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
