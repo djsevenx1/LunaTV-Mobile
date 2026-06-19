@@ -173,7 +173,7 @@ class DownstreamService {
       if (charset == 'gbk' || charset == 'gb2312') {
         // GBK/GB2312 编码
         try {
-          responseBody = utf8.decode(bytes).decode(response.bodyBytes);
+          responseBody = gbk.decode(response.bodyBytes);
         } catch (e) {
           // 如果 GBK 解码失败，尝试 UTF-8
           responseBody = utf8.decode(response.bodyBytes, allowMalformed: true);
@@ -185,7 +185,7 @@ class DownstreamService {
         } catch (e) {
           // 如果 UTF-8 解码失败，尝试 GBK
           try {
-            responseBody = utf8.decode(bytes).decode(response.bodyBytes);
+            responseBody = gbk.decode(response.bodyBytes);
           } catch (e2) {
             // 都失败了，使用默认的 body
             responseBody = response.body;

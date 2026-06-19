@@ -8,7 +8,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/shimmer_effect.dart';
 
-class DoubanMoviesGrid extends StatelessWidget {
+class DoubanMoviesGrid extends StatefulWidget {
   final List<DoubanMovie>? movies;
   final bool isLoading;
   final String? errorMessage;
@@ -27,16 +27,21 @@ class DoubanMoviesGrid extends StatelessWidget {
   });
 
   @override
+  State<DoubanMoviesGrid> createState() => _DoubanMoviesGridState();
+}
+
+class _DoubanMoviesGridState extends State<DoubanMoviesGrid> {
+  @override
   Widget build(BuildContext context) {
-    if (isLoading && (movies == null || movies!.isEmpty)) {
+    if (widget.isLoading && (widget.movies == null || widget.movies!.isEmpty)) {
       return _buildLoadingState();
     }
 
-    if (errorMessage != null) {
+    if (widget.errorMessage != null) {
       return _buildErrorState();
     }
 
-    if (movies == null || movies!.isEmpty) {
+    if (widget.movies == null || widget.movies!.isEmpty) {
       return _buildEmptyState();
     }
 
@@ -49,7 +54,7 @@ class DoubanMoviesGrid extends StatelessWidget {
         // 平板模式根据宽度动态展示6～9列，手机模式3列
         final int crossAxisCount = DeviceUtils.getTabletColumnCount(context);
         final isTablet = DeviceUtils.isTablet(context);
-        
+
         final double screenWidth = constraints.maxWidth;
         const double padding = 16.0;
         const double spacing = 12.0;
@@ -58,7 +63,7 @@ class DoubanMoviesGrid extends StatelessWidget {
         final double calculatedItemWidth = availableWidth / crossAxisCount;
         final double itemWidth = math.max(calculatedItemWidth, minItemWidth);
         final double itemHeight = itemWidth * 2.0;
-        
+
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           shrinkWrap: true,
@@ -81,7 +86,7 @@ class DoubanMoviesGrid extends StatelessWidget {
   /// 构建骨架卡片
   Widget _buildSkeletonCard(double width) {
     final double height = width * 1.5;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -125,7 +130,7 @@ class DoubanMoviesGrid extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            errorMessage ?? '未知错误',
+            widget.errorMessage ?? '未知错误',
             style: FontUtils.poppins(context,
                             fontSize: 14,
               color: const Color(0xFF95a5a6),
@@ -138,9 +143,9 @@ class DoubanMoviesGrid extends StatelessWidget {
   }
 
   Widget _buildEmptyState() {
-    final bool isMovie = contentType == 'movie';
+    final bool isMovie = widget.contentType == 'movie';
     final String contentName = isMovie ? '电影' : '剧集';
-    
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -178,7 +183,7 @@ class DoubanMoviesGrid extends StatelessWidget {
         // 平板模式根据宽度动态展示6～9列，手机模式3列
         final int crossAxisCount = DeviceUtils.getTabletColumnCount(context);
         final isTablet = DeviceUtils.isTablet(context);
-        
+
         final double screenWidth = constraints.maxWidth;
         const double padding = 16.0;
         const double spacing = 12.0;
@@ -187,7 +192,7 @@ class DoubanMoviesGrid extends StatelessWidget {
         final double calculatedItemWidth = availableWidth / crossAxisCount;
         final double itemWidth = math.max(calculatedItemWidth, minItemWidth);
         final double itemHeight = itemWidth * 2.0;
-        
+
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           shrinkWrap: true,
@@ -198,18 +203,18 @@ class DoubanMoviesGrid extends StatelessWidget {
             crossAxisSpacing: spacing,
             mainAxisSpacing: isTablet ? 0 : 6,
           ),
-          itemCount: movies!.length,
+          itemCount: widget.movies!.length,
           itemBuilder: (context, index) {
-            final movie = movies![index];
+            final movie = widget.movies![index];
             final videoInfo = movie.toVideoInfo();
-            
+
             return VideoCard(
               videoInfo: videoInfo,
-              onTap: () => onVideoTap(videoInfo),
+              onTap: () => widget.onVideoTap(videoInfo),
               from: 'douban',
               cardWidth: itemWidth,
-              onGlobalMenuAction: onGlobalMenuAction != null ? (action) => onGlobalMenuAction!(videoInfo, action) : null,
-              isFavorited: false, 
+              onGlobalMenuAction: widget.onGlobalMenuAction != null ? (action) => widget.onGlobalMenuAction!(videoInfo, action) : null,
+              isFavorited: false,
             );
           },
         );

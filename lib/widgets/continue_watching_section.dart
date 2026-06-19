@@ -277,8 +277,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                       color: themeService.isDarkMode
                           ? const Color(0xFFb0b0b0)
                           : const Color(0xFF7f8c8d),
-                      height: 1.4,
-                    ),
+                    ).copyWith(height: 1.4),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),

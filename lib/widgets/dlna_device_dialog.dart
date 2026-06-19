@@ -327,7 +327,7 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
   String _formatTime(DateTime time) {
     final now = DateTime.now();
     final difference = now.difference(time);
-    
+
     if (difference.inMinutes < 1) {
       return '刚刚';
     } else if (difference.inMinutes < 60) {

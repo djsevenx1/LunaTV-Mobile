@@ -464,7 +464,6 @@ class _MainLayoutState extends State<MainLayout> {
                   color: themeService.isDarkMode
                       ? Colors.white
                       : const Color(0xFF2c3e50),
-                  letterSpacing: 1.5,
                 ),
               ),
             ),
@@ -649,8 +648,7 @@ class _MainLayoutState extends State<MainLayout> {
               color: themeService.isDarkMode
                   ? const Color(0xFFffffff)
                   : const Color(0xFF2c3e50),
-              height: 1.2,
-            ),
+            ).copyWith(height: 1.2),
             onSubmitted: (value) {
               _removeOverlay();
               widget.onSearchSubmitted?.call(value);
@@ -780,7 +778,7 @@ class _MainLayoutState extends State<MainLayout> {
               : null,
           child: GestureDetector(
             onTap: () {
-              themeService.toggleTheme(context);
+              themeService.toggleTheme();
             },
             behavior: HitTestBehavior.opaque,
             child: Container(

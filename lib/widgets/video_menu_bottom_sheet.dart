@@ -1073,11 +1073,10 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
               _doubanDetails!.summary!,
               style: FontUtils.poppins(context,
                 fontSize: 14,
-                height: 1.5,
                 color: themeService.isDarkMode 
                     ? const Color(0xFFCCCCCC)
                     : const Color(0xFF666666),
-              ),
+              ).copyWith(height: 1.5),
             ),
           ],
           
@@ -1231,11 +1230,10 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
               _bangumiDetails!.summary,
               style: FontUtils.poppins(context,
                 fontSize: 14,
-                height: 1.5,
                 color: themeService.isDarkMode 
                     ? const Color(0xFFCCCCCC)
                     : const Color(0xFF666666),
-              ),
+              ).copyWith(height: 1.5),
             ),
           ],
           

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:luna_tv/screens/bilibili_screen.dart';
 import 'package:luna_tv/screens/douban_detail_screen.dart';
 import 'package:luna_tv/screens/favorites_screen.dart';
+import 'package:luna_tv/screens/filter_settings_screen.dart';
 import 'package:luna_tv/screens/history_screen.dart';
 import 'package:luna_tv/screens/home_screen.dart';
 import 'package:luna_tv/screens/login_screen.dart';

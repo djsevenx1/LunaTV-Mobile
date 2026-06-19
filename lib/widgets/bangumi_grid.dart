@@ -8,7 +8,7 @@ import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/widgets/shimmer_effect.dart';
 
-class BangumiGrid extends StatelessWidget {
+class BangumiGrid extends StatefulWidget {
   final List<BangumiItem>? bangumiItems;
   final bool isLoading;
   final String? errorMessage;
@@ -27,16 +27,21 @@ class BangumiGrid extends StatelessWidget {
   });
 
   @override
+  State<BangumiGrid> createState() => _BangumiGridState();
+}
+
+class _BangumiGridState extends State<BangumiGrid> {
+  @override
   Widget build(BuildContext context) {
-    if (isLoading && (bangumiItems == null || bangumiItems!.isEmpty)) {
+    if (widget.isLoading && (widget.bangumiItems == null || widget.bangumiItems!.isEmpty)) {
       return _buildLoadingState();
     }
 
-    if (errorMessage != null) {
+    if (widget.errorMessage != null) {
       return _buildErrorState();
     }
 
-    if (bangumiItems == null || bangumiItems!.isEmpty) {
+    if (widget.bangumiItems == null || widget.bangumiItems!.isEmpty) {
       return _buildEmptyState();
     }
 
@@ -49,7 +54,7 @@ class BangumiGrid extends StatelessWidget {
         // 平板模式根据宽度动态展示6～9列，手机模式3列
         final int crossAxisCount = DeviceUtils.getTabletColumnCount(context);
         final isTablet = DeviceUtils.isTablet(context);
-        
+
         final double screenWidth = constraints.maxWidth;
         const double padding = 16.0;
         const double spacing = 12.0;
@@ -58,7 +63,7 @@ class BangumiGrid extends StatelessWidget {
         final double calculatedItemWidth = availableWidth / crossAxisCount;
         final double itemWidth = math.max(calculatedItemWidth, minItemWidth);
         final double itemHeight = itemWidth * 2.0;
-        
+
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           shrinkWrap: true,
@@ -81,7 +86,7 @@ class BangumiGrid extends StatelessWidget {
   /// 构建骨架卡片
   Widget _buildSkeletonCard(double width) {
     final double height = width * 1.5;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -125,7 +130,7 @@ class BangumiGrid extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            errorMessage ?? '未知错误',
+            widget.errorMessage ?? '未知错误',
             style: FontUtils.poppins(context,
                             fontSize: 14,
               color: const Color(0xFF95a5a6),
@@ -138,9 +143,9 @@ class BangumiGrid extends StatelessWidget {
   }
 
   Widget _buildEmptyState() {
-    final bool isAnime = contentType == 'anime';
+    final bool isAnime = widget.contentType == 'anime';
     final String contentName = isAnime ? '番剧' : '内容';
-    
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -178,7 +183,7 @@ class BangumiGrid extends StatelessWidget {
         // 平板模式根据宽度动态展示6～9列，手机模式3列
         final int crossAxisCount = DeviceUtils.getTabletColumnCount(context);
         final isTablet = DeviceUtils.isTablet(context);
-        
+
         final double screenWidth = constraints.maxWidth;
         const double padding = 16.0;
         const double spacing = 12.0;
@@ -187,7 +192,7 @@ class BangumiGrid extends StatelessWidget {
         final double calculatedItemWidth = availableWidth / crossAxisCount;
         final double itemWidth = math.max(calculatedItemWidth, minItemWidth);
         final double itemHeight = itemWidth * 2.0;
-        
+
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           shrinkWrap: true,
@@ -198,18 +203,18 @@ class BangumiGrid extends StatelessWidget {
             crossAxisSpacing: spacing,
             mainAxisSpacing: isTablet ? 0 : 6,
           ),
-          itemCount: bangumiItems!.length,
+          itemCount: widget.bangumiItems!.length,
           itemBuilder: (context, index) {
-            final bangumiItem = bangumiItems![index];
+            final bangumiItem = widget.bangumiItems![index];
             final videoInfo = bangumiItem.toVideoInfo();
-            
+
             return VideoCard(
               videoInfo: videoInfo,
-              onTap: () => onVideoTap(videoInfo),
+              onTap: () => widget.onVideoTap(videoInfo),
               from: 'bangumi',
               cardWidth: itemWidth,
-              onGlobalMenuAction: onGlobalMenuAction != null ? (action) => onGlobalMenuAction!(videoInfo, action) : null,
-              isFavorited: false, 
+              onGlobalMenuAction: widget.onGlobalMenuAction != null ? (action) => widget.onGlobalMenuAction!(videoInfo, action) : null,
+              isFavorited: false,
             );
           },
         );

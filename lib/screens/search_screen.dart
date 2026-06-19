@@ -99,8 +99,10 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Future<void> _loadSearchHistory() async {
-    final prefs = await PageCacheService.getSearchHistory();
-    if (mounted) setState(() => _searchHistory = prefs);
+    final result = await PageCacheService().getSearchHistory(context);
+    if (mounted) {
+      setState(() => _searchHistory = result.data ?? const <String>[]);
+    }
   }
 
   void _onSearchQueryChanged(String query) {
@@ -239,18 +241,23 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Widget _buildSearchResults() {
+    final themeService = Provider.of<ThemeService>(context, listen: false);
     // 保持原有逻辑不变：选中聚合视图或普通列表
     if (_useAggregatedView) {
       return SearchResultAggGrid(
         results: _filteredSearchResults,
+        themeService: themeService,
+        hasReceivedStart: _hasReceivedStart,
         onVideoTap: (video) => _navigateToPlayer(video),
-        onMenuAction: (video, action) => _handleMenuAction(video, action),
+        onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
       );
     } else {
       return SearchResultsGrid(
         results: _filteredSearchResults,
+        themeService: themeService,
+        hasReceivedStart: _hasReceivedStart,
         onVideoTap: (video) => _navigateToPlayer(video),
-        onMenuAction: (video, action) => _handleMenuAction(video, action),
+        onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
       );
     }
   }

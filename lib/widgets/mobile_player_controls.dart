@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:volume_controller/volume_controller.dart';
 import 'package:luna_tv/widgets/dlna_device_dialog.dart';
 
 class MobilePlayerControls extends StatefulWidget {
@@ -106,13 +107,13 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _initSystemControls() {
-    VolumeController().showSystemUI = false;
-    VolumeController().getVolume().then((value) {
+    VolumeController.instance.showSystemUI = false;
+    VolumeController.instance.getVolume().then((value) {
       if (mounted) {
         setState(() => _currentVolume = value);
       }
     }).catchError((_) {});
-    ScreenBrightness().current.then((value) {
+    ScreenBrightness.instance.application.then((value) {
       if (mounted) {
         setState(() => _currentBrightness = value);
       }
@@ -156,7 +157,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     _volumeHideTimer?.cancel();
     _brightnessHideTimer?.cancel();
     _timeUpdateTimer?.cancel();
-    VolumeController().showSystemUI = true;
+    VolumeController.instance.showSystemUI = true;
     super.dispose();
   }
 
@@ -288,7 +289,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
       _currentVolume = (_currentVolume + volumeChange).clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
-    VolumeController().setVolume(_currentVolume);
+    VolumeController.instance.setVolume(_currentVolume);
     _startVolumeHideTimer();
   }
 
@@ -323,7 +324,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
           (_currentBrightness + brightnessChange).clamp(0.0, 1.0);
       _showBrightnessIndicator = true;
     });
-    ScreenBrightness().setApplicationScreenBrightness(_currentBrightness);
+    ScreenBrightness.instance.setApplicationScreenBrightness(_currentBrightness);
     _startBrightnessHideTimer();
   }
 

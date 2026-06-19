@@ -171,11 +171,10 @@ class UpdateDialog extends StatelessWidget {
                                 versionInfo.releaseNotes,
                                 style: FontUtils.poppins(context,
                                   fontSize: 14,
-                                  height: 1.6,
                                   color: themeService.isDarkMode
                                       ? const Color(0xFFCCCCCC)
                                       : const Color(0xFF666666),
-                                ),
+                                ).copyWith(height: 1.6),
                               ),
                             ),
                           ),
