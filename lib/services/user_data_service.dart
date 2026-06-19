@@ -257,4 +257,42 @@ class UserDataService {
   static bool getIsLocalModeSync() {
     return _isLocalModeCache ?? false;
   }
+
+  // 兼容旧接口:保存服务器地址
+  static Future<void> saveServerUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_serverUrlKey, url);
+  }
+
+  // 兼容旧接口:获取豆瓣数据源
+  static Future<String?> getDoubanDataSource() async {
+    return getDoubanDataSourceKey();
+  }
+
+  // 兼容旧接口:设置豆瓣数据源
+  static Future<void> setDoubanDataSource(String source) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_doubanDataSourceKey, source);
+  }
+
+  // 兼容旧接口:获取豆瓣图片源
+  static Future<String?> getDoubanImageSource() async {
+    return getDoubanImageSourceKey();
+  }
+
+  // 兼容旧接口:设置豆瓣图片源
+  static Future<void> setDoubanImageSource(String source) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_doubanImageSourceKey, source);
+  }
+
+  // 兼容旧接口:设置 M3U8 代理 URL
+  static Future<void> setM3u8ProxyUrl(String url) async {
+    await saveM3u8ProxyUrl(url);
+  }
+
+  // 兼容旧接口:设置优选测速
+  static Future<void> setPreferSpeedTest(bool enabled) async {
+    await savePreferSpeedTest(enabled);
+  }
 }

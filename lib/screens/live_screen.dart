@@ -255,7 +255,7 @@ class _LiveScreenState extends State<LiveScreen>
       SnackBar(
         content: Text(
           message,
-          style: FontUtils.poppins(color: Colors.white),
+          style: FontUtils.poppins(context, color: Colors.white),
         ),
         backgroundColor: const Color(0xFF3498DB),
         behavior: SnackBarBehavior.floating,
@@ -563,8 +563,8 @@ class _LiveScreenState extends State<LiveScreen>
           const SizedBox(height: 16),
           Text(
             '加载中...',
-            style: FontUtils.poppins(
-              color: themeService.isDarkMode
+            style: FontUtils.poppins(context,
+                            color: themeService.isDarkMode
                   ? const Color(0xFFb0b0b0)
                   : const Color(0xFF7f8c8d),
             ),
@@ -585,8 +585,8 @@ class _LiveScreenState extends State<LiveScreen>
           const SizedBox(height: 16),
           Text(
             '刷新中...',
-            style: FontUtils.poppins(
-              color: themeService.isDarkMode
+            style: FontUtils.poppins(context,
+                            color: themeService.isDarkMode
                   ? const Color(0xFFb0b0b0)
                   : const Color(0xFF7f8c8d),
             ),
@@ -611,8 +611,8 @@ class _LiveScreenState extends State<LiveScreen>
           const SizedBox(height: 16),
           Text(
             _errorMessage ?? '加载失败',
-            style: FontUtils.poppins(
-              color: themeService.isDarkMode
+            style: FontUtils.poppins(context,
+                            color: themeService.isDarkMode
                   ? const Color(0xFFb0b0b0)
                   : const Color(0xFF7f8c8d),
             ),
@@ -628,7 +628,7 @@ class _LiveScreenState extends State<LiveScreen>
             ),
             child: Text(
               '刷新',
-              style: FontUtils.poppins(color: Colors.white),
+              style: FontUtils.poppins(context, color: Colors.white),
             ),
           ),
         ],
@@ -643,8 +643,8 @@ class _LiveScreenState extends State<LiveScreen>
       return Center(
         child: Text(
           '暂无频道',
-          style: FontUtils.poppins(
-            color: themeService.isDarkMode
+          style: FontUtils.poppins(context,
+                        color: themeService.isDarkMode
                 ? const Color(0xFFb0b0b0)
                 : const Color(0xFF7f8c8d),
           ),
@@ -811,8 +811,8 @@ class _LiveChannelCardState extends State<_LiveChannelCard> {
               const SizedBox(height: 8),
               Text(
                 widget.channel.name,
-                style: FontUtils.poppins(
-                  fontSize: 13,
+                style: FontUtils.poppins(context,
+                                    fontSize: 13,
                   fontWeight: FontWeight.w500,
                   color: isPC && _isHovered
                       ? const Color(0xFF27ae60)

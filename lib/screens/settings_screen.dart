@@ -303,7 +303,7 @@ class _ThemeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mode = context.watch<ThemeService>().themeMode2;
+    final mode = context.watch<ThemeService>().themeMode;
     String label;
     switch (mode) {
       case ThemeMode.light:
@@ -332,9 +332,14 @@ class _ThemeTile extends StatelessWidget {
   }
 }
 
-class _LogoutTile extends StatelessWidget {
+class _LogoutTile extends StatefulWidget {
   const _LogoutTile();
 
+  @override
+  State<_LogoutTile> createState() => _LogoutTileState();
+}
+
+class _LogoutTileState extends State<_LogoutTile> {
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -452,7 +457,7 @@ class _NetdiskSearchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.cloud_search_outlined),
+      leading: const Icon(Icons.cloud_outlined),
       title: const Text('网盘搜索'),
       subtitle: const Text('搜索百度网盘、阿里云盘等资源'),
       onTap: () {

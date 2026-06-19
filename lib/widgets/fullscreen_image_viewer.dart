@@ -84,8 +84,8 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
                     child: Text(
                       '保存图片',
-                      style: FontUtils.poppins(
-                        color: textColor,
+                      style: FontUtils.poppins(context,
+                                                color: textColor,
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
                       ),
@@ -99,8 +99,8 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
                     ),
                     title: Text(
                       '保存到相册',
-                      style: FontUtils.poppins(
-                        color: textColor,
+                      style: FontUtils.poppins(context,
+                                                color: textColor,
                         fontSize: 16,
                       ),
                     ),
@@ -116,8 +116,8 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
                     ),
                     title: Text(
                       '取消',
-                      style: FontUtils.poppins(
-                        color: secondaryTextColor,
+                      style: FontUtils.poppins(context,
+                                                color: secondaryTextColor,
                         fontSize: 16,
                       ),
                     ),
@@ -249,8 +249,8 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
                                 const SizedBox(height: 16),
                                 Text(
                                   '加载中...',
-                                  style: FontUtils.poppins(
-                                    color: textColor,
+                                  style: FontUtils.poppins(context,
+                                                                        color: textColor,
                                     fontSize: 16,
                                   ),
                                 ),
@@ -273,8 +273,8 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
                                 const SizedBox(height: 16),
                                 Text(
                                   '图片加载失败',
-                                  style: FontUtils.poppins(
-                                    color: textColor,
+                                  style: FontUtils.poppins(context,
+                                                                        color: textColor,
                                     fontSize: 16,
                                   ),
                                 ),

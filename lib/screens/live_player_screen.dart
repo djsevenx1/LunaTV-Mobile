@@ -706,8 +706,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                         padding: const EdgeInsets.only(top: 16),
                         child: Text(
                           '频道列表',
-                          style: FontUtils.poppins(
-                            fontSize: 18,
+                          style: FontUtils.poppins(context,
+                                                        fontSize: 18,
                             fontWeight: FontWeight.w600,
                             color: themeService.isDarkMode
                                 ? Colors.white
@@ -819,8 +819,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                     Expanded(
                       child: Text(
                         _currentChannel.name,
-                        style: FontUtils.poppins(
-                          fontSize: 18,
+                        style: FontUtils.poppins(context,
+                                                    fontSize: 18,
                           fontWeight: FontWeight.w600,
                           color: themeService.isDarkMode
                               ? Colors.white
@@ -835,8 +835,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                 const SizedBox(height: 4),
                 Text(
                   '${_currentSource.name} > ${_currentChannel.group}',
-                  style: FontUtils.poppins(
-                    fontSize: 14,
+                  style: FontUtils.poppins(context,
+                                        fontSize: 14,
                     color: themeService.isDarkMode
                         ? const Color(0xFF999999)
                         : const Color(0xFF7f8c8d),
@@ -890,8 +890,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
           padding: const EdgeInsets.all(24),
           child: Text(
             '暂无频道',
-            style: FontUtils.poppins(
-              fontSize: 14,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
               color: themeService.isDarkMode
                   ? const Color(0xFF999999)
                   : const Color(0xFF7f8c8d),
@@ -965,8 +965,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                 ),
           title: Text(
             channel.name,
-            style: FontUtils.poppins(
-              fontSize: 14,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               color: isSelected
                   ? const Color(0xFF27ae60)
@@ -979,8 +979,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
           ),
           subtitle: Text(
             channel.group,
-            style: FontUtils.poppins(
-              fontSize: 12,
+            style: FontUtils.poppins(context,
+                            fontSize: 12,
               color: themeService.isDarkMode
                   ? const Color(0xFF999999)
                   : const Color(0xFF7f8c8d),
@@ -1277,8 +1277,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
               children: [
                 Text(
                   '正在播放: ',
-                  style: FontUtils.poppins(
-                    fontSize: 14,
+                  style: FontUtils.poppins(context,
+                                        fontSize: 14,
                     color: themeService.isDarkMode
                         ? const Color(0xFF999999)
                         : const Color(0xFF7f8c8d),
@@ -1288,8 +1288,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                   child: _isLoadingEpg
                       ? Text(
                           '加载中...',
-                          style: FontUtils.poppins(
-                            fontSize: 14,
+                          style: FontUtils.poppins(context,
+                                                        fontSize: 14,
                             fontWeight: FontWeight.w500,
                             color: themeService.isDarkMode
                                 ? Colors.white
@@ -1301,8 +1301,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                       : currentProgram != null
                           ? Text(
                               currentProgram.title,
-                              style: FontUtils.poppins(
-                                fontSize: 14,
+                              style: FontUtils.poppins(context,
+                                                                fontSize: 14,
                                 fontWeight: FontWeight.w500,
                                 color: themeService.isDarkMode
                                     ? Colors.white
@@ -1313,8 +1313,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                             )
                           : Text(
                               '暂无节目信息',
-                              style: FontUtils.poppins(
-                                fontSize: 14,
+                              style: FontUtils.poppins(context,
+                                                                fontSize: 14,
                                 fontWeight: FontWeight.w500,
                                 color: themeService.isDarkMode
                                     ? const Color(0xFF666666)
@@ -1400,8 +1400,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                   children: [
                     Text(
                       '节目单',
-                      style: FontUtils.poppins(
-                        fontSize: 18,
+                      style: FontUtils.poppins(context,
+                                                fontSize: 18,
                         fontWeight: FontWeight.w600,
                         color: themeService.isDarkMode
                             ? Colors.white
@@ -1448,8 +1448,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
               const SizedBox(height: 16),
               Text(
                 '加载节目单中...',
-                style: FontUtils.poppins(
-                  fontSize: 14,
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
                   color: themeService.isDarkMode
                       ? const Color(0xFF999999)
                       : const Color(0xFF7f8c8d),
@@ -1478,8 +1478,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
               const SizedBox(height: 16),
               Text(
                 '暂无节目单信息',
-                style: FontUtils.poppins(
-                  fontSize: 14,
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
                   color: themeService.isDarkMode
                       ? const Color(0xFF999999)
                       : const Color(0xFF7f8c8d),
@@ -1499,7 +1499,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
         final program = _programs![index];
         // 给当前正在播放的节目添加 key，用于滚动定位
         final itemKey = program.isLive ? _currentProgramKey : null;
-        return _buildVerticalProgramItem(program, themeService, key: itemKey);
+        return _buildVerticalProgramItem(program, themeService, key: itemKey, context: context);
       },
     );
   }
@@ -1509,6 +1509,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
     EpgProgram program,
     ThemeService themeService, {
     Key? key,
+    required BuildContext context,
   }) {
     final now = DateTime.now();
     final isLive = program.isLive;
@@ -1554,6 +1555,7 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
           Text(
             program.timeRange,
             style: FontUtils.sourceCodePro(
+              context,
               fontSize: 13,
               color: timeColor,
               fontWeight: FontWeight.w600,
@@ -1564,8 +1566,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
           Expanded(
             child: Text(
               program.title,
-              style: FontUtils.poppins(
-                fontSize: 14,
+              style: FontUtils.poppins(context,
+                                fontSize: 14,
                 fontWeight: isLive ? FontWeight.w600 : FontWeight.w400,
                 color: textColor,
               ),
@@ -1595,8 +1597,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
               children: [
                 Text(
                   '节目单',
-                  style: FontUtils.poppins(
-                    fontSize: 16,
+                  style: FontUtils.poppins(context,
+                                        fontSize: 16,
                     fontWeight: FontWeight.w600,
                     color: themeService.isDarkMode
                         ? Colors.white
@@ -1654,8 +1656,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
           padding: const EdgeInsets.symmetric(vertical: 24),
           child: Text(
             '加载节目单中...',
-            style: FontUtils.poppins(
-              fontSize: 14,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
               color: themeService.isDarkMode
                   ? const Color(0xFF999999)
                   : const Color(0xFF7f8c8d),
@@ -1682,8 +1684,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
               const SizedBox(height: 12),
               Text(
                 '暂无节目单信息',
-                style: FontUtils.poppins(
-                  fontSize: 14,
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
                   color: themeService.isDarkMode
                       ? const Color(0xFF999999)
                       : const Color(0xFF7f8c8d),
@@ -1791,8 +1793,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
             children: [
               Text(
                 program.timeRange,
-                style: FontUtils.poppins(
-                  fontSize: 9,
+                style: FontUtils.poppins(context,
+                                    fontSize: 9,
                   color: timeColor,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1812,8 +1814,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
                     const SizedBox(width: 2),
                     Text(
                       '直播',
-                      style: FontUtils.poppins(
-                        fontSize: 8,
+                      style: FontUtils.poppins(context,
+                                                fontSize: 8,
                         color: timeColor,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1824,8 +1826,8 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
           ),
           Text(
             program.title,
-            style: FontUtils.poppins(
-              fontSize: 11,
+            style: FontUtils.poppins(context,
+                            fontSize: 11,
               fontWeight: FontWeight.w600,
               color: textColor,
             ),

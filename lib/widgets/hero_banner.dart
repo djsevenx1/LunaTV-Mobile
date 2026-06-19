@@ -301,9 +301,8 @@ class _HeroBannerState extends State<HeroBanner> {
                 ),
                 child: Text(
                   item.typeLabel,
-                  style: FontUtils.poppins(
-                    context,
-                    fontSize: 11,
+                  style: FontUtils.poppins(context,
+                                        fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
                   ),
@@ -313,9 +312,8 @@ class _HeroBannerState extends State<HeroBanner> {
               // 标题
               Text(
                 item.title,
-                style: FontUtils.poppins(
-                  context,
-                  fontSize: 20,
+                style: FontUtils.poppins(context,
+                                    fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
@@ -326,9 +324,8 @@ class _HeroBannerState extends State<HeroBanner> {
               // 副标题/描述
               Text(
                 item.subtitle,
-                style: FontUtils.poppins(
-                  context,
-                  fontSize: 13,
+                style: FontUtils.poppins(context,
+                                    fontSize: 13,
                   fontWeight: FontWeight.w400,
                   color: Colors.white.withOpacity(0.7),
                 ),

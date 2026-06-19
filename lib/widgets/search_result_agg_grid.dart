@@ -166,8 +166,8 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
           const SizedBox(height: 24),
           Text(
             '暂无搜索结果',
-            style: FontUtils.poppins(
-              fontSize: 18,
+            style: FontUtils.poppins(context,
+                            fontSize: 18,
               fontWeight: FontWeight.w500,
               color: const Color(0xFF7f8c8d),
             ),
@@ -175,8 +175,8 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
           const SizedBox(height: 12),
           Text(
             '请尝试其他关键词',
-            style: FontUtils.poppins(
-              fontSize: 14,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
               color: const Color(0xFF95a5a6),
             ),
           ),

@@ -18,7 +18,7 @@ class ThemeService extends ChangeNotifier {
   }
 
   void setThemeMode(ThemeMode mode) {
-    themeMode2 = mode;
+    themeMode = mode;
     notifyListeners();
   }
 
@@ -45,7 +45,7 @@ class ThemeService extends ChangeNotifier {
       colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF2c3e50), brightness: Brightness.light),
       scaffoldBackgroundColor: Color(0xFFf8f9fa),
       appBarTheme: AppBarTheme(backgroundColor: Color(0xFFffffff), foregroundColor: Color(0xFF2c3e50), elevation: 0),
-      cardTheme: CardThemeData(color: Color(0xFFffffff), elevation: 2),
+      cardTheme: CardTheme(color: Color(0xFFffffff), elevation: 2),
       textTheme: textTheme,
       fontFamily: 'Microsoft YaHei',
     );
@@ -66,7 +66,7 @@ class ThemeService extends ChangeNotifier {
       colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF2c3e50), brightness: Brightness.dark),
       scaffoldBackgroundColor: Color(0xFF121212),
       appBarTheme: AppBarTheme(backgroundColor: Color(0xFF1e1e1e), foregroundColor: Color(0xFFffffff), elevation: 0),
-      cardTheme: CardThemeData(color: Color(0xFF1e1e1e), elevation: 2),
+      cardTheme: CardTheme(color: Color(0xFF1e1e1e), elevation: 2),
       textTheme: textTheme,
       fontFamily: 'Microsoft YaHei',
     );

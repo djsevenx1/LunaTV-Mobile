@@ -229,7 +229,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           Flexible(
             child: Text(
               '正在搜索… $label',
-              style: FontUtils.poppins(fontSize: 13, color: theme.hintColor),
+              style: FontUtils.poppins(context, fontSize: 13, color: theme.hintColor),
               overflow: TextOverflow.ellipsis,
             ),
           ),

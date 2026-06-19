@@ -61,7 +61,7 @@ class _CapsuleTabSwitcherState extends State<CapsuleTabSwitcher>
       final textPainter = TextPainter(
         text: TextSpan(
           text: tab,
-          style: FontUtils.poppins(fontSize: 12, fontWeight: FontWeight.w600),
+          style: FontUtils.poppins(context, fontSize: 12, fontWeight: FontWeight.w600),
         ),
         maxLines: 1,
         textDirection: TextDirection.ltr,
@@ -309,8 +309,8 @@ class _CapsuleTabHoverState extends State<_CapsuleTabHover> {
 
               return Text(
                 widget.label,
-                style: FontUtils.poppins(
-                  fontSize: 12,
+                style: FontUtils.poppins(context,
+                                    fontSize: 12,
                   fontWeight: fontWeight,
                   color: color,
                 ),

@@ -164,8 +164,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
               alignment: Alignment.center,
               child: Text(
                 tab.label,
-                style: FontUtils.poppins(
-                  fontSize: 13,
+                style: FontUtils.poppins(context,
+                                    fontSize: 13,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                   color: isSelected
                       ? Colors.white
@@ -196,8 +196,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
               entry.key,
-              style: FontUtils.poppins(
-                fontSize: 16,
+              style: FontUtils.poppins(context,
+                                fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: isDark ? const Color(0xFFffffff) : const Color(0xFF2c3e50),
               ),
@@ -276,8 +276,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                 children: [
                   Text(
                     item.title,
-                    style: FontUtils.poppins(
-                      fontSize: 15,
+                    style: FontUtils.poppins(context,
+                                            fontSize: 15,
                       fontWeight: FontWeight.w600,
                       color: isDark
                           ? const Color(0xFFffffff)
@@ -295,6 +295,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                         Text(
                           item.region,
                           style: FontUtils.sourceCodePro(
+                            context,
                             fontSize: 12,
                             color: isDark
                                 ? const Color(0xFFb0b0b0)
@@ -316,6 +317,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                       Text(
                         item.releaseDate,
                         style: FontUtils.sourceCodePro(
+                          context,
                           fontSize: 12,
                           color: isDark
                               ? const Color(0xFFb0b0b0)
@@ -328,8 +330,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                     const SizedBox(height: 4),
                     Text(
                       item.description,
-                      style: FontUtils.poppins(
-                        fontSize: 12,
+                      style: FontUtils.poppins(context,
+                                                fontSize: 12,
                         color: isDark
                             ? const Color(0xFFb0b0b0)
                             : const Color(0xFF7f8c8d),
@@ -356,8 +358,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
       ),
       child: Text(
         type,
-        style: FontUtils.poppins(
-          fontSize: 11,
+        style: FontUtils.poppins(context,
+                    fontSize: 11,
           fontWeight: FontWeight.w500,
           color: const Color(0xFF27ae60),
         ),
@@ -380,8 +382,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
           const SizedBox(height: 16),
           Text(
             '暂无发布信息',
-            style: FontUtils.poppins(
-              fontSize: 16,
+            style: FontUtils.poppins(context,
+                            fontSize: 16,
               color: isDark
                   ? const Color(0xFFb0b0b0)
                   : const Color(0xFF7f8c8d),
@@ -390,8 +392,8 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
           const SizedBox(height: 8),
           Text(
             '下拉刷新获取最新数据',
-            style: FontUtils.poppins(
-              fontSize: 13,
+            style: FontUtils.poppins(context,
+                            fontSize: 13,
               color: isDark
                   ? Colors.white.withOpacity(0.4)
                   : Colors.grey.withOpacity(0.5),

@@ -576,6 +576,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Text(
             'LunaTV',
             style: FontUtils.sourceCodePro(
+              context,
               fontSize: 42,
               fontWeight: FontWeight.w400,
               color: const Color(0xFF2c3e50),
@@ -841,6 +842,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Text(
               'LunaTV',
               style: FontUtils.sourceCodePro(
+                context,
                 fontSize: 42,
                 fontWeight: FontWeight.w400,
                 color: const Color(0xFF2c3e50),

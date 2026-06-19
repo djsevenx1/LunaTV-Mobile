@@ -260,8 +260,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                   // 标题
                   Text(
                     '清空播放记录',
-                    style: FontUtils.poppins(
-                      fontSize: 18,
+                    style: FontUtils.poppins(context,
+                                            fontSize: 18,
                       fontWeight: FontWeight.w600,
                       color: themeService.isDarkMode
                           ? const Color(0xFFffffff)
@@ -272,8 +272,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                   // 描述
                   Text(
                     '确定要清空所有播放记录吗？此操作无法撤销。',
-                    style: FontUtils.poppins(
-                      fontSize: 14,
+                    style: FontUtils.poppins(context,
+                                            fontSize: 14,
                       color: themeService.isDarkMode
                           ? const Color(0xFFb0b0b0)
                           : const Color(0xFF7f8c8d),
@@ -296,8 +296,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                           ),
                           child: Text(
                             '取消',
-                            style: FontUtils.poppins(
-                              fontSize: 14,
+                            style: FontUtils.poppins(context,
+                                                            fontSize: 14,
                               fontWeight: FontWeight.w500,
                               color: themeService.isDarkMode
                                   ? const Color(0xFFb0b0b0)
@@ -324,8 +324,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                           ),
                           child: Text(
                             '清空',
-                            style: FontUtils.poppins(
-                              fontSize: 14,
+                            style: FontUtils.poppins(context,
+                                                            fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -358,7 +358,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
             SnackBar(
               content: Text(
                 '播放记录已清空',
-                style: FontUtils.poppins(color: Colors.white),
+                style: FontUtils.poppins(context, color: Colors.white),
               ),
               backgroundColor: const Color(0xFF27ae60),
               behavior: SnackBarBehavior.floating,
@@ -376,7 +376,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
             SnackBar(
               content: Text(
                 '清空失败',
-                style: FontUtils.poppins(color: Colors.white),
+                style: FontUtils.poppins(context, color: Colors.white),
               ),
               backgroundColor: const Color(0xFFe74c3c),
               behavior: SnackBarBehavior.floating,
@@ -395,7 +395,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
           SnackBar(
             content: Text(
               '清空失败: ${e.toString()}',
-              style: FontUtils.poppins(color: Colors.white),
+              style: FontUtils.poppins(context, color: Colors.white),
             ),
             backgroundColor: const Color(0xFFe74c3c),
             behavior: SnackBarBehavior.floating,
@@ -438,8 +438,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                       builder: (context, themeService, child) {
                         return Text(
                           '继续观看',
-                          style: FontUtils.poppins(
-                            fontSize: 18,
+                          style: FontUtils.poppins(context,
+                                                        fontSize: 18,
                             fontWeight: FontWeight.w600,
                             color: themeService.isDarkMode
                                 ? const Color(0xFFffffff)
@@ -479,8 +479,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                           ),
                           child: Text(
                             '清空',
-                            style: FontUtils.poppins(
-                              fontSize: 14,
+                            style: FontUtils.poppins(context,
+                                                            fontSize: 14,
                               color: DeviceUtils.isPC() && _isClearButtonHovered
                                   ? const Color(0xFFe74c3c) // hover 时红色
                                   : const Color(0xFF7f8c8d),
@@ -522,8 +522,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                       ),
                       child: Text(
                         '查看全部 >',
-                        style: FontUtils.poppins(
-                          fontSize: 14,
+                        style: FontUtils.poppins(context,
+                                                    fontSize: 14,
                           color: DeviceUtils.isPC() && _isMoreButtonHovered
                               ? const Color(0xFF27ae60) // hover 时绿色
                               : const Color(0xFF7f8c8d),
@@ -811,8 +811,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
             const SizedBox(height: 8),
             Text(
               '加载播放记录失败',
-              style: FontUtils.poppins(
-                fontSize: 14,
+              style: FontUtils.poppins(context,
+                                fontSize: 14,
                 color: Colors.grey[600],
               ),
             ),
@@ -821,8 +821,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
               onPressed: _loadPlayRecords,
               child: Text(
                 '重试',
-                style: FontUtils.poppins(
-                  fontSize: 12,
+                style: FontUtils.poppins(context,
+                                    fontSize: 12,
                   color: const Color(0xFF2c3e50),
                 ),
               ),

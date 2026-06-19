@@ -755,7 +755,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                             // 标题
                                             Text(
                                               widget.videoInfo.title,
-                                              style: FontUtils.poppins(context, context,
+                                              style: FontUtils.poppins(context,
                                                 fontSize: 20,
                                                 fontWeight: FontWeight.bold,
                                                 color: themeService.isDarkMode 
@@ -773,7 +773,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                 ? // 豆瓣或Bangumi来源：纯文本，无边框
                                   Text(
                                     widget.videoInfo.source == 'douban' ? '来自豆瓣' : '来自 Bangumi',
-                                    style: FontUtils.poppins(context, context,
+                                    style: FontUtils.poppins(context,
                                       fontSize: 12,
                                       color: themeService.isDarkMode 
                                           ? const Color(0xFF999999)
@@ -789,7 +789,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                             children: [
                                               Text(
                                                 '共 ${widget.videoInfo.sourceName.split(', ').length} 个播放源',
-                                                style: FontUtils.poppins(context, context,
+                                                style: FontUtils.poppins(context,
                                                   fontSize: 12,
                                                   color: themeService.isDarkMode 
                                                       ? const Color(0xFF999999)
@@ -824,7 +824,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                           ),
                                           child: Text(
                                             widget.videoInfo.sourceName,
-                                            style: FontUtils.poppins(context, context,
+                                            style: FontUtils.poppins(context,
                                               fontSize: 12,
                                               color: themeService.isDarkMode 
                                                   ? const Color(0xFF999999)
@@ -950,7 +950,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
           // 豆瓣详情标题
           Text(
             '豆瓣简介',
-            style: FontUtils.poppins(context, context,
+            style: FontUtils.poppins(context,
               fontSize: 18,
               fontWeight: FontWeight.bold,
               color: themeService.isDarkMode 
@@ -982,7 +982,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                       const SizedBox(width: 4),
                       Text(
                         _doubanDetails!.rate!,
-                        style: FontUtils.poppins(context, context,
+                        style: FontUtils.poppins(context,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: const Color(0xFFFFB800),
@@ -1006,7 +1006,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                 ),
                 child: Text(
                   _doubanDetails!.year,
-                  style: FontUtils.poppins(context, context,
+                  style: FontUtils.poppins(context,
                     fontSize: 14,
                     color: themeService.isDarkMode 
                         ? const Color(0xFF999999)
@@ -1033,7 +1033,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                 ),
                 child: Text(
                   genre,
-                  style: FontUtils.poppins(context, context,
+                  style: FontUtils.poppins(context,
                     fontSize: 12,
                     color: themeService.isDarkMode 
                         ? const Color(0xFFCCCCCC)
@@ -1060,7 +1060,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
             const SizedBox(height: 16),
             Text(
               '简介',
-              style: FontUtils.poppins(context, context,
+              style: FontUtils.poppins(context,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: themeService.isDarkMode 
@@ -1071,7 +1071,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
             const SizedBox(height: 8),
             Text(
               _doubanDetails!.summary!,
-              style: FontUtils.poppins(context, context,
+              style: FontUtils.poppins(context,
                 fontSize: 14,
                 height: 1.5,
                 color: themeService.isDarkMode 
@@ -1114,7 +1114,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
           // Bangumi 详情标题
           Text(
             'Bangumi 简介',
-            style: FontUtils.poppins(context, context,
+            style: FontUtils.poppins(context,
               fontSize: 18,
               fontWeight: FontWeight.bold,
               color: themeService.isDarkMode 
@@ -1146,7 +1146,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                       const SizedBox(width: 4),
                       Text(
                         _bangumiDetails!.rating.score.toStringAsFixed(1),
-                        style: FontUtils.poppins(context, context,
+                        style: FontUtils.poppins(context,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: const Color(0xFFE91E63),
@@ -1171,7 +1171,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                   ),
                   child: Text(
                     _bangumiDetails!.date!.split('-').first,
-                    style: FontUtils.poppins(context, context,
+                    style: FontUtils.poppins(context,
                       fontSize: 14,
                       color: themeService.isDarkMode 
                           ? const Color(0xFF999999)
@@ -1199,7 +1199,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                 ),
                 child: Text(
                   tag,
-                  style: FontUtils.poppins(context, context,
+                  style: FontUtils.poppins(context,
                     fontSize: 12,
                     color: themeService.isDarkMode 
                         ? const Color(0xFFCCCCCC)
@@ -1218,7 +1218,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
             const SizedBox(height: 16),
             Text(
               '简介',
-              style: FontUtils.poppins(context, context,
+              style: FontUtils.poppins(context,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: themeService.isDarkMode 
@@ -1229,7 +1229,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
             const SizedBox(height: 8),
             Text(
               _bangumiDetails!.summary,
-              style: FontUtils.poppins(context, context,
+              style: FontUtils.poppins(context,
                 fontSize: 14,
                 height: 1.5,
                 color: themeService.isDarkMode 
@@ -1254,7 +1254,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
           width: 50,
           child: Text(
             label,
-            style: FontUtils.poppins(context, context,
+            style: FontUtils.poppins(context,
               fontSize: 14,
               color: themeService.isDarkMode 
                   ? const Color(0xFF999999)
@@ -1265,7 +1265,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
         Expanded(
           child: Text(
             value,
-            style: FontUtils.poppins(context, context,
+            style: FontUtils.poppins(context,
               fontSize: 14,
               color: themeService.isDarkMode 
                   ? const Color(0xFFCCCCCC)
@@ -1657,7 +1657,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
               Expanded(
                 child: Text(
                   title,
-                  style: FontUtils.poppins(context, context,
+                  style: FontUtils.poppins(context,
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
                     color: themeService.isDarkMode 
@@ -1671,7 +1671,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
               if (subtitle != null)
                 Text(
                   subtitle,
-                  style: FontUtils.poppins(context, context,
+                  style: FontUtils.poppins(context,
                     fontSize: 14,
                     color: themeService.isDarkMode 
                         ? const Color(0xFF999999)
@@ -1786,7 +1786,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                   child: Text(
                     '可用播放源',
-                    style: FontUtils.poppins(context, context,
+                    style: FontUtils.poppins(context,
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                       color: themeService.isDarkMode
@@ -1819,7 +1819,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                   children: [
                                     Text(
                                       source.sourceName,
-                                      style: FontUtils.poppins(context, context,
+                                      style: FontUtils.poppins(context,
                                         fontSize: 16,
                                         fontWeight: FontWeight.w500,
                                       ),
@@ -1828,7 +1828,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                     if (source.episodes.length > 1)
                                       Text(
                                         '${source.episodes.length}集',
-                                        style: FontUtils.poppins(context, context,
+                                        style: FontUtils.poppins(context,
                                           fontSize: 14,
                                           color: themeService.isDarkMode
                                               ? Colors.white70

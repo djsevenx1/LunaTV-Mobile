@@ -292,6 +292,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
                     Text(
                       '${stat.playCount}次',
                       style: FontUtils.sourceCodePro(
+                        context,
                         fontSize: 12,
                         color: isDark
                             ? const Color(0xFFb0b0b0)
@@ -308,6 +309,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
                     Text(
                       stat.formattedDuration,
                       style: FontUtils.sourceCodePro(
+                        context,
                         fontSize: 12,
                         color: isDark
                             ? const Color(0xFFb0b0b0)
@@ -327,6 +329,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
                       Text(
                         '最后播放: ${_formatLastPlayTime(stat.lastPlayTime)}',
                         style: FontUtils.sourceCodePro(
+                          context,
                           fontSize: 11,
                           color: isDark
                               ? Colors.white.withOpacity(0.4)

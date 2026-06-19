@@ -630,8 +630,7 @@ class _ShortDramaPlayerScreenState extends State<_ShortDramaPlayerScreen> {
                       color: themeService.isDarkMode
                           ? const Color(0xFFb0b0b0)
                           : const Color(0xFF7f8c8d),
-                      height: 1.5,
-                    ),
+                    ).copyWith(height: 1.5),
                   ),
                 ],
                 // 剧集列表

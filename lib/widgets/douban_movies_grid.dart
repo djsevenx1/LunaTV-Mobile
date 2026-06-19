@@ -117,8 +117,8 @@ class DoubanMoviesGrid extends StatelessWidget {
           const SizedBox(height: 24),
           Text(
             '加载失败',
-            style: FontUtils.poppins(
-              fontSize: 18,
+            style: FontUtils.poppins(context,
+                            fontSize: 18,
               fontWeight: FontWeight.w500,
               color: const Color(0xFF7f8c8d),
             ),
@@ -126,8 +126,8 @@ class DoubanMoviesGrid extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             errorMessage ?? '未知错误',
-            style: FontUtils.poppins(
-              fontSize: 14,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
               color: const Color(0xFF95a5a6),
             ),
             textAlign: TextAlign.center,
@@ -153,8 +153,8 @@ class DoubanMoviesGrid extends StatelessWidget {
           const SizedBox(height: 24),
           Text(
             '暂无$contentName',
-            style: FontUtils.poppins(
-              fontSize: 18,
+            style: FontUtils.poppins(context,
+                            fontSize: 18,
               fontWeight: FontWeight.w500,
               color: const Color(0xFF7f8c8d),
             ),
@@ -162,8 +162,8 @@ class DoubanMoviesGrid extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             '当前分类下没有$contentName',
-            style: FontUtils.poppins(
-              fontSize: 14,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
               color: const Color(0xFF95a5a6),
             ),
           ),
