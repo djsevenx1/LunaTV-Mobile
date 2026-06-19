@@ -112,7 +112,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
         setState(() => _currentVolume = value);
       }
     }).catchError((_) {});
-    ScreenBrightness().(value) {
+    ScreenBrightness().current.then((value) {
       if (mounted) {
         setState(() => _currentBrightness = value);
       }
