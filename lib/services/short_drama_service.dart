@@ -38,7 +38,9 @@ class ShortDramaService {
   }
 
   /// 获取短剧分类列表
-  static Future<List<String>> getCategories() async {
+  /// GET /api/shortdrama/categories
+  /// 返回: [{type_id: number, type_name: string}]
+  static Future<List<ShortDramaCategory>> getCategories() async {
     try {
       final url = await _buildUrl('/api/shortdrama/categories');
       final headers = await _buildHeaders();
@@ -50,7 +52,9 @@ class ShortDramaService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data is List) {
-          return data.map((e) => e.toString()).toList();
+          return data
+              .map((e) => ShortDramaCategory.fromJson(e as Map<String, dynamic>))
+              .toList();
         }
         return [];
       }
@@ -60,19 +64,21 @@ class ShortDramaService {
     }
   }
 
-  /// 获取短剧列表
-  static Future<List<ShortDrama>> getList({
-    String? category,
+  /// 获取分类短剧列表（分页）
+  /// GET /api/shortdrama/list?categoryId={categoryId}&page={page}&size={size}
+  /// 返回: {list: [...], hasMore: bool}
+  static Future<ShortDramaListResponse> getList({
+    required int categoryId,
     int page = 1,
+    int size = 20,
   }) async {
     try {
       String url = await _buildUrl('/api/shortdrama/list');
-      final queryParams = <String, String>{};
-
-      if (category != null && category.isNotEmpty) {
-        queryParams['category'] = category;
-      }
-      queryParams['page'] = page.toString();
+      final queryParams = <String, String>{
+        'categoryId': categoryId.toString(),
+        'page': page.toString(),
+        'size': size.toString(),
+      };
 
       final uri = Uri.parse(url).replace(queryParameters: queryParams);
       final headers = await _buildHeaders();
@@ -83,27 +89,33 @@ class ShortDramaService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data is List) {
-          return data
-              .map((e) =>
-                  ShortDrama.fromJson(e as Map<String, dynamic>))
-              .toList();
+        if (data is Map<String, dynamic>) {
+          return ShortDramaListResponse.fromJson(data);
         }
-        return [];
       }
-      return [];
+      return const ShortDramaListResponse(list: [], hasMore: false);
     } catch (e) {
-      return [];
+      return const ShortDramaListResponse(list: [], hasMore: false);
     }
   }
 
   /// 搜索短剧
-  static Future<List<ShortDrama>> search(String query) async {
+  /// GET /api/shortdrama/search?query={query}&page={page}&size={size}
+  /// 返回: {list: [...], hasMore: bool}
+  static Future<ShortDramaListResponse> search(
+    String query, {
+    int page = 1,
+    int size = 20,
+  }) async {
     try {
       String url = await _buildUrl('/api/shortdrama/search');
-      final uri = Uri.parse(url).replace(queryParameters: {
-        'q': query,
-      });
+      final queryParams = <String, String>{
+        'query': query,
+        'page': page.toString(),
+        'size': size.toString(),
+      };
+
+      final uri = Uri.parse(url).replace(queryParameters: queryParams);
       final headers = await _buildHeaders();
 
       final response = await http
@@ -112,22 +124,20 @@ class ShortDramaService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data is List) {
-          return data
-              .map((e) =>
-                  ShortDrama.fromJson(e as Map<String, dynamic>))
-              .toList();
+        if (data is Map<String, dynamic>) {
+          return ShortDramaListResponse.fromJson(data);
         }
-        return [];
       }
-      return [];
+      return const ShortDramaListResponse(list: [], hasMore: false);
     } catch (e) {
-      return [];
+      return const ShortDramaListResponse(list: [], hasMore: false);
     }
   }
 
   /// 获取短剧详情
-  static Future<ShortDrama> getDetail(String id) async {
+  /// GET /api/shortdrama/detail?id={id}
+  /// 返回: {id, title, poster, episodes, episodes_titles, source, ...}
+  static Future<ShortDramaDetail?> getDetail(String id) async {
     try {
       String url = await _buildUrl('/api/shortdrama/detail');
       final uri = Uri.parse(url).replace(queryParameters: {
@@ -141,33 +151,87 @@ class ShortDramaService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return ShortDrama.fromJson(data as Map<String, dynamic>);
+        if (data is Map<String, dynamic>) {
+          return ShortDramaDetail.fromJson(data);
+        }
       }
-      throw Exception('获取短剧详情失败');
+      return null;
     } catch (e) {
-      rethrow;
+      return null;
+    }
+  }
+
+  /// 解析短剧集数获取播放地址
+  /// GET /api/shortdrama/parse?id={id}&episode={episode}&proxy=true
+  /// 返回: {code, msg, data: {videoId, videoName, currentEpisode, totalEpisodes, parsedUrl, ...}}
+  static Future<ShortDramaParseResult> parseEpisode({
+    required int id,
+    required int episode,
+    String? name,
+    bool useProxy = true,
+  }) async {
+    try {
+      String url = await _buildUrl('/api/shortdrama/parse');
+      final queryParams = <String, String>{
+        'id': id.toString(),
+        'episode': episode.toString(),
+      };
+      if (useProxy) {
+        queryParams['proxy'] = 'true';
+      }
+      if (name != null && name.isNotEmpty) {
+        queryParams['name'] = name;
+      }
+
+      final uri = Uri.parse(url).replace(queryParameters: queryParams);
+      final headers = await _buildHeaders();
+
+      final response = await http
+          .get(uri, headers: headers)
+          .timeout(_timeout);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is Map<String, dynamic>) {
+          return ShortDramaParseResult.fromJson(data);
+        }
+      }
+      return const ShortDramaParseResult(code: -1, msg: '解析失败');
+    } catch (e) {
+      return ShortDramaParseResult(code: -1, msg: '网络错误: $e');
     }
   }
 
   /// 获取推荐短剧
-  static Future<List<ShortDrama>> getRecommend() async {
+  /// GET /api/shortdrama/recommend?category={category}&size={size}
+  /// 返回: [ShortDrama, ...]
+  static Future<List<ShortDrama>> getRecommend({
+    int? category,
+    int size = 10,
+  }) async {
     try {
-      final url = await _buildUrl('/api/shortdrama/recommend');
+      String url = await _buildUrl('/api/shortdrama/recommend');
+      final queryParams = <String, String>{
+        'size': size.toString(),
+      };
+      if (category != null) {
+        queryParams['category'] = category.toString();
+      }
+
+      final uri = Uri.parse(url).replace(queryParameters: queryParams);
       final headers = await _buildHeaders();
 
       final response = await http
-          .get(Uri.parse(url), headers: headers)
+          .get(uri, headers: headers)
           .timeout(_timeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data is List) {
           return data
-              .map((e) =>
-                  ShortDrama.fromJson(e as Map<String, dynamic>))
+              .map((e) => ShortDrama.fromJson(e as Map<String, dynamic>))
               .toList();
         }
-        return [];
       }
       return [];
     } catch (e) {

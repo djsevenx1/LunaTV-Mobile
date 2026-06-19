@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:luna_tv/models/short_drama.dart';
 import 'package:luna_tv/services/short_drama_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
@@ -18,10 +20,15 @@ class ShortDramaScreen extends StatefulWidget {
 
 class _ShortDramaScreenState extends State<ShortDramaScreen> {
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
 
   // 分类数据
-  List<String> _categories = [];
-  String _selectedCategory = '';
+  List<ShortDramaCategory> _categories = [];
+  int? _selectedCategoryId;
+
+  // 搜索
+  String _searchQuery = '';
+  bool _isSearchMode = false;
 
   // 列表数据
   final List<ShortDrama> _dramaList = [];
@@ -35,7 +42,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   void initState() {
     super.initState();
     _loadCategories();
-    _fetchDramaList(isRefresh: true);
     _scrollController.addListener(_handleScroll);
   }
 
@@ -43,6 +49,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   void dispose() {
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -52,6 +59,11 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     if (!mounted) return;
     setState(() {
       _categories = categories;
+      // 默认选中第一个分类
+      if (categories.isNotEmpty && _selectedCategoryId == null) {
+        _selectedCategoryId = categories.first.typeId;
+        _fetchDramaList(isRefresh: true);
+      }
     });
   }
 
@@ -69,7 +81,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         return;
       }
 
-      const double threshold = 50.0;
+      const double threshold = 100.0;
       if (position.pixels >= position.maxScrollExtent - threshold) {
         _loadMoreDramaList();
       }
@@ -79,6 +91,38 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   /// 获取短剧列表
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
+
+    // 搜索模式或分类模式
+    if (_isSearchMode && _searchQuery.isNotEmpty) {
+      setState(() {
+        _isLoading = true;
+        if (isRefresh) {
+          _dramaList.clear();
+          _page = 1;
+          _hasMore = true;
+        }
+        _errorMessage = null;
+      });
+
+      final result = await ShortDramaService.search(_searchQuery, page: _page);
+
+      if (!mounted) return;
+
+      setState(() {
+        _dramaList.addAll(result.list);
+        _hasMore = result.hasMore;
+        _isLoading = false;
+      });
+      return;
+    }
+
+    // 分类模式
+    if (_selectedCategoryId == null) {
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -90,25 +134,40 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _errorMessage = null;
     });
 
-    final category =
-        (_selectedCategory.isEmpty || _selectedCategory == '全部')
-            ? null
-            : _selectedCategory;
-
     final result = await ShortDramaService.getList(
-      category: category,
+      categoryId: _selectedCategoryId!,
       page: _page,
     );
 
     if (!mounted) return;
 
     setState(() {
-      _dramaList.addAll(result);
-      if (result.isEmpty) {
-        _hasMore = false;
-      }
+      _dramaList.addAll(result.list);
+      _hasMore = result.hasMore;
       _isLoading = false;
+      // 如果当前分类为空，自动跳到下一个分类
+      if (result.list.isEmpty && _categories.isNotEmpty && !_isSearchMode) {
+        _autoSwitchToNextCategory();
+      }
     });
+  }
+
+  /// 自动切换到下一个有内容的分类
+  void _autoSwitchToNextCategory() {
+    if (_selectedCategoryId == null || _categories.isEmpty) return;
+
+    final currentIndex = _categories.indexWhere(
+      (c) => c.typeId == _selectedCategoryId,
+    );
+    if (currentIndex >= 0 && currentIndex < _categories.length - 1) {
+      final nextCategory = _categories[currentIndex + 1];
+      // 延迟切换，避免在 build 中调用 setState
+      Future.microtask(() {
+        if (mounted) {
+          _onCategoryChanged(nextCategory.typeId);
+        }
+      });
+    }
   }
 
   /// 加载更多
@@ -122,25 +181,30 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
 
     _page++;
 
-    final category =
-        (_selectedCategory.isEmpty || _selectedCategory == '全部')
-            ? null
-            : _selectedCategory;
-
-    final result = await ShortDramaService.getList(
-      category: category,
-      page: _page,
-    );
-
-    if (!mounted) return;
-
-    setState(() {
-      _dramaList.addAll(result);
-      if (result.isEmpty) {
-        _hasMore = false;
-      }
-      _isLoadingMore = false;
-    });
+    if (_isSearchMode && _searchQuery.isNotEmpty) {
+      final result = await ShortDramaService.search(_searchQuery, page: _page);
+      if (!mounted) return;
+      setState(() {
+        _dramaList.addAll(result.list);
+        _hasMore = result.hasMore;
+        _isLoadingMore = false;
+      });
+    } else if (_selectedCategoryId != null) {
+      final result = await ShortDramaService.getList(
+        categoryId: _selectedCategoryId!,
+        page: _page,
+      );
+      if (!mounted) return;
+      setState(() {
+        _dramaList.addAll(result.list);
+        _hasMore = result.hasMore;
+        _isLoadingMore = false;
+      });
+    } else {
+      setState(() {
+        _isLoadingMore = false;
+      });
+    }
   }
 
   /// 下拉刷新
@@ -149,21 +213,45 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   }
 
   /// 切换分类
-  void _onCategoryChanged(String category) {
+  void _onCategoryChanged(int categoryId) {
     if (!mounted) return;
     setState(() {
-      _selectedCategory = category;
+      _selectedCategoryId = categoryId;
+      _isSearchMode = false;
+      _searchController.clear();
+    });
+    _fetchDramaList(isRefresh: true);
+  }
+
+  /// 执行搜索
+  void _onSearch(String query) {
+    if (query.isEmpty) {
+      _onClearSearch();
+      return;
+    }
+    setState(() {
+      _searchQuery = query;
+      _isSearchMode = true;
+    });
+    _fetchDramaList(isRefresh: true);
+  }
+
+  /// 清除搜索
+  void _onClearSearch() {
+    setState(() {
+      _searchQuery = '';
+      _isSearchMode = false;
+      _searchController.clear();
     });
     _fetchDramaList(isRefresh: true);
   }
 
   /// 点击短剧卡片
   void _onDramaTap(ShortDrama drama) {
-    // 跳转到播放器页面
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => _ShortDramaPlayerScreen(drama: drama),
+        builder: (context) => ShortDramaPlayerScreen(drama: drama),
       ),
     );
   }
@@ -182,6 +270,11 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
               SliverToBoxAdapter(
                 child: _buildHeader(themeService),
               ),
+              // 搜索栏
+              SliverToBoxAdapter(
+                child: _buildSearchBar(themeService),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
               // 分类横向滚动标签
               SliverToBoxAdapter(
                 child: _buildCategoryTabs(themeService),
@@ -200,7 +293,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
                   hasScrollBody: false,
                   child: _buildErrorState(themeService),
                 )
-              else if (_dramaList.isEmpty)
+              else if (_dramaList.isEmpty && !_isLoading)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _buildEmptyState(themeService),
@@ -228,7 +321,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '短剧',
+            '短剧频道',
             style: FontUtils.poppins(context,
               fontSize: 28,
               fontWeight: FontWeight.w600,
@@ -241,7 +334,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
           SizedBox(
             height: 20,
             child: Text(
-              '精选短剧内容',
+              '精彩短剧，一刷到底',
               style: FontUtils.poppins(context,
                 fontSize: 14,
                 color: themeService.isDarkMode
@@ -257,33 +350,84 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
+  /// 构建搜索栏
+  Widget _buildSearchBar(ThemeService themeService) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: themeService.isDarkMode
+              ? Colors.white.withOpacity(0.08)
+              : Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: themeService.isDarkMode
+                ? Colors.white.withOpacity(0.1)
+                : Colors.grey[300]!,
+            width: 0.5,
+          ),
+        ),
+        child: TextField(
+          controller: _searchController,
+          onSubmitted: _onSearch,
+          style: FontUtils.poppins(context, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: '搜索短剧...',
+            hintStyle: FontUtils.poppins(context,
+              fontSize: 14,
+              color: themeService.isDarkMode
+                  ? const Color(0xFF888888)
+                  : const Color(0xFF999999),
+            ),
+            prefixIcon: Icon(
+              Icons.search,
+              color: themeService.isDarkMode
+                  ? const Color(0xFF888888)
+                  : const Color(0xFF999999),
+              size: 20,
+            ),
+            suffixIcon: _isSearchMode
+                ? IconButton(
+                    icon: Icon(
+                      Icons.close,
+                      color: themeService.isDarkMode
+                          ? const Color(0xFF888888)
+                          : const Color(0xFF999999),
+                      size: 18,
+                    ),
+                    onPressed: _onClearSearch,
+                  )
+                : null,
+            border: InputBorder.none,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 构建分类横向滚动标签
   Widget _buildCategoryTabs(ThemeService themeService) {
+    if (_categories.isEmpty) {
+      return const SizedBox(height: 40);
+    }
     return SizedBox(
       height: 40,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          // "全部" 标签始终显示
-          _buildCategoryChip(
-            label: '全部',
-            isSelected: _selectedCategory.isEmpty || _selectedCategory == '全部',
-            themeService: themeService,
-          ),
-          const SizedBox(width: 8),
-          // API 返回的分类标签
-          ..._categories.map((category) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: _buildCategoryChip(
-                label: category,
-                isSelected: _selectedCategory == category,
-                themeService: themeService,
-              ),
-            );
-          }),
-        ],
+        children: _categories.map((category) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _buildCategoryChip(
+              label: category.typeName,
+              isSelected: _selectedCategoryId == category.typeId,
+              themeService: themeService,
+              onTap: () => _onCategoryChanged(category.typeId),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -293,9 +437,10 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     required String label,
     required bool isSelected,
     required ThemeService themeService,
+    required VoidCallback onTap,
   }) {
     return GestureDetector(
-      onTap: () => _onCategoryChanged(label),
+      onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -336,7 +481,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     final bool isPC = DeviceUtils.isPC();
     final double screenWidth = MediaQuery.of(context).size.width;
 
-    // 根据屏幕宽度计算每行卡片数量和卡片宽度
     int crossAxisCount;
     double cardWidth;
     double horizontalPadding;
@@ -351,8 +495,8 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       }
       horizontalPadding = 24;
     } else {
-      crossAxisCount = 2;
-      horizontalPadding = 16;
+      crossAxisCount = 3;
+      horizontalPadding = 12;
     }
 
     final double gridWidth = screenWidth - horizontalPadding * 2;
@@ -366,7 +510,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
           crossAxisCount: crossAxisCount,
           mainAxisSpacing: 16,
           crossAxisSpacing: spacing,
-          childAspectRatio: cardWidth / (cardWidth * 1.4 + 0),
+          childAspectRatio: cardWidth / (cardWidth * 1.5 + 22),
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) {
@@ -398,7 +542,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            '暂无短剧内容',
+            _isSearchMode ? '未找到相关短剧' : '暂无短剧内容',
             style: FontUtils.poppins(context,
               fontSize: 16,
               fontWeight: FontWeight.w500,
@@ -519,171 +663,278 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   }
 }
 
-/// 短剧播放器页面（占位）
-class _ShortDramaPlayerScreen extends StatefulWidget {
+/// 短剧播放器页面
+class ShortDramaPlayerScreen extends StatefulWidget {
   final ShortDrama drama;
 
-  const _ShortDramaPlayerScreen({required this.drama});
+  const ShortDramaPlayerScreen({super.key, required this.drama});
 
   @override
-  State<_ShortDramaPlayerScreen> createState() =>
-      _ShortDramaPlayerScreenState();
+  State<ShortDramaPlayerScreen> createState() => _ShortDramaPlayerScreenState();
 }
 
-class _ShortDramaPlayerScreenState extends State<_ShortDramaPlayerScreen> {
+class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
+  late final Player _player;
+  late final VideoController _controller;
+
+  bool _isLoading = true;
+  bool _isError = false;
+  String _errorMessage = '';
+  int _currentEpisode = 1;
+  int _totalEpisodes = 1;
+  String _videoUrl = '';
+  String _videoName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _player = Player();
+    _controller = VideoController(_player);
+    _videoName = widget.drama.name;
+    _parseAndPlay(1);
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  /// 解析并播放指定集数
+  Future<void> _parseAndPlay(int episode) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _isError = false;
+      _errorMessage = '';
+      _currentEpisode = episode;
+    });
+
+    try {
+      final result = await ShortDramaService.parseEpisode(
+        id: widget.drama.id,
+        episode: episode - 1, // API 的 episode 从 0 开始
+        name: widget.drama.name,
+      );
+
+      if (!mounted) return;
+
+      if (result.code == 0 && result.data != null) {
+        final data = result.data!;
+        _videoUrl = data.proxyUrl.isNotEmpty ? data.proxyUrl : data.parsedUrl;
+        _totalEpisodes = data.totalEpisodes > 0 ? data.totalEpisodes : 1;
+        _videoName = data.videoName.isNotEmpty ? data.videoName : widget.drama.name;
+
+        if (_videoUrl.isNotEmpty) {
+          await _player.open(Media(_videoUrl));
+          setState(() {
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
+            _isError = true;
+            _errorMessage = '未获取到播放地址';
+          });
+        }
+      } else {
+        setState(() {
+          _isLoading = false;
+          _isError = true;
+          _errorMessage = result.msg.isNotEmpty ? result.msg : '解析失败';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _isError = true;
+        _errorMessage = '播放错误: $e';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
         return Scaffold(
-          backgroundColor: themeService.isDarkMode
-              ? const Color(0xFF1e1e1e)
-              : Colors.white,
-          appBar: AppBar(
-            backgroundColor: themeService.isDarkMode
-                ? const Color(0xFF1e1e1e)
-                : Colors.white,
-            foregroundColor: themeService.isDarkMode
-                ? const Color(0xFFffffff)
-                : const Color(0xFF2c3e50),
-            elevation: 0,
-            title: Text(
-              widget.drama.title,
-              style: FontUtils.poppins(context,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 播放器占位区域
-                Container(
-                  width: double.infinity,
-                  height: 200,
-                  decoration: BoxDecoration(
-                    color: themeService.isDarkMode
-                        ? const Color(0xFF333333)
-                        : Colors.grey[200],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.play_circle_outline,
-                      size: 64,
-                      color: Color(0xFF27ae60),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                // 短剧信息
-                Text(
-                  widget.drama.title,
-                  style: FontUtils.poppins(context,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: themeService.isDarkMode
-                        ? const Color(0xFFffffff)
-                        : const Color(0xFF2c3e50),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // 集数标签
-                if (widget.drama.episodeCount > 0)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF27ae60).withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '共${widget.drama.episodeCount}集',
-                      style: FontUtils.poppins(context,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: const Color(0xFF27ae60),
+          backgroundColor: Colors.black,
+          body: Column(
+            children: [
+              // 播放器区域
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Video(controller: _controller),
+                    if (_isLoading)
+                      const CircularProgressIndicator(
+                        color: Color(0xFF27ae60),
                       ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                // 简介
-                if (widget.drama.description.isNotEmpty) ...[
-                  Text(
-                    '简介',
-                    style: FontUtils.poppins(context,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: themeService.isDarkMode
-                          ? const Color(0xFFffffff)
-                          : const Color(0xFF2c3e50),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.drama.description,
-                    style: FontUtils.poppins(context,
-                      fontSize: 14,
-                      color: themeService.isDarkMode
-                          ? const Color(0xFFb0b0b0)
-                          : const Color(0xFF7f8c8d),
-                    ).copyWith(height: 1.5),
-                  ),
-                ],
-                // 剧集列表
-                if (widget.drama.episodes.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    '选集',
-                    style: FontUtils.poppins(context,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: themeService.isDarkMode
-                          ? const Color(0xFFffffff)
-                          : const Color(0xFF2c3e50),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: widget.drama.episodes.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final episode = entry.value;
-                      return GestureDetector(
-                        onTap: () {
-                          // TODO: 播放指定集数
-                        },
-                        child: Container(
-                          width: 48,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: themeService.isDarkMode
-                                ? Colors.white.withOpacity(0.1)
-                                : Colors.grey[200],
-                            borderRadius: BorderRadius.circular(8),
+                    if (_isError)
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            color: Colors.redAccent,
+                            size: 48,
                           ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            '${index + 1}',
+                          const SizedBox(height: 12),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Text(
+                              _errorMessage,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextButton(
+                            onPressed: () => _parseAndPlay(_currentEpisode),
+                            child: const Text('重试'),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              // 信息和选集区域
+              Expanded(
+                child: Container(
+                  color: themeService.isDarkMode
+                      ? const Color(0xFF1e1e1e)
+                      : Colors.white,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 标题
+                        Text(
+                          _videoName,
+                          style: FontUtils.poppins(context,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: themeService.isDarkMode
+                                ? const Color(0xFFffffff)
+                                : const Color(0xFF2c3e50),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // 集数信息
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF27ae60).withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '第$_currentEpisode集 / 共$_totalEpisodes集',
+                                style: FontUtils.poppins(context,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: const Color(0xFF27ae60),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        // 简介
+                        if (widget.drama.description.isNotEmpty) ...[
+                          Text(
+                            '简介',
                             style: FontUtils.poppins(context,
-                              fontSize: 13,
+                              fontSize: 15,
                               fontWeight: FontWeight.w500,
                               color: themeService.isDarkMode
                                   ? const Color(0xFFffffff)
                                   : const Color(0xFF2c3e50),
                             ),
                           ),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.drama.description,
+                            style: FontUtils.poppins(context,
+                              fontSize: 14,
+                              color: themeService.isDarkMode
+                                  ? const Color(0xFFb0b0b0)
+                                  : const Color(0xFF7f8c8d),
+                            ).copyWith(height: 1.5),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        // 选集
+                        Text(
+                          '选集',
+                          style: FontUtils.poppins(context,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: themeService.isDarkMode
+                                ? const Color(0xFFffffff)
+                                : const Color(0xFF2c3e50),
+                          ),
                         ),
-                      );
-                    }).toList(),
+                        const SizedBox(height: 8),
+                        // 集数网格
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 5,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                            childAspectRatio: 1.5,
+                          ),
+                          itemCount: _totalEpisodes,
+                          itemBuilder: (context, index) {
+                            final episodeNum = index + 1;
+                            final isCurrent = episodeNum == _currentEpisode;
+                            return GestureDetector(
+                              onTap: () => _parseAndPlay(episodeNum),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isCurrent
+                                      ? const Color(0xFF27ae60)
+                                      : (themeService.isDarkMode
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.grey[200]),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '$episodeNum',
+                                  style: FontUtils.poppins(context,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: isCurrent
+                                        ? Colors.white
+                                        : (themeService.isDarkMode
+                                            ? const Color(0xFFffffff)
+                                            : const Color(0xFF2c3e50)),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ],
-            ),
+                ),
+              ),
+            ],
           ),
         );
       },

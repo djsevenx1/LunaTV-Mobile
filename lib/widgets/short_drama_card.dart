@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:luna_tv/models/short_drama.dart';
@@ -28,6 +27,20 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
   bool _isHovered = false;
   bool _isPlayButtonHovered = false;
 
+  String _formatScore(double score) {
+    return score > 0 ? score.toStringAsFixed(1) : '--';
+  }
+
+  String _formatUpdateTime(String updateTime) {
+    if (updateTime.isEmpty) return '';
+    try {
+      final date = DateTime.parse(updateTime);
+      return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return updateTime;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isPC = DeviceUtils.isPC();
@@ -35,7 +48,7 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
         final double width = widget.cardWidth ?? 120.0;
-        final double height = width * 1.4;
+        final double height = width * 1.5;
 
         final cardContent = SizedBox(
           width: width,
@@ -53,9 +66,9 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                       borderRadius: BorderRadius.circular(8),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
+                          color: Colors.black.withOpacity(0.15),
+                          blurRadius: 6,
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
@@ -109,7 +122,7 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                     left: 0,
                     right: 0,
                     child: Container(
-                      height: height * 0.45,
+                      height: height * 0.4,
                       decoration: BoxDecoration(
                         borderRadius: const BorderRadius.only(
                           bottomLeft: Radius.circular(8),
@@ -120,32 +133,70 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                           end: Alignment.bottomCenter,
                           colors: [
                             Colors.transparent,
-                            Colors.black.withOpacity(0.7),
+                            Colors.black.withOpacity(0.8),
                           ],
                           stops: const [0.0, 1.0],
                         ),
                       ),
                     ),
                   ),
-                  // 集数标签
-                  if (widget.drama.episodeCount > 0)
+                  // 左上角：集数标签（只在集数>1时显示）
+                  if (widget.drama.episodeCount > 1)
                     Positioned(
                       top: 4,
-                      right: 4,
+                      left: 4,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 4),
+                            horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF27ae60),
-                          borderRadius: BorderRadius.circular(5),
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          '共${widget.drama.episodeCount}集',
+                          '${widget.drama.episodeCount}集',
                           style: FontUtils.poppins(context,
                             color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
                           ),
+                        ),
+                      ),
+                    ),
+                  // 左上角下方：评分标签（只在评分>0时显示）
+                  if (widget.drama.voteAverage > 0)
+                    Positioned(
+                      top: widget.drama.episodeCount > 1 ? 28 : 4,
+                      left: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [
+                              Color(0xFFFBBF24),
+                              Color(0xFFF97316),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.star,
+                              color: Colors.white,
+                              size: 10,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              _formatScore(widget.drama.voteAverage),
+                              style: FontUtils.poppins(context,
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -155,10 +206,10 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                     left: 6,
                     right: 6,
                     child: Text(
-                      widget.drama.title,
+                      widget.drama.name,
                       style: FontUtils.poppins(context,
                         color: Colors.white,
-                        fontSize: width < 100 ? 12 : 13,
+                        fontSize: width < 100 ? 11 : 12,
                         fontWeight: FontWeight.w500,
                       ),
                       maxLines: 1,
@@ -234,6 +285,20 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                     ),
                 ],
               ),
+              const SizedBox(height: 6),
+              // 更新时间
+              if (_formatUpdateTime(widget.drama.updateTime).isNotEmpty)
+                Text(
+                  _formatUpdateTime(widget.drama.updateTime),
+                  style: FontUtils.poppins(context,
+                    fontSize: 10,
+                    color: themeService.isDarkMode
+                        ? const Color(0xFF888888)
+                        : const Color(0xFF999999),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
         );
