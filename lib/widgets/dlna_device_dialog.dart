@@ -287,12 +287,7 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
                                   ),
                               ],
                             ),
-                            subtitle: Text(
-                              '活跃时间: ${_formatTime(device.activeTime)}',
-                              style: TextStyle(
-                                color: Theme.of(context).textTheme.bodyMedium?.color,
-                              ),
-                            ),
+                            subtitle: null,
                             onTap: isCurrentDevice 
                                 ? null 
                                 : () {
