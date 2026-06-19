@@ -10,7 +10,7 @@ import 'package:luna_tv/widgets/main_layout.dart';
 import 'package:luna_tv/widgets/top_tab_switcher.dart';
 import 'package:luna_tv/widgets/favorites_grid.dart';
 import 'package:luna_tv/widgets/history_grid.dart';
-import 'package:luna_tv/search_screen.dart';
+import 'package:luna_tv/screens/search_screen.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/widgets/custom_refresh_indicator.dart';
 import 'package:luna_tv/models/play_record.dart';
@@ -19,12 +19,13 @@ import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/version_service.dart';
 import 'package:luna_tv/widgets/update_dialog.dart';
-import 'package:luna_tv/movie_screen.dart';
-import 'package:luna_tv/tv_screen.dart';
-import 'package:luna_tv/anime_screen.dart';
-import 'package:luna_tv/show_screen.dart';
-import 'package:luna_tv/player_screen.dart';
-import 'package:luna_tv/live_screen.dart';
+import 'package:luna_tv/screens/movie_screen.dart';
+import 'package:luna_tv/screens/tv_screen.dart';
+import 'package:luna_tv/screens/anime_screen.dart';
+import 'package:luna_tv/screens/show_screen.dart';
+import 'package:luna_tv/screens/player_screen.dart';
+import 'package:luna_tv/screens/live_screen.dart';
+import 'package:luna_tv/screens/short_drama_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -309,7 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 );
               },
-              onMoreTap: () => _onBottomNavChanged(4),
+              onMoreTap: () => _onBottomNavChanged(5),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
@@ -417,6 +418,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const MovieScreen(),
         const TvScreen(),
         const AnimeScreen(),
+        const ShortDramaScreen(),
         const ShowScreen(),
         const LiveScreen(),
       ],

@@ -41,6 +41,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _ThemeTile(),
           _DividerTile(),
           _M3uImportTile(),
+          _Section(label: '工具'),
+          const _YouTubeTile(),
+          const _BilibiliTile(),
+          const _NetdiskSearchTile(),
+          const _ReleaseCalendarTile(),
+          const _PlayStatsTile(),
+          _DividerTile(),
           _Section(label: '内容过滤'),
           const _FilterEntryTile(),
           _DividerTile(),
@@ -402,6 +409,86 @@ class _AboutTile extends StatelessWidget {
           applicationName: 'LunaTV-Mobile',
           applicationVersion: '1.0.0',
         );
+      },
+    );
+  }
+}
+
+class _YouTubeTile extends StatelessWidget {
+  const _YouTubeTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.smart_display_outlined),
+      title: const Text('YouTube'),
+      subtitle: const Text('YouTube 视频搜索'),
+      onTap: () {
+        Navigator.of(context).pushNamed('/youtube');
+      },
+    );
+  }
+}
+
+class _BilibiliTile extends StatelessWidget {
+  const _BilibiliTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.tv_outlined),
+      title: const Text('Bilibili'),
+      subtitle: const Text('Bilibili 视频搜索'),
+      onTap: () {
+        Navigator.of(context).pushNamed('/bilibili');
+      },
+    );
+  }
+}
+
+class _NetdiskSearchTile extends StatelessWidget {
+  const _NetdiskSearchTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.cloud_search_outlined),
+      title: const Text('网盘搜索'),
+      subtitle: const Text('搜索百度网盘、阿里云盘等资源'),
+      onTap: () {
+        Navigator.of(context).pushNamed('/netdisk');
+      },
+    );
+  }
+}
+
+class _ReleaseCalendarTile extends StatelessWidget {
+  const _ReleaseCalendarTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.calendar_month_outlined),
+      title: const Text('发布日历'),
+      subtitle: const Text('查看影视发布时间'),
+      onTap: () {
+        Navigator.of(context).pushNamed('/release-calendar');
+      },
+    );
+  }
+}
+
+class _PlayStatsTile extends StatelessWidget {
+  const _PlayStatsTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.bar_chart_outlined),
+      title: const Text('播放统计'),
+      subtitle: const Text('查看播放记录统计'),
+      onTap: () {
+        Navigator.of(context).pushNamed('/play-stats');
       },
     );
   }

@@ -1,17 +1,15 @@
-import 'package:luna_tv/widgets/user_menu.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
-import 'package:luna_tv/services/search_service.dart';
-import 'package:luna_tv/services/user_data_service.dart';
-import 'package:luna_tv/services/theme_service.dart';
+import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/search_service.dart';
+import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
-import 'package:luna_tv/user_menu.dart';
-import 'dart:io' show Platform;
-import 'dart:async';
-import 'package:luna_tv/windows_title_bar.dart';
+import 'package:luna_tv/widgets/user_menu.dart';
 
 class MainLayout extends StatefulWidget {
   final Widget content;
@@ -928,6 +926,7 @@ const SizedBox(width: 12),
       {'icon': LucideIcons.video, 'label': '电影'},
       {'icon': LucideIcons.tv, 'label': '剧集'},
       {'icon': LucideIcons.cat, 'label': '动漫'},
+      {'icon': LucideIcons.clapperboard, 'label': '短剧'},
       {'icon': LucideIcons.clover, 'label': '综艺'},
       {'icon': LucideIcons.radio, 'label': '直播'},
     ];
