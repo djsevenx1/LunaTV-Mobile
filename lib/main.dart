@@ -143,7 +143,8 @@ class _AppWrapperState extends State<AppWrapper> {
       if (hasAutoLoginData && mounted) {
         // 尝试自动登录
         try {
-          final success = await ApiService.autoLogin();
+          final resp = await ApiService.autoLogin();
+          final success = resp.success;
           if (success && mounted) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (context) => const HomeScreen()),

@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:luna_tv/mobile_player_controls.dart';
-import 'package:luna_tv/pc_player_controls.dart';
-import 'package:luna_tv/video_player_surface.dart';
+import 'package:luna_tv/widgets/mobile_player_controls.dart';
+import 'package:luna_tv/widgets/pc_player_controls.dart';
+import 'package:luna_tv/widgets/video_player_surface.dart';
 
 class VideoPlayerWidget extends StatefulWidget {
   final VideoPlayerSurface surface;

@@ -145,18 +145,18 @@ class _LoginScreenState extends State<LoginScreen> {
         // 订阅链接输入框
         TextFormField(
           controller: _subscriptionUrlController,
-          style: FontUtils.poppins(
+          style: FontUtils.poppins(context, 
             fontSize: 16,
             color: const Color(0xFF2c3e50),
           ),
           decoration: InputDecoration(
             labelText: '订阅链接',
-            labelStyle: FontUtils.poppins(
+            labelStyle: FontUtils.poppins(context, 
               color: const Color(0xFF7f8c8d),
               fontSize: 14,
             ),
             hintText: '请输入订阅链接',
-            hintStyle: FontUtils.poppins(
+            hintStyle: FontUtils.poppins(context, 
               color: const Color(0xFFbdc3c7),
               fontSize: 16,
             ),
@@ -230,7 +230,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(width: 12),
                     Text(
                       '登录中...',
-                      style: FontUtils.poppins(
+                      style: FontUtils.poppins(context, 
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                         color: Colors.white,
@@ -240,7 +240,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 )
               : Text(
                   '登录',
-                  style: FontUtils.poppins(
+                  style: FontUtils.poppins(context, 
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
                     letterSpacing: 1.0,
@@ -284,7 +284,7 @@ class _LoginScreenState extends State<LoginScreen> {
       SnackBar(
         content: Text(
           message,
-          style: FontUtils.poppins(
+          style: FontUtils.poppins(context, 
             color: Colors.white,
             fontSize: 14,
           ),
@@ -430,7 +430,7 @@ class _LoginScreenState extends State<LoginScreen> {
             builder: (context) => AlertDialog(
               title: Text(
                 '提示',
-                style: FontUtils.poppins(
+                style: FontUtils.poppins(context, 
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
                   color: const Color(0xFF2c3e50),
@@ -438,7 +438,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               content: Text(
                 '检测到已有本地模式内容且订阅链接不一致，是否清空全部本地模式存储？',
-                style: FontUtils.poppins(
+                style: FontUtils.poppins(context, 
                   fontSize: 14,
                   color: const Color(0xFF2c3e50),
                 ),
@@ -448,7 +448,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () => Navigator.of(context).pop(false),
                   child: Text(
                     '否',
-                    style: FontUtils.poppins(
+                    style: FontUtils.poppins(context, 
                       fontSize: 14,
                       color: const Color(0xFF7f8c8d),
                     ),
@@ -458,7 +458,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () => Navigator.of(context).pop(true),
                   child: Text(
                     '是',
-                    style: FontUtils.poppins(
+                    style: FontUtils.poppins(context, 
                       fontSize: 14,
                       color: const Color(0xFFe74c3c),
                       fontWeight: FontWeight.w600,
@@ -597,18 +597,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     // URL 输入框
                     TextFormField(
                       controller: _urlController,
-                      style: FontUtils.poppins(
+                      style: FontUtils.poppins(context, 
                         fontSize: 16,
                         color: const Color(0xFF2c3e50),
                       ),
                       decoration: InputDecoration(
                         labelText: '服务器地址',
-                        labelStyle: FontUtils.poppins(
+                        labelStyle: FontUtils.poppins(context, 
                           color: const Color(0xFF7f8c8d),
                           fontSize: 14,
                         ),
                         hintText: 'https://example.com',
-                        hintStyle: FontUtils.poppins(
+                        hintStyle: FontUtils.poppins(context, 
                           color: const Color(0xFFbdc3c7),
                           fontSize: 16,
                         ),
@@ -655,18 +655,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     // 用户名输入框
                     TextFormField(
                       controller: _usernameController,
-                      style: FontUtils.poppins(
+                      style: FontUtils.poppins(context, 
                         fontSize: 16,
                         color: const Color(0xFF2c3e50),
                       ),
                       decoration: InputDecoration(
                         labelText: '用户名',
-                        labelStyle: FontUtils.poppins(
+                        labelStyle: FontUtils.poppins(context, 
                           color: const Color(0xFF7f8c8d),
                           fontSize: 14,
                         ),
                         hintText: '请输入用户名',
-                        hintStyle: FontUtils.poppins(
+                        hintStyle: FontUtils.poppins(context, 
                           color: const Color(0xFFbdc3c7),
                           fontSize: 16,
                         ),
@@ -708,18 +708,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     TextFormField(
                       controller: _passwordController,
                       obscureText: !_isPasswordVisible,
-                      style: FontUtils.poppins(
+                      style: FontUtils.poppins(context, 
                         fontSize: 16,
                         color: const Color(0xFF2c3e50),
                       ),
                       decoration: InputDecoration(
                         labelText: '密码',
-                        labelStyle: FontUtils.poppins(
+                        labelStyle: FontUtils.poppins(context, 
                           color: const Color(0xFF7f8c8d),
                           fontSize: 14,
                         ),
                         hintText: '请输入密码',
-                        hintStyle: FontUtils.poppins(
+                        hintStyle: FontUtils.poppins(context, 
                           color: const Color(0xFFbdc3c7),
                           fontSize: 16,
                         ),
@@ -806,7 +806,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 const SizedBox(width: 12),
                                 Text(
                                   '登录中...',
-                                  style: FontUtils.poppins(
+                                  style: FontUtils.poppins(context, 
                                     fontSize: 16,
                                     fontWeight: FontWeight.w500,
                                     color: Colors.white,
@@ -816,7 +816,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             )
                           : Text(
                               '登录',
-                              style: FontUtils.poppins(
+                              style: FontUtils.poppins(context, 
                                 fontSize: 16,
                                 fontWeight: FontWeight.w500,
                                 letterSpacing: 1.0,
@@ -864,18 +864,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       // URL 输入框
                       TextFormField(
                         controller: _urlController,
-                        style: FontUtils.poppins(
+                        style: FontUtils.poppins(context, 
                           fontSize: 16,
                           color: const Color(0xFF2c3e50),
                         ),
                         decoration: InputDecoration(
                           labelText: '服务器地址',
-                          labelStyle: FontUtils.poppins(
+                          labelStyle: FontUtils.poppins(context, 
                             color: const Color(0xFF7f8c8d),
                             fontSize: 14,
                           ),
                           hintText: 'https://example.com',
-                          hintStyle: FontUtils.poppins(
+                          hintStyle: FontUtils.poppins(context, 
                             color: const Color(0xFFbdc3c7),
                             fontSize: 16,
                           ),
@@ -922,18 +922,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       // 用户名输入框
                       TextFormField(
                         controller: _usernameController,
-                        style: FontUtils.poppins(
+                        style: FontUtils.poppins(context, 
                           fontSize: 16,
                           color: const Color(0xFF2c3e50),
                         ),
                         decoration: InputDecoration(
                           labelText: '用户名',
-                          labelStyle: FontUtils.poppins(
+                          labelStyle: FontUtils.poppins(context, 
                             color: const Color(0xFF7f8c8d),
                             fontSize: 14,
                           ),
                           hintText: '请输入用户名',
-                          hintStyle: FontUtils.poppins(
+                          hintStyle: FontUtils.poppins(context, 
                             color: const Color(0xFFbdc3c7),
                             fontSize: 16,
                           ),
@@ -975,18 +975,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextFormField(
                         controller: _passwordController,
                         obscureText: !_isPasswordVisible,
-                        style: FontUtils.poppins(
+                        style: FontUtils.poppins(context, 
                           fontSize: 16,
                           color: const Color(0xFF2c3e50),
                         ),
                         decoration: InputDecoration(
                           labelText: '密码',
-                          labelStyle: FontUtils.poppins(
+                          labelStyle: FontUtils.poppins(context, 
                             color: const Color(0xFF7f8c8d),
                             fontSize: 14,
                           ),
                           hintText: '请输入密码',
-                          hintStyle: FontUtils.poppins(
+                          hintStyle: FontUtils.poppins(context, 
                             color: const Color(0xFFbdc3c7),
                             fontSize: 16,
                           ),
@@ -1073,7 +1073,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   const SizedBox(width: 12),
                                   Text(
                                     '登录中...',
-                                    style: FontUtils.poppins(
+                                    style: FontUtils.poppins(context, 
                                       fontSize: 16,
                                       fontWeight: FontWeight.w500,
                                       color: Colors.white,
@@ -1083,7 +1083,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               )
                             : Text(
                                 '登录',
-                                style: FontUtils.poppins(
+                                style: FontUtils.poppins(context, 
                                   fontSize: 16,
                                   fontWeight: FontWeight.w500,
                                   letterSpacing: 1.0,
