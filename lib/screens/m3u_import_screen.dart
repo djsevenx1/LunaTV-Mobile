@@ -86,7 +86,7 @@ class _M3uImportScreenState extends State<M3uImportScreen> {
     }
 
     // 同时切换到本地模式
-    await UserDataService.setLocalMode(true);
+    await UserDataService.saveIsLocalMode(true);
 
     setState(() {
       _success = '导入成功，共 $savedCount 个源。已自动切换到本地模式。';

@@ -76,7 +76,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
                       const SizedBox(height: 20),
                       Text(
                         '播放排行',
-                        style: FontUtils.poppins(
+                        style: FontUtils.poppins(context, 
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                           color: isDark
@@ -179,7 +179,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
               const SizedBox(width: 6),
               Text(
                 label,
-                style: FontUtils.poppins(
+                style: FontUtils.poppins(context, 
                   fontSize: 12,
                   color: isDark
                       ? const Color(0xFFb0b0b0)
@@ -191,7 +191,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
           const SizedBox(height: 8),
           Text(
             value,
-            style: FontUtils.poppins(
+            style: FontUtils.poppins(context, 
               fontSize: 20,
               fontWeight: FontWeight.w700,
               color: isDark
@@ -270,7 +270,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
               children: [
                 Text(
                   stat.title,
-                  style: FontUtils.poppins(
+                  style: FontUtils.poppins(context, 
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: isDark
@@ -352,7 +352,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
       ),
       child: Text(
         type,
-        style: FontUtils.poppins(
+        style: FontUtils.poppins(context, 
           fontSize: 11,
           fontWeight: FontWeight.w500,
           color: const Color(0xFF27ae60),
@@ -403,7 +403,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
           const SizedBox(height: 16),
           Text(
             '暂无播放记录',
-            style: FontUtils.poppins(
+            style: FontUtils.poppins(context, 
               fontSize: 16,
               color: isDark
                   ? const Color(0xFFb0b0b0)
@@ -413,7 +413,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
           const SizedBox(height: 8),
           Text(
             '观看影视内容后这里会显示统计信息',
-            style: FontUtils.poppins(
+            style: FontUtils.poppins(context, 
               fontSize: 13,
               color: isDark
                   ? Colors.white.withOpacity(0.4)

@@ -183,7 +183,7 @@ class _NetdiskSearchScreenState extends State<NetdiskSearchScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.cloud_search_outlined,
+            Icons.cloud_outlined,
             size: 72,
             color: isDark
                 ? Colors.white.withOpacity(0.3)
