@@ -34,7 +34,7 @@ dependencies:
   # bs58check: ^1.0.0
   lucide_icons_flutter: ^3.1.14+1
   # 编码
-  gbk_codec: ^0.2.0
+  gbk_codec: ^0.4.0
   # XML
   xml: ^6.5.0
 
