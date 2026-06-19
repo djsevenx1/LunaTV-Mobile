@@ -7,7 +7,7 @@ import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
-import 'package:luna_tv/video_card.dart';
+import 'package:luna_tv/widgets/video_card.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 
 /// 搜索结果网格组件

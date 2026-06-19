@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math';
 import 'package:luna_tv/models/douban_movie.dart';
-import 'package:luna_tv/api/api_service.dart';
+import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 

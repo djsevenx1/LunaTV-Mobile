@@ -21,7 +21,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       appBar: AppBar(
         title: const Text('收藏夹'),
       ),
-      body: const FavoritesGrid(),
+      body: FavoritesGrid(
+        onVideoTap: (playRecord) {},
+      ),
     );
   }
 }

@@ -9,7 +9,7 @@ import 'package:luna_tv/services/subscription_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/windows_title_bar.dart';
-import 'package:luna_tv/home_screen.dart';
+import 'package:luna_tv/screens/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

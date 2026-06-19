@@ -15,7 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
 import 'package:luna_tv/widgets/bangumi_grid.dart';
 import 'package:luna_tv/widgets/simple_tab_switcher.dart';
-import 'package:luna_tv/player_screen.dart';
+import 'package:luna_tv/screens/player_screen.dart';
 import 'package:luna_tv/widgets/filter_pill_hover.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -515,8 +515,9 @@ class _AnimeScreenState extends State<AnimeScreen> {
         context,
         MaterialPageRoute(
           builder: (context) => PlayerScreen(
+            source: videoInfo.source,
+            id: videoInfo.id,
             title: videoInfo.title,
-            stype: 'movie',
             year: videoInfo.year,
           ),
         ),
@@ -527,6 +528,8 @@ class _AnimeScreenState extends State<AnimeScreen> {
         context,
         MaterialPageRoute(
           builder: (context) => PlayerScreen(
+            source: videoInfo.source,
+            id: videoInfo.id,
             title: videoInfo.title,
             year: videoInfo.year,
           ),

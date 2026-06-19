@@ -21,7 +21,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       appBar: AppBar(
         title: const Text('播放历史'),
       ),
-      body: const HistoryGrid(),
+      body: HistoryGrid(
+        onVideoTap: (playRecord) {},
+      ),
     );
   }
 }

@@ -12,7 +12,7 @@ import 'package:luna_tv/services/local_search_cache_service.dart';
 import 'package:luna_tv/services/version_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
-import 'package:luna_tv/update_dialog.dart';
+import 'package:luna_tv/widgets/update_dialog.dart';
 
 class UserMenu extends StatefulWidget {
   final bool isDarkMode;

@@ -1,6 +1,8 @@
 // 省略最前面的 import 不变，保留到 line 30
 // ... 为节省 token，我先写核心修改，完整文件保留原 import 头部
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -19,7 +21,7 @@ import 'package:luna_tv/widgets/filter_pill_hover.dart';
 import 'package:luna_tv/widgets/main_layout.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
-import 'package:luna_tv/player_screen.dart';
+import 'package:luna_tv/screens/player_screen.dart';
 
 // SearchProgress model 已经在 sse_search_service.dart 定义过，懒得重复，直接引用
 
@@ -114,7 +116,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   void _performSearch(String query) async {
-    if (_searchService.isStreaming) _searchService.cancel();
+    if (_searchService.isConnected) unawaited(_searchService.stopSearch());
     setState(() {
       _hasSearched = true;
       _searchResults.clear();
@@ -123,7 +125,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       _searchProgress = null;
     });
 
-    _incrementalResultsSubscription = _searchService.streamResults(query).listen(
+    _incrementalResultsSubscription = _searchService.incrementalResultsStream.listen(
       (results) {
         if (mounted) {
           setState(() {
@@ -136,7 +138,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       },
     );
 
-    _progressSubscription = _searchService.streamProgress().listen((progress) {
+    _progressSubscription = _searchService.progressStream.listen((progress) {
       if (mounted) {
         setState(() {
           _searchProgress = progress;
@@ -145,11 +147,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       }
     });
 
-    _errorSubscription = _searchService.streamErrors().listen((err) {
+    _errorSubscription = _searchService.errorStream.listen((err) {
       if (mounted) setState(() => _searchError = err);
     });
 
-    _searchService.start(query);
+    unawaited(_searchService.startSearch(query));
   }
 
   @override
@@ -158,7 +160,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     _incrementalResultsSubscription?.cancel();
     _progressSubscription?.cancel();
     _errorSubscription?.cancel();
-    _searchService.cancel();
+    _searchService.stopSearch();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
@@ -257,10 +259,10 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
+          source: video.source,
+          id: video.id,
           title: video.title,
           year: video.year,
-          source: video.id,
-          id: video.source,
         ),
       ),
     );
@@ -272,7 +274,19 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         _navigateToPlayer(video);
         break;
       case VideoMenuAction.favorite:
-        PageCacheService().toggleFavorite(video);
+        unawaited(PageCacheService().toggleFavorite(
+          video.source,
+          video.id,
+          {
+            'title': video.title,
+            'source_name': video.sourceName,
+            'year': video.year,
+            'cover': video.cover,
+            'total_episodes': video.totalEpisodes,
+            'save_time': video.saveTime,
+          },
+          context,
+        ));
         break;
       case VideoMenuAction.doubanDetail:
         Navigator.of(context, rootNavigator: true).pushNamed(

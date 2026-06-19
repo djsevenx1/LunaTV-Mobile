@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/favorite_item.dart';
-import 'package:luna_tv/api/api_service.dart';
+import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/data_operation_interface.dart';
 import 'package:luna_tv/services/user_data_service.dart';
@@ -386,6 +386,19 @@ class PageCacheService
     } catch (e) {
       return DataOperationResult.error('取消收藏异常: ${e.toString()}');
     }
+  }
+
+  /// 切换收藏状态
+  Future<DataOperationResult<void>> toggleFavorite(
+    String source,
+    String id,
+    Map<String, dynamic> favoriteData,
+    BuildContext context,
+  ) async {
+    if (isFavoritedSync(source, id)) {
+      return removeFavorite(source, id, context);
+    }
+    return addFavorite(source, id, favoriteData, context);
   }
 
   @override

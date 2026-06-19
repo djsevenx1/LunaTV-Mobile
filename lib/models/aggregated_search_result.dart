@@ -1,4 +1,4 @@
-import 'package:luna_tv/search_result.dart';
+import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 
 /// 聚合搜索结果数据模型

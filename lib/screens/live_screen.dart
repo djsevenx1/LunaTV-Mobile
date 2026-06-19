@@ -6,7 +6,7 @@ import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:provider/provider.dart';
-import 'package:luna_tv/live_player_screen.dart';
+import 'package:luna_tv/screens/live_player_screen.dart';
 import 'package:luna_tv/widgets/filter_pill_hover.dart';
 import 'package:luna_tv/widgets/filter_options_selector.dart';
 

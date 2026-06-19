@@ -11,7 +11,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/bangumi_service.dart';
 import 'package:luna_tv/utils/image_url.dart';
-import 'package:luna_tv/fullscreen_image_viewer.dart';
+import 'package:luna_tv/widgets/fullscreen_image_viewer.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 

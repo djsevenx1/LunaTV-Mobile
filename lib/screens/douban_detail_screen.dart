@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:luna_tv/services/douban_service.dart';
+import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/models/douban_movie.dart';
 
 class DoubanDetailScreen extends StatefulWidget {
@@ -38,7 +39,7 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _future = DoubanService.getDoubanDetails(widget.id, widget.kind);
+    _future = DoubanService.getDoubanDetails(context, doubanId: widget.id);
   }
 
   @override
@@ -73,10 +74,10 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen> {
                   );
                 }
                 final resp = snapshot.data;
-                if (resp == null || resp.error != null) {
+                if (resp == null || !resp.success) {
                   return Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text('加载失败：${resp?.error ?? "未知错误"}', style: const TextStyle(color: Colors.red)),
+                    child: Text('加载失败：${resp?.message ?? "未知错误"}', style: const TextStyle(color: Colors.red)),
                   );
                 }
                 final d = resp.data!;

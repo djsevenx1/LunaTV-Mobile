@@ -7,7 +7,7 @@ class PlayerScreen extends StatefulWidget {
   final String source;
   final String id;
   final String title;
-  final int? year;
+  final String? year;
 
   const PlayerScreen({
     super.key,

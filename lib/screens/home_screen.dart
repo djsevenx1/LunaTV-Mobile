@@ -231,8 +231,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onMovieTap: (videoInfo) {
                 _navigateToPlayer(
                   PlayerScreen(
+                    source: videoInfo.source,
+                    id: videoInfo.id,
                     title: videoInfo.title,
-                    stype: 'movie',
                     year: videoInfo.year,
                   ),
                 );
@@ -242,8 +243,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
                     PlayerScreen(
+                      source: videoInfo.source,
+                      id: videoInfo.id,
                       title: videoInfo.title,
-                      stype: 'movie',
                       year: videoInfo.year,
                     ),
                   );
@@ -257,6 +259,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onTvTap: (videoInfo) {
                 _navigateToPlayer(
                   PlayerScreen(
+                    source: videoInfo.source,
+                    id: videoInfo.id,
                     title: videoInfo.title,
                     year: videoInfo.year,
                   ),
@@ -267,6 +271,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
                     PlayerScreen(
+                      source: videoInfo.source,
+                      id: videoInfo.id,
                       title: videoInfo.title,
                       year: videoInfo.year,
                     ),
@@ -281,6 +287,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onBangumiTap: (videoInfo) {
                 _navigateToPlayer(
                   PlayerScreen(
+                    source: videoInfo.source,
+                    id: videoInfo.id,
                     title: videoInfo.title,
                     year: videoInfo.year,
                   ),
@@ -291,6 +299,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
                     PlayerScreen(
+                      source: videoInfo.source,
+                      id: videoInfo.id,
                       title: videoInfo.title,
                       year: videoInfo.year,
                     ),
@@ -305,6 +315,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onShowTap: (videoInfo) {
                 _navigateToPlayer(
                   PlayerScreen(
+                    source: videoInfo.source,
+                    id: videoInfo.id,
                     title: videoInfo.title,
                     year: videoInfo.year,
                   ),
@@ -315,6 +327,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
                     PlayerScreen(
+                      source: videoInfo.source,
+                      id: videoInfo.id,
                       title: videoInfo.title,
                       year: videoInfo.year,
                     ),

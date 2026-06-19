@@ -3,7 +3,7 @@ import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/douban_service.dart';
-import 'package:luna_tv/recommendation_section.dart';
+import 'package:luna_tv/widgets/recommendation_section.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 
 /// 热门电影组件

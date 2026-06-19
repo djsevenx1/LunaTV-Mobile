@@ -10,7 +10,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
-import 'package:luna_tv/player_screen.dart';
+import 'package:luna_tv/screens/player_screen.dart';
 import 'package:luna_tv/widgets/filter_pill_hover.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -433,8 +433,9 @@ class _MovieScreenState extends State<MovieScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => PlayerScreen(
+          source: videoInfo.source,
+          id: videoInfo.id,
           title: videoInfo.title,
-          stype: 'movie',
           year: videoInfo.year,
         ),
       ),

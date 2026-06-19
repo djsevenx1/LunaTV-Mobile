@@ -33,6 +33,11 @@ dependencies:
   # bitsdojo_window: ^0.1.5
   # bs58check: ^1.0.0
   lucide_icons_flutter: ^3.1.14+1
+  # 编码
+  gbk_codec: ^0.2.0
+  # XML
+  xml: ^6.5.0
+
   # gal: ^2.0.1
   # app_settings: ^4.1.1
 
