@@ -113,7 +113,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
         setState(() => _currentVolume = value);
       }
     }).catchError((_) {});
-    ScreenBrightness().application.then((value) {
+    ScreenBrightness().current.then((value) {
       if (mounted) {
         setState(() => _currentBrightness = value);
       }
@@ -324,7 +324,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
           (_currentBrightness + brightnessChange).clamp(0.0, 1.0);
       _showBrightnessIndicator = true;
     });
-    ScreenBrightness().setApplicationScreenBrightness(_currentBrightness);
+    ScreenBrightness().setScreenBrightness(_currentBrightness);
     _startBrightnessHideTimer();
   }
 
