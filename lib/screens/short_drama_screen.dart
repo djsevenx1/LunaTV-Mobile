@@ -811,6 +811,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   Widget build(BuildContext context) {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
+        final isDark = themeService.isDarkMode;
         return PopScope(
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) {
