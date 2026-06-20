@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/image_url.dart';
 
 class SourceSpeed {
   String quality = '';
@@ -279,35 +280,68 @@ class _SourcePanelItemWithHoverState extends State<_SourcePanelItemWithHover> {
                         borderRadius: BorderRadius.circular(8),
                         child: AspectRatio(
                           aspectRatio: 2 / 3,
-                          child: CachedNetworkImage(
-                            imageUrl: widget.source.poster,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => Container(
-                              decoration: BoxDecoration(
-                                color: widget.isDarkMode
-                                    ? const Color(0xFF333333)
-                                    : Colors.grey[300],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            errorWidget: (context, url, error) => Container(
-                              decoration: BoxDecoration(
-                                color: widget.isDarkMode
-                                    ? const Color(0xFF333333)
-                                    : Colors.grey[300],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(
-                                Icons.movie,
-                                color: widget.isDarkMode
-                                    ? const Color(0xFF666666)
-                                    : Colors.grey,
-                                size: 40,
-                              ),
-                            ),
-                            fadeInDuration: const Duration(milliseconds: 200),
-                            fadeOutDuration: const Duration(milliseconds: 100),
-                          ),
+                          child: widget.source.poster.isNotEmpty
+                              ? FutureBuilder<String>(
+                                  future: getImageUrl(
+                                      widget.source.poster,
+                                      widget.source.source),
+                                  builder: (context, snapshot) {
+                                    final String imageUrl = snapshot.data ??
+                                        widget.source.poster;
+                                    final headers = getImageRequestHeaders(
+                                        imageUrl, widget.source.source);
+                                    return CachedNetworkImage(
+                                      imageUrl: imageUrl,
+                                      fit: BoxFit.cover,
+                                      httpHeaders: headers,
+                                      placeholder: (context, url) => Container(
+                                        decoration: BoxDecoration(
+                                          color: widget.isDarkMode
+                                              ? const Color(0xFF333333)
+                                              : Colors.grey[300],
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      errorWidget: (context, url, error) =>
+                                          Container(
+                                        decoration: BoxDecoration(
+                                          color: widget.isDarkMode
+                                              ? const Color(0xFF333333)
+                                              : Colors.grey[300],
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(
+                                          Icons.movie,
+                                          color: widget.isDarkMode
+                                              ? const Color(0xFF666666)
+                                              : Colors.grey,
+                                          size: 40,
+                                        ),
+                                      ),
+                                      fadeInDuration:
+                                          const Duration(milliseconds: 200),
+                                      fadeOutDuration:
+                                          const Duration(milliseconds: 100),
+                                    );
+                                  },
+                                )
+                              : Container(
+                                  decoration: BoxDecoration(
+                                    color: widget.isDarkMode
+                                        ? const Color(0xFF333333)
+                                        : Colors.grey[300],
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    Icons.movie,
+                                    color: widget.isDarkMode
+                                        ? const Color(0xFF666666)
+                                        : Colors.grey,
+                                    size: 40,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 12),

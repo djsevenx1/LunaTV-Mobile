@@ -4,6 +4,7 @@ import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
 /// LunaTV 风格的豆瓣详情页 (对齐 Web 版 PlayInfoPanel)
@@ -304,25 +305,38 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
         // 海报
         ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: CachedNetworkImage(
-            imageUrl: d.poster,
+          child: SizedBox(
             width: 100,
             height: 150,
-            fit: BoxFit.cover,
-            placeholder: (c, u) => Container(
-              width: 100,
-              height: 150,
-              color: isDark
-                  ? const Color(0xFF1F2937)
-                  : const Color(0xFFE5E7EB),
-            ),
-            errorWidget: (c, u, e) => Container(
-              width: 100,
-              height: 150,
-              color: isDark
-                  ? const Color(0xFF1F2937)
-                  : const Color(0xFFE5E7EB),
-              child: const Icon(Icons.movie_outlined, color: Colors.grey),
+            child: FutureBuilder<String>(
+              future: getImageUrl(d.poster, 'douban'),
+              builder: (context, snapshot) {
+                final imageUrl = snapshot.data ?? d.poster;
+                final headers = getImageRequestHeaders(imageUrl, 'douban');
+                return CachedNetworkImage(
+                  imageUrl: imageUrl,
+                  width: 100,
+                  height: 150,
+                  fit: BoxFit.cover,
+                  httpHeaders: headers,
+                  placeholder: (c, u) => Container(
+                    width: 100,
+                    height: 150,
+                    color: isDark
+                        ? const Color(0xFF1F2937)
+                        : const Color(0xFFE5E7EB),
+                  ),
+                  errorWidget: (c, u, e) => Container(
+                    width: 100,
+                    height: 150,
+                    color: isDark
+                        ? const Color(0xFF1F2937)
+                        : const Color(0xFFE5E7EB),
+                    child: const Icon(Icons.movie_outlined,
+                        color: Colors.grey),
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -813,20 +827,29 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: CachedNetworkImage(
-                      imageUrl: r.poster,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      placeholder: (c, u) => Container(
-                        color: isDark
-                            ? const Color(0xFF1F2937)
-                            : const Color(0xFFE5E7EB),
-                      ),
-                      errorWidget: (c, u, e) => Container(
-                        color: isDark
-                            ? const Color(0xFF1F2937)
-                            : const Color(0xFFE5E7EB),
-                      ),
+                    child: FutureBuilder<String>(
+                      future: getImageUrl(r.poster, 'douban'),
+                      builder: (context, snapshot) {
+                        final imageUrl = snapshot.data ?? r.poster;
+                        final headers =
+                            getImageRequestHeaders(imageUrl, 'douban');
+                        return CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          httpHeaders: headers,
+                          placeholder: (c, u) => Container(
+                            color: isDark
+                                ? const Color(0xFF1F2937)
+                                : const Color(0xFFE5E7EB),
+                          ),
+                          errorWidget: (c, u, e) => Container(
+                            color: isDark
+                                ? const Color(0xFF1F2937)
+                                : const Color(0xFFE5E7EB),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
