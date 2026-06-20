@@ -455,16 +455,37 @@ class _MainLayoutState extends State<MainLayout> {
             child: GestureDetector(
               onTap: widget.onHomeTap,
               behavior: HitTestBehavior.opaque,
-              child: Text(
-                'LunaTV',
-                style: FontUtils.sourceCodePro(
-                  context,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w400,
-                  color: themeService.isDarkMode
-                      ? Colors.white
-                      : const Color(0xFF2c3e50),
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF3B82F6), Color(0xFF9333EA)],
+                      ),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: const Icon(Icons.tv, color: Colors.white, size: 18),
+                  ),
+                  const SizedBox(width: 8),
+                  ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [Color(0xFF2563EB), Color(0xFF9333EA)],
+                    ).createShader(bounds),
+                    child: const Text(
+                      'LunaTV',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
