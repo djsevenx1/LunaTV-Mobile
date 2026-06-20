@@ -97,6 +97,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _player.stop();
     } catch (_) {}
     _player.dispose();
+    // 恢复系统UI和竖屏方向
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
   }
@@ -109,8 +114,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return false; // 默认横屏
   }
 
-  /// 进入全屏：根据视频宽高比设置屏幕方向
+  /// 进入全屏：隐藏系统UI + 根据视频宽高比设置屏幕方向
   Future<void> _onEnterFullscreen() async {
+    // 隐藏系统UI（状态栏、导航栏）
+    await SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.immersiveSticky,
+      overlays: [],
+    );
+    // 根据视频宽高比设置方向
     if (_isPortraitVideo) {
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
@@ -123,8 +134,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// 退出全屏：恢复竖屏
+  /// 退出全屏：恢复系统UI + 恢复竖屏
   Future<void> _onExitFullscreen() async {
+    // 恢复系统UI
+    await SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+    // 恢复竖屏
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
