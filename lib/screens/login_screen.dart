@@ -10,6 +10,8 @@ import 'package:luna_tv/utils/device_utils.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/screens/home_screen.dart';
 
+/// LunaTV 风格登录页
+/// 主色：emerald-500 (LunaTV Web 绿色品牌色)
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -373,23 +375,23 @@ class _LoginScreenState extends State<LoginScreen>
                     Color(0xFF111827),
                   ]
                 : const [
-                    Color(0xFFEFF6FF), // blue-50
+                    Color(0xFFECFDF5), // emerald-50
                     Color(0xFFFFFFFF),
-                    Color(0xFFFAF5FF), // purple-50
+                    Color(0xFFF0FDFA), // teal-50
                   ],
           ),
         ),
         child: Stack(
           children: [
-            // 装饰光斑
+            // 装饰光斑 (LunaTV 风格)
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.2,
-              left: MediaQuery.of(context).size.width * 0.15,
+              top: MediaQuery.of(context).size.height * 0.15,
+              left: MediaQuery.of(context).size.width * 0.1,
               child: _buildBlurCircle(
                 isDarkMode
-                    ? const Color(0xFF3B82F6).withOpacity(0.15)
-                    : const Color(0xFF60A5FA).withOpacity(0.4),
-                200,
+                    ? const Color(0xFF10B981).withOpacity(0.18)
+                    : const Color(0xFF6EE7B7).withOpacity(0.5),
+                180,
               ),
             ),
             Positioned(
@@ -397,21 +399,22 @@ class _LoginScreenState extends State<LoginScreen>
               right: MediaQuery.of(context).size.width * 0.15,
               child: _buildBlurCircle(
                 isDarkMode
-                    ? const Color(0xFFA855F7).withOpacity(0.15)
-                    : const Color(0xFFC084FC).withOpacity(0.4),
-                200,
+                    ? const Color(0xFF14B8A6).withOpacity(0.18)
+                    : const Color(0xFF5EEAD4).withOpacity(0.45),
+                180,
               ),
             ),
             Positioned(
-              top: MediaQuery.of(context).size.height * 0.4,
-              left: MediaQuery.of(context).size.width * 0.4,
+              top: MediaQuery.of(context).size.height * 0.45,
+              left: MediaQuery.of(context).size.width * 0.5,
               child: _buildBlurCircle(
                 isDarkMode
-                    ? const Color(0xFFEC4899).withOpacity(0.1)
-                    : const Color(0xFFF9A8D4).withOpacity(0.3),
-                200,
+                    ? const Color(0xFF34D399).withOpacity(0.12)
+                    : const Color(0xFFA7F3D0).withOpacity(0.4),
+                160,
               ),
             ),
+
             // 登录卡片
             SafeArea(
               child: Center(
@@ -426,16 +429,16 @@ class _LoginScreenState extends State<LoginScreen>
                     decoration: BoxDecoration(
                       color: isDarkMode
                           ? Colors.white.withOpacity(0.05)
-                          : Colors.white.withOpacity(0.8),
+                          : Colors.white.withOpacity(0.85),
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(
                         color: isDarkMode
                             ? Colors.white.withOpacity(0.1)
-                            : Colors.white.withOpacity(0.4),
+                            : Colors.white.withOpacity(0.5),
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: const Color(0xFF10B981).withOpacity(0.12),
                           blurRadius: 32,
                           offset: const Offset(0, 8),
                         ),
@@ -450,7 +453,6 @@ class _LoginScreenState extends State<LoginScreen>
                           _buildLogoHeader(isDarkMode),
                           const SizedBox(height: 32),
 
-                          // 错误提示占位
                           // 表单
                           _isLocalMode
                               ? _buildSubscriptionForm(isDarkMode)
@@ -512,7 +514,7 @@ class _LoginScreenState extends State<LoginScreen>
       onTap: _handleLogoTap,
       child: Column(
         children: [
-          // Logo
+          // Logo (LunaTV 风格: 绿色渐变方块 + 闪光图标)
           Container(
             width: 64,
             height: 64,
@@ -520,43 +522,45 @@ class _LoginScreenState extends State<LoginScreen>
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF3B82F6), Color(0xFF9333EA)],
+                colors: [Color(0xFF22C55E), Color(0xFF059669)],
               ),
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF3B82F6).withOpacity(0.3),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
+                  color: const Color(0xFF22C55E).withOpacity(0.4),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
             child: const Icon(
-              Icons.tv,
+              Icons.auto_awesome,
               color: Colors.white,
               size: 32,
             ),
           ),
           const SizedBox(height: 16),
-          // 标题
+          // 标题 (LunaTV 绿色渐变)
           ShaderMask(
             shaderCallback: (bounds) => const LinearGradient(
-              colors: [Color(0xFF2563EB), Color(0xFF9333EA)],
+              colors: [Color(0xFF16A34A), Color(0xFF0D9488)],
             ).createShader(bounds),
             child: const Text(
               'LunaTV',
               style: TextStyle(
                 fontSize: 28,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w800,
                 color: Colors.white,
+                letterSpacing: -0.5,
               ),
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            '登录以使用更多功能',
+            '欢迎回来，请登录您的账户',
             style: TextStyle(
               fontSize: 14,
+              fontWeight: FontWeight.w500,
               color: isDarkMode
                   ? AppColors.darkTextSecondary
                   : AppColors.lightTextSecondary,
@@ -686,7 +690,7 @@ class _LoginScreenState extends State<LoginScreen>
         filled: true,
         fillColor: isDarkMode
             ? Colors.white.withOpacity(0.05)
-            : Colors.white.withOpacity(0.6),
+            : Colors.white.withOpacity(0.7),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
@@ -717,12 +721,12 @@ class _LoginScreenState extends State<LoginScreen>
       height: 48,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF3B82F6), Color(0xFF9333EA)],
+          colors: [Color(0xFF16A34A), Color(0xFF059669)],
         ),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF3B82F6).withOpacity(0.3),
+            color: const Color(0xFF22C55E).withOpacity(0.35),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -754,12 +758,19 @@ class _LoginScreenState extends State<LoginScreen>
                   SizedBox(width: 12),
                   Text('登录中...',
                       style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w500)),
+                          fontSize: 16, fontWeight: FontWeight.w600)),
                 ],
               )
-            : const Text(
-                '登录',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.lock_outline, color: Colors.white, size: 18),
+                  SizedBox(width: 8),
+                  Text(
+                    '立即登录',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
       ),
     );

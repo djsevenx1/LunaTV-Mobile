@@ -262,7 +262,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       builder: (context, themeService, child) {
         return RefreshIndicator(
           onRefresh: _refreshDramaList,
-          color: const Color(0xFF27ae60),
+          color: const Color(0xFF22C55E),
           child: CustomScrollView(
             controller: _scrollController,
             slivers: [
@@ -445,11 +445,16 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF27ae60)
-              : (themeService.isDarkMode
+          gradient: isSelected
+              ? const LinearGradient(
+                  colors: [Color(0xFF22C55E), Color(0xFF10B981)],
+                )
+              : null,
+          color: !isSelected
+              ? (themeService.isDarkMode
                   ? Colors.white.withOpacity(0.1)
-                  : Colors.grey[200]),
+                  : Colors.grey[200])
+              : null,
           borderRadius: BorderRadius.circular(20),
           border: isSelected
               ? null
@@ -684,6 +689,9 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   int _totalEpisodes = 1;
   String _videoUrl = '';
   String _videoName = '';
+  bool _isAutoPlay = false; // 是否自动连播
+  bool _isLoadingDetail = true;
+  ShortDramaDetail? _detail;
 
   @override
   void initState() {
@@ -691,7 +699,50 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     _player = Player();
     _controller = VideoController(_player);
     _videoName = widget.drama.name;
-    _parseAndPlay(1);
+    _setupPlayerListener();
+    _loadDetailAndPlay(1);
+  }
+
+  /// 监听播放结束事件
+  void _setupPlayerListener() {
+    _player.stream.playing.listen((playing) {
+      if (!playing && _isAutoPlay && !_isLoading) {
+        // 播放结束,自动播放下一集
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted || !_isAutoPlay) return;
+          _onEpisodeEnded();
+        });
+      }
+    });
+  }
+
+  /// 先加载详情获取总集数,再解析播放
+  Future<void> _loadDetailAndPlay(int episode) async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingDetail = true;
+      _currentEpisode = episode;
+    });
+    try {
+      final detail = await ShortDramaService.getDetail(widget.drama.id);
+      if (!mounted) return;
+      setState(() {
+        _detail = detail;
+        // 优先使用 getDetail 返回的 episodes 列表长度
+        if (detail != null && detail.episodes.isNotEmpty) {
+          _totalEpisodes = detail.episodes.length;
+        } else if (detail?.totalEpisodes != null && detail!.totalEpisodes! > 0) {
+          _totalEpisodes = detail.totalEpisodes!;
+        }
+        _isLoadingDetail = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingDetail = false;
+      });
+    }
+    await _parseAndPlay(episode);
   }
 
   @override
@@ -723,11 +774,17 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       if (result.code == 0 && result.data != null) {
         final data = result.data!;
         _videoUrl = data.proxyUrl.isNotEmpty ? data.proxyUrl : data.parsedUrl;
-        _totalEpisodes = data.totalEpisodes > 0 ? data.totalEpisodes : 1;
-        _videoName = data.videoName.isNotEmpty ? data.videoName : widget.drama.name;
+        // 如果详情加载成功则使用详细集数,否则用 parse 返回的
+        if (_totalEpisodes <= 1 && data.totalEpisodes > 0) {
+          _totalEpisodes = data.totalEpisodes;
+        }
+        _videoName = data.videoName.isNotEmpty
+            ? data.videoName
+            : widget.drama.name;
 
         if (_videoUrl.isNotEmpty) {
           await _player.open(Media(_videoUrl));
+          if (!mounted) return;
           setState(() {
             _isLoading = false;
           });
@@ -755,10 +812,20 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     }
   }
 
+  /// 自动连播 - 播放下一集
+  void _onEpisodeEnded() {
+    if (!_isAutoPlay) return;
+    if (_currentEpisode >= _totalEpisodes) return;
+    _parseAndPlay(_currentEpisode + 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
+        final isDark = themeService.isDarkMode;
+        const greenColor = Color(0xFF22C55E);
+        const greenColorLight = Color(0xFF10B981);
         return Scaffold(
           backgroundColor: Colors.black,
           body: Column(
@@ -772,7 +839,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                     Video(controller: _controller),
                     if (_isLoading)
                       const CircularProgressIndicator(
-                        color: Color(0xFF27ae60),
+                        color: Color(0xFF22C55E),
                       ),
                     if (_isError)
                       Column(
@@ -798,7 +865,10 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                           const SizedBox(height: 16),
                           TextButton(
                             onPressed: () => _parseAndPlay(_currentEpisode),
-                            child: const Text('重试'),
+                            child: const Text(
+                              '重试',
+                              style: TextStyle(color: greenColor),
+                            ),
                           ),
                         ],
                       ),
@@ -808,7 +878,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
               // 信息和选集区域
               Expanded(
                 child: Container(
-                  color: themeService.isDarkMode
+                  color: isDark
                       ? const Color(0xFF1e1e1e)
                       : Colors.white,
                   child: SingleChildScrollView(
@@ -822,20 +892,20 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                           style: FontUtils.poppins(context,
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
-                            color: themeService.isDarkMode
+                            color: isDark
                                 ? const Color(0xFFffffff)
                                 : const Color(0xFF2c3e50),
                           ),
                         ),
                         const SizedBox(height: 8),
-                        // 集数信息
+                        // 集数信息 + 全部播放按钮
                         Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF27ae60).withOpacity(0.15),
+                                color: greenColor.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
@@ -843,10 +913,72 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                                 style: FontUtils.poppins(context,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
-                                  color: const Color(0xFF27ae60),
+                                  color: greenColor,
                                 ),
                               ),
                             ),
+                            const Spacer(),
+                            if (_totalEpisodes > 1)
+                              GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _isAutoPlay = !_isAutoPlay;
+                                  });
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          _isAutoPlay ? '已开启自动连播' : '已关闭自动连播'),
+                                      backgroundColor:
+                                          _isAutoPlay ? greenColor : null,
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: _isAutoPlay
+                                          ? [greenColor, greenColorLight]
+                                          : (isDark
+                                              ? [Colors.white12, Colors.white10]
+                                              : [Colors.grey.shade200,
+                                                  Colors.grey.shade200]),
+                                    ),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _isAutoPlay
+                                            ? Icons.play_circle_filled
+                                            : Icons.play_circle_outline,
+                                        size: 14,
+                                        color: _isAutoPlay
+                                            ? Colors.white
+                                            : (isDark
+                                                ? Colors.white70
+                                                : Colors.black87),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _isAutoPlay ? '连播中' : '全部播放',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: _isAutoPlay
+                                              ? Colors.white
+                                              : (isDark
+                                                  ? Colors.white70
+                                                  : Colors.black87),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -857,7 +989,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                             style: FontUtils.poppins(context,
                               fontSize: 15,
                               fontWeight: FontWeight.w500,
-                              color: themeService.isDarkMode
+                              color: isDark
                                   ? const Color(0xFFffffff)
                                   : const Color(0xFF2c3e50),
                             ),
@@ -867,7 +999,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                             widget.drama.description,
                             style: FontUtils.poppins(context,
                               fontSize: 14,
-                              color: themeService.isDarkMode
+                              color: isDark
                                   ? const Color(0xFFb0b0b0)
                                   : const Color(0xFF7f8c8d),
                             ).copyWith(height: 1.5),
@@ -875,60 +1007,105 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                         ],
                         const SizedBox(height: 16),
                         // 选集
-                        Text(
-                          '选集',
-                          style: FontUtils.poppins(context,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: themeService.isDarkMode
-                                ? const Color(0xFFffffff)
-                                : const Color(0xFF2c3e50),
-                          ),
+                        Row(
+                          children: [
+                            Text(
+                              '选集',
+                              style: FontUtils.poppins(context,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                color: isDark
+                                    ? const Color(0xFFffffff)
+                                    : const Color(0xFF2c3e50),
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_isLoadingDetail)
+                              const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.5,
+                                  color: greenColor,
+                                ),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         // 集数网格
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 5,
-                            mainAxisSpacing: 8,
-                            crossAxisSpacing: 8,
-                            childAspectRatio: 1.5,
-                          ),
-                          itemCount: _totalEpisodes,
-                          itemBuilder: (context, index) {
-                            final episodeNum = index + 1;
-                            final isCurrent = episodeNum == _currentEpisode;
-                            return GestureDetector(
-                              onTap: () => _parseAndPlay(episodeNum),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isCurrent
-                                      ? const Color(0xFF27ae60)
-                                      : (themeService.isDarkMode
-                                          ? Colors.white.withOpacity(0.1)
-                                          : Colors.grey[200]),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '$episodeNum',
-                                  style: FontUtils.poppins(context,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                    color: isCurrent
-                                        ? Colors.white
-                                        : (themeService.isDarkMode
-                                            ? const Color(0xFFffffff)
-                                            : const Color(0xFF2c3e50)),
+                        if (_totalEpisodes > 1)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 5,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                              childAspectRatio: 1.5,
+                            ),
+                            itemCount: _totalEpisodes,
+                            itemBuilder: (context, index) {
+                              final episodeNum = index + 1;
+                              final isCurrent = episodeNum == _currentEpisode;
+                              return GestureDetector(
+                                onTap: () => _parseAndPlay(episodeNum),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: isCurrent
+                                        ? const LinearGradient(
+                                            colors: [
+                                              greenColor,
+                                              greenColorLight
+                                            ],
+                                          )
+                                        : null,
+                                    color: !isCurrent
+                                        ? (isDark
+                                            ? Colors.white.withOpacity(0.08)
+                                            : Colors.grey[100])
+                                        : null,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: !isCurrent
+                                        ? Border.all(
+                                            color: isDark
+                                                ? Colors.white.withOpacity(0.1)
+                                                : Colors.grey.shade300!,
+                                          )
+                                        : null,
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    '$episodeNum',
+                                    style: FontUtils.poppins(context,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: isCurrent
+                                          ? Colors.white
+                                          : (isDark
+                                              ? const Color(0xFFffffff)
+                                              : const Color(0xFF2c3e50)),
+                                    ),
                                   ),
                                 ),
+                              );
+                            },
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text(
+                              _isLoadingDetail
+                                  ? '正在加载集数...'
+                                  : '暂无可用集数,请尝试重新解析',
+                              style: TextStyle(
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.black54,
+                                fontSize: 13,
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
