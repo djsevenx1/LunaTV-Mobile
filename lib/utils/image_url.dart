@@ -1,33 +1,60 @@
 // 通用图片地址处理工具
 import 'package:luna_tv/services/user_data_service.dart';
 
+/// 升级豆瓣图片 URL 到更高分辨率（用于大图展示场景如 Hero Banner）。
+///
+/// 豆瓣 `/view/photo/...` 路径里 `s_` / `m_` / `l_` 决定返回尺寸：
+/// - s_ratio_poster  → 约 200×300（小）
+/// - m_ratio_poster  → 约 400×600（中）
+/// - l_ratio_poster  → 约 600×900（大）
+/// 默认源数据一般只给 `s_`，直接用于轮播大图会模糊。
+String _upgradeDoubanPosterUrl(String url) {
+  // 把 ratio_poster 前的小/中尺寸升级到大尺寸
+  return url
+      .replaceFirst('s_ratio_poster', 'l_ratio_poster')
+      .replaceFirst('m_ratio_poster', 'l_ratio_poster')
+      .replaceFirst('photo/s', 'photo/l')
+      .replaceFirst('photo/m', 'photo/l');
+}
+
 /// 根据来源处理图片 URL（例如豆瓣域名替换）。
 /// - [originalUrl]: 原始图片地址
 /// - [source]: 数据来源（如 'douban'、'bangumi' 等）
+/// - [upgradeDouban]: 是否升级豆瓣图为高分辨率（默认 false，用于小卡片）；
+///   设为 true 适用于 Hero Banner 等大图展示场景。
 /// 返回可直接用于加载的图片地址。
-Future<String> getImageUrl(String originalUrl, String? source) async {
+Future<String> getImageUrl(
+  String originalUrl,
+  String? source, {
+  bool upgradeDouban = false,
+}) async {
   if (source == 'douban' && originalUrl.isNotEmpty) {
     final imageSourceKey = await UserDataService.getDoubanImageSourceKey();
 
+    String processed = originalUrl;
+    if (upgradeDouban) {
+      processed = _upgradeDoubanPosterUrl(processed);
+    }
+
     switch (imageSourceKey) {
       case 'official_cdn':
-        return originalUrl.replaceAll(
+        return processed.replaceAll(
           RegExp(r'img\d+\.doubanio\.com'),
           'img3.doubanio.com',
         );
       case 'cdn_tencent':
-        return originalUrl.replaceAll(
+        return processed.replaceAll(
           RegExp(r'img\d+\.doubanio\.com'),
           'img.doubanio.cmliussss.net',
         );
       case 'cdn_aliyun':
-        return originalUrl.replaceAll(
+        return processed.replaceAll(
           RegExp(r'img\d+\.doubanio\.com'),
           'img.doubanio.cmliussss.com',
         );
       case 'direct':
       default:
-        return originalUrl;
+        return processed;
     }
   }
   // Bangumi 图片 URL 统一使用 HTTPS

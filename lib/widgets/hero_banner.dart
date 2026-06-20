@@ -243,14 +243,21 @@ class _HeroBannerState extends State<HeroBanner> {
         children: [
           // 背景图
           FutureBuilder<String>(
-            future: getImageUrl(item.imageUrl, item.source),
+            future: getImageUrl(item.imageUrl, item.source,
+                upgradeDouban: true),
             builder: (context, snapshot) {
               final imageUrl = snapshot.data ?? item.imageUrl;
               final headers = getImageRequestHeaders(imageUrl, item.source);
+              // 按实际显示尺寸 × devicePixelRatio 解码，
+              // 避免在小尺寸源图（如 Douban s_ratio_poster）下被拉伸变糊
+              final screenWidth = MediaQuery.of(context).size.width;
+              final dpr = MediaQuery.of(context).devicePixelRatio;
+              final targetWidth = (screenWidth * dpr).round();
               return CachedNetworkImage(
                 imageUrl: imageUrl,
                 fit: BoxFit.cover,
                 httpHeaders: headers,
+                memCacheWidth: targetWidth,
                 placeholder: (context, url) => Container(
                   color: isDarkMode ? Colors.black : Colors.grey[300],
                 ),
