@@ -66,18 +66,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
-    // 播放结束自动播下一集
-    _player.stream.playing.listen((playing) {
-      if (!playing && _phase == 'playing') {
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (!mounted) return;
-          final src = _selectedSource;
-          if (src != null && _currentEpisodeIndex < src.episodes.length - 1) {
-            _playEpisode(_currentEpisodeIndex + 1);
-          }
-        });
-      }
-    });
+    // 不再自动播下一集,由用户控制
     _loadSources();
   }
 
@@ -601,11 +590,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final ms = _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
     return InkWell(
       onTap: () {
+        // 切源后只更新选中状态,不自动播放 (由用户点"播放"按钮或集数触发)
         _selectSource(s);
-        // 切换源后立即用新源第1集开始播放
-        if (s.episodes.isNotEmpty) {
-          _playEpisode(0);
-        }
       },
       borderRadius: BorderRadius.circular(8),
       child: Container(
