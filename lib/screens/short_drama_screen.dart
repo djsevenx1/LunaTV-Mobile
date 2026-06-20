@@ -724,15 +724,16 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       _currentEpisode = episode;
     });
     try {
-      final detail = await ShortDramaService.getDetail(widget.drama.id);
+      final detail = await ShortDramaService.getDetail(
+          widget.drama.id.toString());
       if (!mounted) return;
       setState(() {
         _detail = detail;
         // 优先使用 getDetail 返回的 episodes 列表长度
         if (detail != null && detail.episodes.isNotEmpty) {
           _totalEpisodes = detail.episodes.length;
-        } else if (detail?.totalEpisodes != null && detail!.totalEpisodes! > 0) {
-          _totalEpisodes = detail.totalEpisodes!;
+        } else if (widget.drama.episodeCount > 0) {
+          _totalEpisodes = widget.drama.episodeCount;
         }
         _isLoadingDetail = false;
       });
@@ -740,6 +741,10 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       if (!mounted) return;
       setState(() {
         _isLoadingDetail = false;
+        // fallback to episodeCount from the drama list
+        if (widget.drama.episodeCount > 0) {
+          _totalEpisodes = widget.drama.episodeCount;
+        }
       });
     }
     await _parseAndPlay(episode);
