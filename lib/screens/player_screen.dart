@@ -11,6 +11,7 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
 /// LunaTV Web 风格播放详情页
@@ -476,21 +477,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
               width: 110,
               height: 150,
               child: widget.videoInfo.cover.isNotEmpty
-                  ? CachedNetworkImage(
-                      imageUrl: widget.videoInfo.cover,
-                      fit: BoxFit.cover,
-                      placeholder: (c, u) => Container(
-                        color: isDark
-                            ? const Color(0xFF1F2937)
-                            : const Color(0xFFE5E7EB),
-                      ),
-                      errorWidget: (c, u, e) => Container(
-                        color: isDark
-                            ? const Color(0xFF1F2937)
-                            : const Color(0xFFE5E7EB),
-                        child: const Icon(Icons.movie_outlined,
-                            color: Colors.grey, size: 40),
-                      ),
+                  ? FutureBuilder<String>(
+                      future: getImageUrl(
+                          widget.videoInfo.cover, widget.videoInfo.source),
+                      builder: (context, snapshot) {
+                        final imageUrl =
+                            snapshot.data ?? widget.videoInfo.cover;
+                        final headers = getImageRequestHeaders(
+                            imageUrl, widget.videoInfo.source);
+                        return CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          fit: BoxFit.cover,
+                          width: 110,
+                          height: 150,
+                          httpHeaders: headers,
+                          memCacheWidth: (110 *
+                                  MediaQuery.of(context).devicePixelRatio)
+                              .round(),
+                          memCacheHeight: (150 *
+                                  MediaQuery.of(context).devicePixelRatio)
+                              .round(),
+                          placeholder: (c, u) => Container(
+                            color: isDark
+                                ? const Color(0xFF1F2937)
+                                : const Color(0xFFE5E7EB),
+                          ),
+                          errorWidget: (c, u, e) => Container(
+                            color: isDark
+                                ? const Color(0xFF1F2937)
+                                : const Color(0xFFE5E7EB),
+                            child: const Icon(Icons.movie_outlined,
+                                color: Colors.grey, size: 40),
+                          ),
+                        );
+                      },
                     )
                   : Container(
                       color: isDark
