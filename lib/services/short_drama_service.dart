@@ -229,8 +229,17 @@ class ShortDramaService {
         if (data is Map<String, dynamic>) {
           return ShortDramaParseResult.fromJson(data);
         }
+        final bodyPreview = response.body.length > 200
+            ? '${response.body.substring(0, 200)}...'
+            : response.body;
+        return ShortDramaParseResult(
+            code: -1, msg: '响应非 JSON: $bodyPreview');
       }
-      return const ShortDramaParseResult(code: -1, msg: '解析失败');
+      final bodyPreview = response.body.length > 200
+          ? '${response.body.substring(0, 200)}...'
+          : response.body;
+      return ShortDramaParseResult(
+          code: -1, msg: 'HTTP ${response.statusCode}: $bodyPreview');
     } catch (e) {
       return ShortDramaParseResult(code: -1, msg: '网络错误: $e');
     }

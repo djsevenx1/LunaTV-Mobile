@@ -1138,85 +1138,111 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                '选集',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : const Color(0xFF2c3e50),
-                ),
-              ),
-              const Spacer(),
-              if (_isLoadingDetail)
-                const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    color: greenColor,
+          // 1 集时直接显示标签,不再显示"选集"网格
+          if (_totalEpisodes == 1)
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF22C55E).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (_detailError != null)
-            Text(
-              _detailError!,
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white60 : Colors.black54,
-              ),
-            )
-          else if (_totalEpisodes >= 1)
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 5,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: 1.6,
-              ),
-              itemCount: _totalEpisodes,
-              itemBuilder: (context, index) {
-                final episodeNum = index + 1;
-                return GestureDetector(
-                  onTap: () => _playEpisode(episodeNum),
-                  child: Container(
-                    decoration: BoxDecoration(
+                  child: Text(
+                    '单集',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
                       color: isDark
-                          ? const Color(0xFF1e1e1e)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.18)
-                            : Colors.grey.shade300!,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      '$episodeNum',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : const Color(0xFF2c3e50),
-                      ),
+                          ? const Color(0xFF22C55E)
+                          : const Color(0xFF22C55E),
                     ),
                   ),
-                );
-              },
+                ),
+              ],
             )
-          else
-            Text(
-              _isLoadingDetail ? '正在加载集数...' : '暂无可用集数',
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white60 : Colors.black54,
-              ),
+          else ...[
+            Row(
+              children: [
+                Text(
+                  '选集',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                  ),
+                ),
+                const Spacer(),
+                if (_isLoadingDetail)
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: Color(0xFF22C55E),
+                    ),
+                  ),
+              ],
             ),
+            const SizedBox(height: 10),
+            if (_detailError != null)
+              Text(
+                _detailError!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
+              )
+            else if (_totalEpisodes >= 2)
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 5,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 1.6,
+                ),
+                itemCount: _totalEpisodes,
+                itemBuilder: (context, index) {
+                  final episodeNum = index + 1;
+                  return GestureDetector(
+                    onTap: () => _playEpisode(episodeNum),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF1e1e1e)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withOpacity(0.18)
+                              : Colors.grey.shade300!,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '$episodeNum',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              )
+            else
+              Text(
+                _isLoadingDetail ? '正在加载集数...' : '暂无可用集数',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
+              ),
+          ],
         ],
       ),
     );
