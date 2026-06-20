@@ -702,6 +702,13 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   String _videoUrl = '';
   String _videoName = '';
 
+  // 源/线路
+  // 短剧后端只提供 1 个源 (短剧数据源), 但每集返回两个 url: proxy / direct
+  String _directUrl = '';   // 原始 m3u8
+  String _proxyUrl = '';    // 后端代理过的 m3u8 (解决跨域)
+  bool _useProxy = true;    // 默认走代理
+  bool _hasSource = true;   // 短剧只有一个源 (固定 true)
+
   // 调试面板
   bool _showDebug = false;
   String _debugInfo = '';
@@ -839,7 +846,9 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
 
       if (result.code == 0 && result.data != null) {
         final data = result.data!;
-        _videoUrl = data.proxyUrl.isNotEmpty ? data.proxyUrl : data.parsedUrl;
+        _directUrl = data.parsedUrl;
+        _proxyUrl = data.proxyUrl;
+        _videoUrl = _pickUrl();
         if (data.totalEpisodes > 0) {
           _totalEpisodes = data.totalEpisodes;
         }
@@ -875,6 +884,25 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
         _isError = true;
         _errorMessage = '播放错误: $e';
       });
+    }
+  }
+
+  /// 根据 _useProxy 选 url (proxy 优先, 没有则用 direct)
+  String _pickUrl() {
+    if (_useProxy && _proxyUrl.isNotEmpty) return _proxyUrl;
+    if (_directUrl.isNotEmpty) return _directUrl;
+    return _proxyUrl; // 兜底
+  }
+
+  /// 切换解析线路 (proxy / direct), 不重新 parse, 只换 url
+  Future<void> _switchLine(bool useProxy) async {
+    if (_useProxy == useProxy) return;
+    setState(() {
+      _useProxy = useProxy;
+      _videoUrl = _pickUrl();
+    });
+    if (_videoUrl.isNotEmpty) {
+      await _player.open(Media(_videoUrl));
     }
   }
 
@@ -934,6 +962,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
               children: [
                 // 海报 + 元信息
                 _buildPosterHeader(isDark),
+                // 源/线路
+                _buildSourceSection(isDark),
                 // 选集网格
                 _buildEpisodeSection(isDark),
                 // 简介
@@ -1089,6 +1119,78 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                       ),
                     ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 源/线路模块
+  /// 短剧后端只有 1 个源(短剧数据源), 这里显示源名称 + 解析线路切换
+  Widget _buildSourceSection(bool isDark) {
+    const greenColor = Color(0xFF22C55E);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '源',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : const Color(0xFF2c3e50),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // 源 (固定 1 个 - 短剧)
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF1e1e1e)
+                  : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: greenColor.withOpacity(0.5),
+                width: 1.2,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: greenColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '短剧',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? Colors.white
+                          : const Color(0xFF2c3e50),
+                    ),
+                  ),
+                ),
+                Text(
+                  '默认',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark
+                        ? const Color(0xFFb0b0b0)
+                        : const Color(0xFF7f8c8d),
+                  ),
+                ),
               ],
             ),
           ),
