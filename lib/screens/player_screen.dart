@@ -243,7 +243,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final isDark = theme.isDarkMode;
         return PopScope(
           canPop: _phase == 'detail',
-          onPopInvokedWithResult: (didPop, result) {
+          onPopInvoked: (didPop) {
             if (!didPop && _phase == 'playing') {
               setState(() {
                 _phase = 'detail';
