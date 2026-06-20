@@ -137,7 +137,10 @@ class ShortDramaService {
   /// 获取短剧详情
   /// GET /api/shortdrama/detail?id={id}
   /// 返回: {id, title, poster, episodes, episodes_titles, source, ...}
+  /// 或后端可能用 episode_count / episode_list 字段
   static Future<ShortDramaDetail?> getDetail(String id) async {
+    // ignore: avoid_print
+    print('[shortdrama/detail] id=$id');
     try {
       String url = await _buildUrl('/api/shortdrama/detail');
       final uri = Uri.parse(url).replace(queryParameters: {
@@ -149,14 +152,25 @@ class ShortDramaService {
           .get(uri, headers: headers)
           .timeout(_timeout);
 
+      // ignore: avoid_print
+      print('[shortdrama/detail] status=${response.statusCode} body=${response.body}');
+
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final body = response.body;
+        if (body.isEmpty) return null;
+        final data = json.decode(body);
         if (data is Map<String, dynamic>) {
+          // 打印实际 keys 方便排查字段名
+          // ignore: avoid_print
+          print('[shortdrama/detail] keys=${data.keys.toList()}');
           return ShortDramaDetail.fromJson(data);
         }
+        return null;
       }
       return null;
     } catch (e) {
+      // ignore: avoid_print
+      print('[shortdrama/detail] error=$e');
       return null;
     }
   }

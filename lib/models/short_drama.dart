@@ -166,6 +166,7 @@ class ShortDramaDetail {
   final String poster;
   final List<String> episodes;
   final List<String> episodesTitles;
+  final int episodeCount;
   final String source;
   final String sourceName;
   final String year;
@@ -179,6 +180,7 @@ class ShortDramaDetail {
     required this.poster,
     required this.episodes,
     required this.episodesTitles,
+    required this.episodeCount,
     required this.source,
     required this.sourceName,
     required this.year,
@@ -187,17 +189,45 @@ class ShortDramaDetail {
     required this.dramaName,
   });
 
+  /// 总集数:优先用 episodes 数组长度,再 episodes_titles,再 episode_count 字段
+  int get totalEpisodes {
+    if (episodes.isNotEmpty) return episodes.length;
+    if (episodesTitles.isNotEmpty) return episodesTitles.length;
+    return episodeCount;
+  }
+
   factory ShortDramaDetail.fromJson(Map<String, dynamic> json) {
+    // 兼容多种字段名
+    final episodes = (json['episodes'] as List<dynamic>?) ??
+        (json['episode_list'] as List<dynamic>?) ??
+        (json['eps'] as List<dynamic>?) ??
+        [];
+    final episodesTitles = (json['episodes_titles'] as List<dynamic>?) ??
+        (json['episode_titles'] as List<dynamic>?) ??
+        (json['titles'] as List<dynamic>?) ??
+        [];
+    int episodeCount = 0;
+    final ec = json['episode_count'] ?? json['totalEpisodes'] ?? json['total_episodes'];
+    if (ec is int) {
+      episodeCount = ec;
+    } else if (ec is String) {
+      episodeCount = int.tryParse(ec) ?? 0;
+    }
+    // 如果 episodes 是数字数组(可能后端用 1..N 表示),也算集数
+    if (episodesTitles.isEmpty &&
+        episodes.isNotEmpty &&
+        episodes.first is int) {
+      // 长度就是集数
+    }
+    // 如果 episodes 是 List<String> 长度=集数
     return ShortDramaDetail(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       poster: json['poster']?.toString() ?? '',
-      episodes: (json['episodes'] as List<dynamic>? ?? [])
-          .map((e) => e.toString())
-          .toList(),
-      episodesTitles: (json['episodes_titles'] as List<dynamic>? ?? [])
-          .map((e) => e.toString())
-          .toList(),
+      episodes: episodes.map((e) => e.toString()).toList(),
+      episodesTitles:
+          episodesTitles.map((e) => e.toString()).toList(),
+      episodeCount: episodeCount,
       source: json['source']?.toString() ?? '',
       sourceName: json['source_name']?.toString() ?? '',
       year: json['year']?.toString() ?? '',

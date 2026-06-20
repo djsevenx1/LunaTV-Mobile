@@ -719,14 +719,23 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       final detail =
           await ShortDramaService.getDetail(widget.drama.id.toString());
       if (!mounted) return;
+      // 优先从 detail 拿集数, 没有则用列表里 drama 的 episodeCount
+      final detailTotal =
+          (detail != null) ? detail.totalEpisodes : 0;
+      if (detailTotal > 0) {
+        _totalEpisodes = detailTotal;
+      } else if (widget.drama.episodeCount > 0) {
+        _totalEpisodes = widget.drama.episodeCount;
+      }
       setState(() {
         _detail = detail;
-        if (detail != null && detail.episodes.isNotEmpty) {
-          _totalEpisodes = detail.episodes.length;
-        } else if (widget.drama.episodeCount > 0) {
-          _totalEpisodes = widget.drama.episodeCount;
-        }
         _isLoadingDetail = false;
+        if (detail == null) {
+          _detailError = '详情接口返回为空, 已用列表中的集数 (${_totalEpisodes})';
+        } else if (detailTotal == 0 && widget.drama.episodeCount > 0) {
+          _detailError =
+              '详情接口未带集数字段, 已用列表中的集数 (${_totalEpisodes})';
+        }
       });
     } catch (e) {
       if (!mounted) return;
