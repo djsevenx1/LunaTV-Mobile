@@ -45,5 +45,17 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"
+  min_sdk_android: 21
+  # iOS 也会用同一张图作为 App Store 图标源
+  # ios: true
+
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icons/
