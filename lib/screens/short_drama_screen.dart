@@ -668,8 +668,10 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   }
 }
 
-/// 短剧播放器页面
-/// 从列表点卡片 → 直接进入播放第 1 集,集数条放在播放区下方
+/// 短剧详情 + 播放页
+/// 仿照 PlayerScreen 风格: 两阶段
+///   1. detail  - 顶部条 + 海报/元信息 + 选集网格 + 底部固定播放按钮
+///   2. playing - 全屏播放 + 返回可回 detail
 class ShortDramaPlayerScreen extends StatefulWidget {
   final ShortDrama drama;
 
@@ -683,13 +685,16 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
 
+  // 阶段: detail (先看详情) / playing (全屏播放)
+  String _phase = 'detail';
+
   // 详情
   bool _isLoadingDetail = true;
   ShortDramaDetail? _detail;
   String? _detailError;
 
   // 当前播放
-  bool _isLoading = true;
+  bool _isLoading = false;
   bool _isError = false;
   String _errorMessage = '';
   int _currentEpisode = 1;
@@ -703,13 +708,12 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     _player = Player();
     _controller = VideoController(_player);
     _videoName = widget.drama.name;
-    // 先用列表里的 episodeCount 兜底,避免显示 1
+    // 先用列表里的 episodeCount 兜底
     if (widget.drama.episodeCount > 0) {
       _totalEpisodes = widget.drama.episodeCount;
     }
-    // 加载详情(拿准确集数),同时直接开始播放第 1 集
+    // 加载详情拿准确集数
     _loadDetail();
-    _playEpisode(1);
   }
 
   /// 加载详情 (只拉集数列表, 不解析播放地址)
@@ -723,7 +727,6 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       final detail =
           await ShortDramaService.getDetail(widget.drama.id.toString());
       if (!mounted) return;
-      // 优先从 detail 拿集数, 没有则用列表里 drama 的 episodeCount
       final detailTotal =
           (detail != null) ? detail.totalEpisodes : 0;
       if (detailTotal > 0) {
@@ -754,6 +757,9 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
 
   @override
   void dispose() {
+    try {
+      _player.stop();
+    } catch (_) {}
     _player.dispose();
     super.dispose();
   }
@@ -763,6 +769,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     if (!mounted) return;
 
     setState(() {
+      _phase = 'playing';
       _isLoading = true;
       _isError = false;
       _errorMessage = '';
@@ -781,7 +788,6 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       if (result.code == 0 && result.data != null) {
         final data = result.data!;
         _videoUrl = data.proxyUrl.isNotEmpty ? data.proxyUrl : data.parsedUrl;
-        // 如果详情加载成功则使用详细集数,否则用 parse 返回的
         if (_totalEpisodes <= 1 && data.totalEpisodes > 0) {
           _totalEpisodes = data.totalEpisodes;
         }
@@ -805,7 +811,6 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
         setState(() {
           _isLoading = false;
           _isError = true;
-          // 优先显示后端 msg, 否则显示通用文案
           _errorMessage = result.msg.isNotEmpty
               ? '播放失败: ${result.msg}'
               : '播放失败,请稍后重试';
@@ -821,38 +826,417 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     }
   }
 
+  /// 退到详情 (不清空 player, 节省下次进入时间)
+  void _backToDetail() {
+    try {
+      _player.stop();
+    } catch (_) {}
+    setState(() {
+      _phase = 'detail';
+      _videoUrl = '';
+      _isError = false;
+      _errorMessage = '';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
         final isDark = themeService.isDarkMode;
-        return Scaffold(
-          backgroundColor: isDark
-              ? const Color(0xFF121212)
-              : const Color(0xFFF5F5F7),
-          body: _buildBody(themeService),
+        return PopScope(
+          canPop: _phase == 'detail',
+          onPopInvoked: (didPop) {
+            if (didPop) return;
+            if (_phase == 'playing') {
+              _backToDetail();
+            }
+          },
+          child: Scaffold(
+            backgroundColor: isDark
+                ? const Color(0xFF121212)
+                : const Color(0xFFF5F5F7),
+            body: SafeArea(
+              child: _phase == 'detail'
+                  ? _buildDetailView(isDark)
+                  : _buildPlayingView(isDark),
+            ),
+          ),
         );
       },
     );
   }
 
-  /// 整体页面: 顶部条 + 播放器 + 滚动区(简介+集数)
-  Widget _buildBody(ThemeService themeService) {
-    final isDark = themeService.isDarkMode;
-    const greenColor = Color(0xFF22C55E);
-    const greenColorLight = Color(0xFF10B981);
+  // ===================== 详情阶段 =====================
 
+  Widget _buildDetailView(bool isDark) {
     return Column(
       children: [
-        // 顶部条
+        // 顶部 bar
+        _buildDetailTopBar(isDark),
+        // 滚动内容
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 海报 + 元信息
+                _buildPosterHeader(isDark),
+                // 选集网格
+                _buildEpisodeSection(isDark),
+                // 简介
+                if (widget.drama.description.isNotEmpty)
+                  _buildDescription(isDark),
+                const SizedBox(height: 100),
+              ],
+            ),
+          ),
+        ),
+        // 底部固定播放按钮
+        _buildBottomPlayButton(isDark),
+      ],
+    );
+  }
+
+  Widget _buildDetailTopBar(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(Icons.arrow_back,
+                color: isDark ? Colors.white : Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: Text(
+              widget.drama.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : const Color(0xFF2c3e50),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPosterHeader(bool isDark) {
+    final cover = widget.drama.backdrop.isNotEmpty
+        ? widget.drama.backdrop
+        : widget.drama.cover;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 左侧海报
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 110,
+              height: 160,
+              child: cover.isNotEmpty
+                  ? Image.network(
+                      cover,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: isDark
+                            ? const Color(0xFF1e1e1e)
+                            : Colors.grey[200],
+                        child: const Icon(Icons.movie,
+                            color: Colors.white54),
+                      ),
+                    )
+                  : Container(
+                      color: isDark
+                          ? const Color(0xFF1e1e1e)
+                          : Colors.grey[200],
+                      child: const Icon(Icons.movie,
+                          color: Colors.white54),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          // 右侧元信息
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.drama.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (widget.drama.score > 0)
+                  Row(
+                    children: [
+                      const Icon(Icons.star_rounded,
+                          color: Color(0xFFFBBF24), size: 18),
+                      const SizedBox(width: 4),
+                      Text(
+                        widget.drama.score.toStringAsFixed(1),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? Colors.white
+                              : const Color(0xFF2c3e50),
+                        ),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: 6),
+                if (widget.drama.author.isNotEmpty)
+                  Text(
+                    '导演: ${widget.drama.author}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark
+                          ? const Color(0xFFb0b0b0)
+                          : const Color(0xFF7f8c8d),
+                    ),
+                  ),
+                if (widget.drama.updateTime.isNotEmpty)
+                  Text(
+                    '更新: ${widget.drama.updateTime}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark
+                          ? const Color(0xFFb0b0b0)
+                          : const Color(0xFF7f8c8d),
+                    ),
+                  ),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF22C55E).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '共 $_totalEpisodes 集',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF22C55E),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEpisodeSection(bool isDark) {
+    const greenColor = Color(0xFF22C55E);
+    const greenColorLight = Color(0xFF10B981);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '选集',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                ),
+              ),
+              const Spacer(),
+              if (_isLoadingDetail)
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: greenColor,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_totalEpisodes >= 2)
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1.6,
+              ),
+              itemCount: _totalEpisodes,
+              itemBuilder: (context, index) {
+                final episodeNum = index + 1;
+                return GestureDetector(
+                  onTap: () => _playEpisode(episodeNum),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF1e1e1e)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.18)
+                            : Colors.grey.shade300!,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$episodeNum',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark
+                            ? Colors.white
+                            : const Color(0xFF2c3e50),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            )
+          else if (_isLoadingDetail)
+            Text(
+              '正在加载集数...',
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            )
+          else
+            Text(
+              '暂无可用集数',
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDescription(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '简介',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : const Color(0xFF2c3e50),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            widget.drama.description,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: isDark
+                  ? const Color(0xFFb0b0b0)
+                  : const Color(0xFF7f8c8d),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomPlayButton(bool isDark) {
+    const greenColor = Color(0xFF22C55E);
+    const greenColorLight = Color(0xFF10B981);
+    final canPlay = _totalEpisodes > 0;
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        12,
+        16,
+        12 + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1a1a1a) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark
+                ? Colors.white.withOpacity(0.08)
+                : Colors.grey.withOpacity(0.2),
+          ),
+        ),
+      ),
+      child: GestureDetector(
+        onTap: canPlay ? () => _playEpisode(1) : null,
+        child: Container(
+          height: 48,
+          decoration: BoxDecoration(
+            gradient: canPlay
+                ? const LinearGradient(
+                    colors: [greenColor, greenColorLight],
+                  )
+                : null,
+            color: canPlay
+                ? null
+                : (isDark
+                    ? Colors.white.withOpacity(0.08)
+                    : Colors.grey[300]),
+            borderRadius: BorderRadius.circular(24),
+          ),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.play_arrow,
+                  color: Colors.white, size: 22),
+              const SizedBox(width: 6),
+              Text(
+                canPlay ? '播放 第1集' : '暂无可播放集数',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===================== 播放阶段 =====================
+
+  Widget _buildPlayingView(bool isDark) {
+    const greenColor = Color(0xFF22C55E);
+    const greenColorLight = Color(0xFF10B981);
+    return Column(
+      children: [
+        // 顶部条 (返回 detail)
         Container(
           color: isDark ? const Color(0xFF1a1a1a) : Colors.white,
-          padding: EdgeInsets.fromLTRB(
-            8,
-            MediaQuery.of(context).padding.top + 4,
-            8,
-            8,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: Row(
             children: [
               IconButton(
@@ -861,16 +1245,11 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                   size: 20,
                   color: isDark ? Colors.white : Colors.black87,
                 ),
-                onPressed: () {
-                  try {
-                    _player.stop();
-                  } catch (_) {}
-                  Navigator.of(context).pop();
-                },
+                onPressed: _backToDetail,
               ),
               Expanded(
                 child: Text(
-                  widget.drama.name,
+                  _videoName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
@@ -885,7 +1264,6 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
             ],
           ),
         ),
-
         // 播放器
         AspectRatio(
           aspectRatio: 16 / 9,
@@ -918,7 +1296,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                         ),
                         const SizedBox(height: 12),
                         TextButton(
-                          onPressed: () => _playEpisode(_currentEpisode),
+                          onPressed: () =>
+                              _playEpisode(_currentEpisode),
                           child: const Text('重试',
                               style: TextStyle(color: greenColor)),
                         ),
@@ -929,8 +1308,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
             ),
           ),
         ),
-
-        // 滚动区: 简介 + 集数
+        // 集数 + 简介 滚动区
         Expanded(
           child: Container(
             color: isDark ? const Color(0xFF1a1a1a) : Colors.white,
@@ -939,58 +1317,32 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 当前集数 / 总集数 badge
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: greenColor.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '第$_currentEpisode集 / 共$_totalEpisodes集',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: greenColor,
-                          ),
-                        ),
-                      ),
-                      if (_isLoadingDetail) ...[
-                        const SizedBox(width: 8),
-                        const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            color: greenColor,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  if (_detailError != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      _detailError!,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDark ? Colors.white60 : Colors.black54,
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: greenColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '第$_currentEpisode集 / 共$_totalEpisodes集',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: greenColor,
                       ),
                     ),
-                  ],
+                  ),
                   const SizedBox(height: 16),
-
-                  // 简介
                   if (widget.drama.description.isNotEmpty) ...[
                     Text(
                       '简介',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                        color: isDark
+                            ? Colors.white
+                            : const Color(0xFF2c3e50),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1006,15 +1358,15 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                     ),
                     const SizedBox(height: 16),
                   ],
-
-                  // 选集 (>= 2 集才显示)
                   if (_totalEpisodes >= 2) ...[
                     Text(
                       '选集',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                        color: isDark
+                            ? Colors.white
+                            : const Color(0xFF2c3e50),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -1031,14 +1383,18 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                       itemCount: _totalEpisodes,
                       itemBuilder: (context, index) {
                         final episodeNum = index + 1;
-                        final isCurrent = episodeNum == _currentEpisode;
+                        final isCurrent =
+                            episodeNum == _currentEpisode;
                         return GestureDetector(
                           onTap: () => _playEpisode(episodeNum),
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: isCurrent
                                   ? const LinearGradient(
-                                      colors: [greenColor, greenColorLight],
+                                      colors: [
+                                        greenColor,
+                                        greenColorLight
+                                      ],
                                     )
                                   : null,
                               color: !isCurrent
@@ -1071,14 +1427,6 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                           ),
                         );
                       },
-                    ),
-                  ] else if (_isLoadingDetail) ...[
-                    Text(
-                      '正在加载集数...',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.black54,
-                      ),
                     ),
                   ],
                 ],
