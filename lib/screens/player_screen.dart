@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -5,6 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
@@ -53,6 +56,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   SearchResult? _selectedSource;
   int _currentEpisodeIndex = 0;
 
+  // 播放进度上报
+  Timer? _progressTimer;
+  bool _firstRecordSaved = false;
+  String? _lastSavedKey; // 避免重复保存同一条
+
   @override
   void initState() {
     super.initState();
@@ -75,9 +83,73 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    // 退出时最后一次保存
+    _saveCurrentProgress(force: true);
+    _progressTimer?.cancel();
     _player.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
+  }
+
+  /// 构造并保存当前播放记录
+  Future<void> _saveCurrentProgress({bool force = false}) async {
+    final source = _selectedSource;
+    if (source == null) return;
+    if (source.source.isEmpty) return;
+
+    int playTime = 0;
+    int totalTime = 0;
+    try {
+      final state = _player.state;
+      if (state.playing || state.paused) {
+        playTime = state.position.inMilliseconds;
+        totalTime = state.duration.inMilliseconds;
+      }
+    } catch (_) {}
+
+    final key = '${source.source}+${source.id}';
+    // 没播放过(skip) || 同一集还没开始播且已存过(避免启动时连发两条空)
+    if (!force && _lastSavedKey == key && playTime == 0 && _firstRecordSaved) {
+      return;
+    }
+
+    final record = PlayRecord(
+      id: source.id,
+      source: source.source,
+      title: source.title.isNotEmpty
+          ? source.title
+          : widget.videoInfo.title,
+      sourceName: source.sourceName,
+      year: widget.videoInfo.year,
+      cover: source.poster.isNotEmpty
+          ? source.poster
+          : widget.videoInfo.cover,
+      index: _currentEpisodeIndex + 1,
+      totalEpisodes: source.episodes.length,
+      playTime: playTime,
+      totalTime: totalTime,
+      saveTime: DateTime.now().millisecondsSinceEpoch,
+      searchTitle: widget.videoInfo.searchTitle.isNotEmpty
+          ? widget.videoInfo.searchTitle
+          : widget.videoInfo.title,
+    );
+
+    _lastSavedKey = key;
+    _firstRecordSaved = true;
+
+    try {
+      await PageCacheService().savePlayRecord(record, context);
+    } catch (_) {
+      // 静默失败
+    }
+  }
+
+  /// 启动进度上报定时器(每 10 秒)
+  void _startProgressTimer() {
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _saveCurrentProgress();
+    });
   }
 
   /// 加载多源并自动测速
@@ -222,11 +294,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _phase = 'playing';
     });
 
+    // 切集时先保存上一条的进度
+    if (_firstRecordSaved) {
+      _saveCurrentProgress(force: true);
+    }
+
     try {
       await _player.stop();
       await _player.open(Media(url));
       if (!mounted) return;
       setState(() => _isBuffering = false);
+      // 启动定时器,并立即保存一条(标记已开始)
+      _startProgressTimer();
+      _firstRecordSaved = false; // 重置,让定时器先存一次
+      _saveCurrentProgress();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -243,11 +324,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final isDark = theme.isDarkMode;
         return PopScope(
           canPop: _phase == 'detail',
-          onPopInvoked: (didPop) {
+          onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              setState(() {
-                _phase = 'detail';
-              });
+              // 从播放页返回详情页: 先保存一次
+              await _saveCurrentProgress(force: true);
+              if (mounted) {
+                setState(() {
+                  _phase = 'detail';
+                });
+              }
+            } else if (didPop && _phase == 'detail') {
+              // 真正退出页面: 最后保存一次
+              await _saveCurrentProgress(force: true);
             }
           },
           child: Scaffold(
