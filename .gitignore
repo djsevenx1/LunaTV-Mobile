@@ -146,3 +146,4 @@ $RECYCLE.BIN/
 *.temp
 *.bak
 *.backup
+.uploads/
