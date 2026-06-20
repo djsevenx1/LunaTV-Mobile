@@ -44,7 +44,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Hero Banner 数据
   List<HeroBannerItem> _bannerItems = [];
-  bool _bannerLoaded = false;
 
   @override
   void initState() {
@@ -101,30 +100,23 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// 加载 Hero Banner 数据（从热门电影/剧集/番剧取前几项）
-  /// [force] = true 时强制重新加载（用于下拉刷新）
-  Future<void> _loadBannerData({bool force = false}) async {
-    if (_bannerLoaded && !force) return;
-    if (force) {
-      // 强制刷新时先清空旧数据，触发 HeroBanner 重建
-      if (mounted) {
-        setState(() {
-          _bannerItems = [];
-          _bannerLoaded = false;
-        });
-      }
-    }
+  /// 加载 Hero Banner 数据（从豆瓣近期热门电影/剧集/综艺 + 番剧取前几项）
+  /// 对齐 LunaTV web 版的动态 banner：数据来自豆瓣 recent_hot 接口，
+  /// 内容随时间变化；缓存由 DoubanCacheService（6小时）管理，无需一次性守卫。
+  Future<void> _loadBannerData() async {
     try {
       final moviesResult = await DoubanService.getHotMovies(context);
       final tvResult = await DoubanService.getHotTvShows(context);
+      final showResult = await DoubanService.getHotShows(context);
       final animeResult = await BangumiService.getTodayCalendar(context);
 
       if (!mounted) return;
 
       final List<HeroBannerItem> items = [];
 
+      // 热门电影 - 取前 2 部（对齐 web 版）
       if (moviesResult.success && moviesResult.data != null) {
-        for (final m in moviesResult.data!.take(3)) {
+        for (final m in moviesResult.data!.take(2)) {
           items.add(HeroBannerItem(
             id: m.id,
             title: m.title,
@@ -138,6 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ));
         }
       }
+      // 热门剧集 - 取前 2 部（对齐 web 版）
       if (tvResult.success && tvResult.data != null) {
         for (final t in tvResult.data!.take(2)) {
           items.add(HeroBannerItem(
@@ -153,8 +146,25 @@ class _HomeScreenState extends State<HomeScreen> {
           ));
         }
       }
+      // 热门综艺 - 取前 1 部（对齐 web 版）
+      if (showResult.success && showResult.data != null) {
+        for (final s in showResult.data!.take(1)) {
+          items.add(HeroBannerItem(
+            id: s.id,
+            title: s.title,
+            subtitle: '热门综艺',
+            imageUrl: s.poster,
+            type: 'show',
+            source: 'douban',
+            id_: s.id,
+            year: s.year.isNotEmpty ? s.year : null,
+            rate: s.rate,
+          ));
+        }
+      }
+      // 新番放送 - 取前 1 部（对齐 web 版）
       if (animeResult.success && animeResult.data != null) {
-        for (final a in animeResult.data!.take(2)) {
+        for (final a in animeResult.data!.take(1)) {
           final name = (a.nameCn != null && a.nameCn!.isNotEmpty)
               ? a.nameCn!
               : a.name;
@@ -182,7 +192,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted && items.isNotEmpty) {
         setState(() {
           _bannerItems = items;
-          _bannerLoaded = true;
         });
       }
     } catch (_) {
@@ -195,8 +204,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     try {
-      // 强制刷新 Hero Banner（下拉刷新时重新拉取轮播数据）
-      _loadBannerData(force: true);
+      // 刷新 Hero Banner（下拉刷新时重新拉取轮播数据，缓存由 DoubanCacheService 管理）
+      _loadBannerData();
 
       // 调用各个组件的刷新方法
       // 刷新继续观看组件
