@@ -87,14 +87,27 @@ class ShortDramaService {
           .get(uri, headers: headers)
           .timeout(_timeout);
 
+      // ignore: avoid_print
+      print('[shortdrama/list] status=${response.statusCode} body=${response.body}');
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data is Map<String, dynamic>) {
+          // 打印 list 第一项的 keys
+          if (data['list'] is List && (data['list'] as List).isNotEmpty) {
+            final first = (data['list'] as List).first;
+            if (first is Map<String, dynamic>) {
+              // ignore: avoid_print
+              print('[shortdrama/list] firstItem keys=${first.keys.toList()}');
+            }
+          }
           return ShortDramaListResponse.fromJson(data);
         }
       }
       return const ShortDramaListResponse(list: [], hasMore: false);
     } catch (e) {
+      // ignore: avoid_print
+      print('[shortdrama/list] error=$e');
       return const ShortDramaListResponse(list: [], hasMore: false);
     }
   }
