@@ -859,7 +859,10 @@ MouseRegion(
       : null,
   child: GestureDetector(
     onTap: () {
-      Navigator.of(context, rootNavigator: true).pushNamed('/settings');
+      // 设置入口已合并到弹窗里：直接打开用户菜单
+      setState(() {
+        _showUserMenu = true;
+      });
     },
     behavior: HitTestBehavior.opaque,
     child: Container(

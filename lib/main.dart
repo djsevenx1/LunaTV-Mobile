@@ -57,7 +57,6 @@ class LunaTVApp extends StatelessWidget {
             darkTheme: themeService.darkTheme,
             themeMode: themeService.themeMode,
             routes: {
-              '/settings': (_) => const SettingsScreen(),
               '/filter-settings': (_) => const FilterSettingsScreen(),
               '/m3u-import': (_) => const M3uImportScreen(),
               '/douban-detail': (ctx) => DoubanDetailScreen.fromArgs(ctx),
