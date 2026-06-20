@@ -7,6 +7,7 @@ import 'package:luna_tv/services/short_drama_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/short_drama_card.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
+import 'package:luna_tv/widgets/capsule_tab_switcher.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 
@@ -21,9 +22,15 @@ class ShortDramaScreen extends StatefulWidget {
 class _ShortDramaScreenState extends State<ShortDramaScreen> {
   final ScrollController _scrollController = ScrollController();
 
-  // 分类数据
-  List<ShortDramaCategory> _categories = [];
-  int? _selectedCategoryId;
+  // 一级筛选：分类
+  final List<String> _primaryTabs = const ['全部', '最近热门'];
+  String _selectedPrimaryTab = '最近热门';
+
+  // 二级筛选：类型（来自 API 的分类列表，前面会拼一个"全部"）
+  List<String> _typeTabs = const ['全部'];
+  String _selectedTypeTab = '全部';
+  // 类型 -> 分类 typeId 的映射（"全部" 对应 null）
+  final Map<String, int> _typeToCategoryId = {};
 
   // 列表数据
   final List<ShortDrama> _dramaList = [];
@@ -51,14 +58,25 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   Future<void> _loadCategories() async {
     final categories = await ShortDramaService.getCategories();
     if (!mounted) return;
-    setState(() {
-      _categories = categories;
-      // 默认选中第一个分类
-      if (categories.isNotEmpty && _selectedCategoryId == null) {
-        _selectedCategoryId = categories.first.typeId;
-        _fetchDramaList(isRefresh: true);
+
+    final typeTabs = <String>['全部'];
+    final typeToId = <String, int>{'全部': -1};
+    for (final c in categories) {
+      if (!typeTabs.contains(c.typeName)) {
+        typeTabs.add(c.typeName);
+        typeToId[c.typeName] = c.typeId;
       }
+    }
+
+    setState(() {
+      _typeTabs = typeTabs;
+      _typeToCategoryId
+        ..clear()
+        ..addAll(typeToId);
     });
+
+    // 初次加载：根据当前筛选状态拉取
+    _fetchDramaList(isRefresh: true);
   }
 
   /// 处理滚动事件，上拉加载更多
@@ -82,16 +100,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     }
   }
 
-  /// 获取短剧列表
+  /// 根据当前筛选拉取数据
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
-
-    if (_selectedCategoryId == null) {
-      setState(() {
-        _isLoading = false;
-      });
-      return;
-    }
 
     setState(() {
       _isLoading = true;
@@ -103,10 +114,29 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _errorMessage = null;
     });
 
-    final result = await ShortDramaService.getList(
-      categoryId: _selectedCategoryId!,
-      page: _page,
-    );
+    ShortDramaListResponse result;
+    final selectedTypeId = _typeToCategoryId[_selectedTypeTab];
+
+    if (_selectedPrimaryTab == '最近热门' ||
+        _selectedTypeTab == '全部' ||
+        selectedTypeId == null ||
+        selectedTypeId == -1) {
+      // 最近热门 / 全部类型 -> 走推荐接口
+      result = await ShortDramaService.getRecommendResponse(
+        category: selectedTypeId != null && selectedTypeId > 0
+            ? selectedTypeId
+            : null,
+        page: _page,
+        size: 20,
+      );
+    } else {
+      // 指定类型 -> 走分类列表接口
+      result = await ShortDramaService.getList(
+        categoryId: selectedTypeId,
+        page: _page,
+        size: 20,
+      );
+    }
 
     if (!mounted) return;
 
@@ -114,29 +144,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _dramaList.addAll(result.list);
       _hasMore = result.hasMore;
       _isLoading = false;
-      // 如果当前分类为空，自动跳到下一个分类
-      if (result.list.isEmpty && _categories.isNotEmpty) {
-        _autoSwitchToNextCategory();
-      }
     });
-  }
-
-  /// 自动切换到下一个有内容的分类
-  void _autoSwitchToNextCategory() {
-    if (_selectedCategoryId == null || _categories.isEmpty) return;
-
-    final currentIndex = _categories.indexWhere(
-      (c) => c.typeId == _selectedCategoryId,
-    );
-    if (currentIndex >= 0 && currentIndex < _categories.length - 1) {
-      final nextCategory = _categories[currentIndex + 1];
-      // 延迟切换，避免在 build 中调用 setState
-      Future.microtask(() {
-        if (mounted) {
-          _onCategoryChanged(nextCategory.typeId);
-        }
-      });
-    }
   }
 
   /// 加载更多
@@ -150,22 +158,34 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
 
     _page++;
 
-    if (_selectedCategoryId != null) {
-      final result = await ShortDramaService.getList(
-        categoryId: _selectedCategoryId!,
+    ShortDramaListResponse result;
+    final selectedTypeId = _typeToCategoryId[_selectedTypeTab];
+
+    if (_selectedPrimaryTab == '最近热门' ||
+        _selectedTypeTab == '全部' ||
+        selectedTypeId == null ||
+        selectedTypeId == -1) {
+      result = await ShortDramaService.getRecommendResponse(
+        category: selectedTypeId != null && selectedTypeId > 0
+            ? selectedTypeId
+            : null,
         page: _page,
+        size: 20,
       );
-      if (!mounted) return;
-      setState(() {
-        _dramaList.addAll(result.list);
-        _hasMore = result.hasMore;
-        _isLoadingMore = false;
-      });
     } else {
-      setState(() {
-        _isLoadingMore = false;
-      });
+      result = await ShortDramaService.getList(
+        categoryId: selectedTypeId,
+        page: _page,
+        size: 20,
+      );
     }
+
+    if (!mounted) return;
+    setState(() {
+      _dramaList.addAll(result.list);
+      _hasMore = result.hasMore;
+      _isLoadingMore = false;
+    });
   }
 
   /// 下拉刷新
@@ -173,11 +193,20 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     await _fetchDramaList(isRefresh: true);
   }
 
-  /// 切换分类
-  void _onCategoryChanged(int categoryId) {
-    if (!mounted) return;
+  /// 切换一级分类
+  void _onPrimaryTabChanged(String tab) {
+    if (_selectedPrimaryTab == tab) return;
     setState(() {
-      _selectedCategoryId = categoryId;
+      _selectedPrimaryTab = tab;
+    });
+    _fetchDramaList(isRefresh: true);
+  }
+
+  /// 切换二级类型
+  void _onTypeTabChanged(String tab) {
+    if (_selectedTypeTab == tab) return;
+    setState(() {
+      _selectedTypeTab = tab;
     });
     _fetchDramaList(isRefresh: true);
   }
@@ -221,7 +250,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
               SliverToBoxAdapter(
                 child: _buildHeader(themeService),
               ),
-              // 筛选区（与电视剧页风格一致）
+              // 筛选区（与电视剧页风格一致：白底圆角容器，双行标签）
               SliverToBoxAdapter(
                 child: _buildFilterSection(themeService),
               ),
@@ -292,7 +321,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
-  /// 构建筛选区（与电视剧页一致：白底圆角容器，分类标签）
+  /// 构建筛选区（与电视剧页风格一致：白底圆角容器 + 双行胶囊标签）
   Widget _buildFilterSection(ThemeService themeService) {
     return Container(
       width: double.infinity,
@@ -307,81 +336,52 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 8),
-            child: Text(
-              '分类',
-              style: FontUtils.poppins(context,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).textTheme.bodyMedium?.color,
-              ),
-            ),
+          _buildFilterRow(
+            label: '分类',
+            tabs: _primaryTabs,
+            selectedTab: _selectedPrimaryTab,
+            onTabChanged: _onPrimaryTabChanged,
           ),
-          _buildCategoryTabs(themeService),
+          const SizedBox(height: 16),
+          _buildFilterRow(
+            label: '类型',
+            tabs: _typeTabs,
+            selectedTab: _selectedTypeTab,
+            onTabChanged: _onTypeTabChanged,
+          ),
         ],
       ),
     );
   }
 
-  /// 构建分类横向滚动标签
-  Widget _buildCategoryTabs(ThemeService themeService) {
-    if (_categories.isEmpty) {
-      return const SizedBox(height: 40);
-    }
-    return SizedBox(
-      height: 40,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: _categories.map((category) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 8, left: 4),
-            child: _buildCategoryChip(
-              label: category.typeName,
-              isSelected: _selectedCategoryId == category.typeId,
-              themeService: themeService,
-              onTap: () => _onCategoryChanged(category.typeId),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  /// 构建单个分类标签（与剧集页胶囊风格一致）
-  Widget _buildCategoryChip({
+  /// 构建单行筛选行（标题 + 横向胶囊标签）
+  Widget _buildFilterRow({
     required String label,
-    required bool isSelected,
-    required ThemeService themeService,
-    required VoidCallback onTap,
+    required List<String> tabs,
+    required String selectedTab,
+    required ValueChanged<String> onTabChanged,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF22C55E)
-              : (themeService.isDarkMode
-                  ? Colors.white.withOpacity(0.08)
-                  : Colors.grey[200]),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
           label,
           style: FontUtils.poppins(context,
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-            color: isSelected
-                ? Colors.white
-                : (themeService.isDarkMode
-                    ? const Color(0xFFb0b0b0)
-                    : const Color(0xFF7f8c8d)),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).textTheme.bodyMedium?.color,
           ),
         ),
-      ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: CapsuleTabSwitcher(
+            tabs: tabs,
+            selectedTab: selectedTab,
+            onTabChanged: onTabChanged,
+          ),
+        ),
+      ],
     );
   }
 
