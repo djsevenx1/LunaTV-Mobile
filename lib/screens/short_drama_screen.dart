@@ -962,10 +962,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
               children: [
                 // 海报 + 元信息
                 _buildPosterHeader(isDark),
-                // 源/线路
+                // 源 + 解析线路 + 选集 (整合在一个源模块里)
                 _buildSourceSection(isDark),
-                // 选集网格
-                _buildEpisodeSection(isDark),
                 // 简介
                 if (widget.drama.description.isNotEmpty)
                   _buildDescription(isDark),
@@ -1127,90 +1125,26 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     );
   }
 
-  /// 源/线路模块
-  /// 短剧后端只有 1 个源(短剧数据源), 这里显示源名称 + 解析线路切换
+  /// 源/线路/选集 模块 (仿照 PlayerScreen 的源选择)
+  /// 短剧后端只有 1 个源(短剧), 但包含:
+  ///   - 源 tile (名称 + 集数)
+  ///   - 解析线路切换 (代理 / 直连)
+  ///   - 选集 grid
   Widget _buildSourceSection(bool isDark) {
     const greenColor = Color(0xFF22C55E);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '源',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : const Color(0xFF2c3e50),
-            ),
-          ),
-          const SizedBox(height: 8),
-          // 源 (固定 1 个 - 短剧)
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? const Color(0xFF1e1e1e)
-                  : Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: greenColor.withOpacity(0.5),
-                width: 1.2,
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: greenColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '短剧',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isDark
-                          ? Colors.white
-                          : const Color(0xFF2c3e50),
-                    ),
-                  ),
-                ),
-                Text(
-                  '默认',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark
-                        ? const Color(0xFFb0b0b0)
-                        : const Color(0xFF7f8c8d),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEpisodeSection(bool isDark) {
-    const greenColor = Color(0xFF22C55E);
     const greenColorLight = Color(0xFF10B981);
+    final hasProxy = _proxyUrl.isNotEmpty;
+    final hasDirect = _directUrl.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 标题
           Row(
             children: [
               Text(
-                '选集',
+                '播放源',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
@@ -1229,8 +1163,115 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
-          if (_totalEpisodes >= 2)
+          const SizedBox(height: 8),
+          // 源 tile (固定 1 个 - 短剧)
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: greenColor.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: greenColor,
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                // 状态点
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: greenColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // 名称
+                Expanded(
+                  child: Text(
+                    '短剧',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? Colors.white
+                          : const Color(0xFF2c3e50),
+                    ),
+                  ),
+                ),
+                // 集数
+                Text(
+                  _totalEpisodes > 0 ? '共 $_totalEpisodes 集' : '加载中…',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark
+                        ? const Color(0xFFb0b0b0)
+                        : const Color(0xFF7f8c8d),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 测速中显示 loading (这里 mock 显示)
+                if (hasProxy || hasDirect)
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: greenColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // 解析线路 (代理 / 直连)
+          if (hasProxy || hasDirect) ...[
+            const SizedBox(height: 12),
+            Text(
+              '线路',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: isDark
+                    ? const Color(0xFFb0b0b0)
+                    : const Color(0xFF7f8c8d),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (hasProxy)
+                  Expanded(
+                    child: _buildLineTile(
+                      label: '代理 (推荐)',
+                      desc: '解决跨域,速度快',
+                      selected: _useProxy,
+                      enabled: true,
+                      isDark: isDark,
+                      onTap: () => _switchLine(true),
+                    ),
+                  ),
+                if (hasProxy && hasDirect) const SizedBox(width: 8),
+                if (hasDirect)
+                  Expanded(
+                    child: _buildLineTile(
+                      label: '直连',
+                      desc: '原始链接',
+                      selected: !_useProxy,
+                      enabled: true,
+                      isDark: isDark,
+                      onTap: () => _switchLine(false),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+
+          // 选集 grid
+          if (_totalEpisodes >= 2) ...[
+            const SizedBox(height: 12),
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -1271,24 +1312,102 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                   ),
                 );
               },
-            )
-          else if (_isLoadingDetail)
+            ),
+          ] else if (_isLoadingDetail) ...[
+            const SizedBox(height: 12),
             Text(
-              '正在加载集数...',
+              '正在加载集数…',
               style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white60 : Colors.black54,
-              ),
-            )
-          else
-            Text(
-              '点击播放试播,集数将在解析后显示',
-              style: TextStyle(
-                fontSize: 13,
+                fontSize: 12,
                 color: isDark ? Colors.white60 : Colors.black54,
               ),
             ),
+          ] else if (_totalEpisodes == 1) ...[
+            const SizedBox(height: 12),
+            Text(
+              '点击播放试播,集数将在解析后显示',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// 线路 tile (代理 / 直连)
+  Widget _buildLineTile({
+    required String label,
+    required String desc,
+    required bool selected,
+    required bool enabled,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    const greenColor = Color(0xFF22C55E);
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? greenColor.withOpacity(0.12)
+              : (isDark
+                  ? Colors.white.withOpacity(0.04)
+                  : Colors.white),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected
+                ? greenColor
+                : (isDark
+                    ? Colors.white.withOpacity(0.12)
+                    : Colors.black.withOpacity(0.08)),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? greenColor
+                        : (isDark
+                            ? Colors.white38
+                            : Colors.black26),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              desc,
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark
+                    ? const Color(0xFFb0b0b0)
+                    : const Color(0xFF7f8c8d),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
