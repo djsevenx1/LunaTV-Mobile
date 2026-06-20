@@ -788,7 +788,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       if (result.code == 0 && result.data != null) {
         final data = result.data!;
         _videoUrl = data.proxyUrl.isNotEmpty ? data.proxyUrl : data.parsedUrl;
-        if (_totalEpisodes <= 1 && data.totalEpisodes > 0) {
+        if (data.totalEpisodes > 0) {
           _totalEpisodes = data.totalEpisodes;
         }
         _videoName =
@@ -1018,22 +1018,23 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                     ),
                   ),
                 const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF22C55E).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '共 $_totalEpisodes 集',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF22C55E),
+                if (_totalEpisodes > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22C55E).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '共 $_totalEpisodes 集',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF22C55E),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1125,7 +1126,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
             )
           else
             Text(
-              '暂无可用集数',
+              '点击播放试播,集数将在解析后显示',
               style: TextStyle(
                 fontSize: 13,
                 color: isDark ? Colors.white60 : Colors.black54,
@@ -1169,7 +1170,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   Widget _buildBottomPlayButton(bool isDark) {
     const greenColor = Color(0xFF22C55E);
     const greenColorLight = Color(0xFF10B981);
-    final canPlay = _totalEpisodes > 0;
+    // 即便 _totalEpisodes=0 (后端 detail 接口没返回), 仍允许点播放试播, parseEpisode 会回填
+    final canPlay = true;
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
