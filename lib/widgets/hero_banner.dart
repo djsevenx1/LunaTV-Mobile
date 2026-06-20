@@ -1,11 +1,8 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:luna_tv/services/theme_service.dart';
-import 'package:luna_tv/utils/device_utils.dart';
-import 'package:luna_tv/utils/font_utils.dart';
+import 'package:provider/provider.dart';
 
 /// Hero Banner 轮播项数据模型
 class HeroBannerItem {
@@ -16,6 +13,9 @@ class HeroBannerItem {
   final String type; // movie/tv/anime/show
   final String source;
   final String id_; // 用于跳转播放
+  final String? year;
+  final String? rate;
+  final String? description;
 
   const HeroBannerItem({
     required this.id,
@@ -25,9 +25,11 @@ class HeroBannerItem {
     required this.type,
     required this.source,
     required this.id_,
+    this.year,
+    this.rate,
+    this.description,
   });
 
-  /// 根据 type 返回中文标签
   String get typeLabel {
     switch (type) {
       case 'movie':
@@ -38,23 +40,24 @@ class HeroBannerItem {
         return '动漫';
       case 'show':
         return '综艺';
+      case 'short':
+        return '短剧';
       default:
         return type;
     }
   }
 }
 
-/// Hero Banner 轮播组件，用于首页顶部展示热门内容
+/// Hero Banner 轮播组件 - LunaTV 风格
+/// 全屏背景图 + 渐变遮罩 + 大标题 + CTA 按钮
 class HeroBanner extends StatefulWidget {
   final List<HeroBannerItem> items;
   final void Function(HeroBannerItem item)? onTap;
-  final double height;
 
   const HeroBanner({
     super.key,
     required this.items,
     this.onTap,
-    this.height = 200,
   });
 
   @override
@@ -65,11 +68,6 @@ class _HeroBannerState extends State<HeroBanner> {
   late PageController _pageController;
   Timer? _autoScrollTimer;
   int _currentPage = 0;
-  bool _isUserInteracting = false;
-
-  // PC 端 hover 状态
-  bool _isHovered = false;
-  bool _isPlayButtonHovered = false;
 
   @override
   void initState() {
@@ -81,336 +79,379 @@ class _HeroBannerState extends State<HeroBanner> {
   @override
   void didUpdateWidget(covariant HeroBanner oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 列表变化时重置
     if (oldWidget.items.length != widget.items.length) {
       _currentPage = 0;
       if (_pageController.hasClients) {
         _pageController.jumpToPage(0);
       }
+      _startAutoScroll();
     }
   }
 
   @override
   void dispose() {
-    _stopAutoScroll();
+    _autoScrollTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
 
-  /// 启动自动轮播
   void _startAutoScroll() {
-    _stopAutoScroll();
-    _autoScrollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (!_isUserInteracting && widget.items.length > 1 && mounted) {
-        _nextPage();
-      }
-    });
-  }
-
-  /// 停止自动轮播
-  void _stopAutoScroll() {
     _autoScrollTimer?.cancel();
-    _autoScrollTimer = null;
-  }
-
-  /// 切换到下一页
-  void _nextPage() {
-    if (!mounted || ! _pageController.hasClients) return;
-    _currentPage = (_currentPage + 1) % widget.items.length;
-    _pageController.animateToPage(
-      _currentPage,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  /// 用户开始拖拽
-  void _onPageDragStart() {
-    _isUserInteracting = true;
-    _stopAutoScroll();
-  }
-
-  /// 用户结束拖拽
-  void _onPageDragEnd() {
-    _isUserInteracting = false;
-    _startAutoScroll();
-  }
-
-  /// 处理 banner 点击
-  void _onBannerTap(HeroBannerItem item) {
-    widget.onTap?.call(item);
+    if (widget.items.length <= 1) return;
+    _autoScrollTimer = Timer.periodic(const Duration(seconds: 8), (timer) {
+      if (!mounted || !_pageController.hasClients) return;
+      final next = (_currentPage + 1) % widget.items.length;
+      _pageController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 1000),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    // 空列表时不显示
-    if (widget.items.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (widget.items.isEmpty) return const SizedBox.shrink();
 
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Banner 主体
-            SizedBox(
-              height: widget.height,
-              child: _buildBannerContent(themeService),
-            ),
-            // 底部指示器
-            const SizedBox(height: 8),
-            _buildIndicator(themeService),
-          ],
+        final isDarkMode = themeService.isDarkMode;
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            // 响应式高度
+            final screenWidth = constraints.maxWidth;
+            final screenHeight = MediaQuery.of(context).size.height;
+            double bannerHeight;
+            if (screenWidth < 640) {
+              bannerHeight = screenHeight * 0.55; // 移动端 55vh
+            } else if (screenWidth < 768) {
+              bannerHeight = screenHeight * 0.6; // sm 60vh
+            } else if (screenWidth < 1024) {
+              bannerHeight = screenHeight * 0.7; // md 70vh
+            } else {
+              bannerHeight = screenHeight * 0.75; // lg+ 75vh
+            }
+            bannerHeight = bannerHeight.clamp(380.0, 720.0);
+
+            return Container(
+              width: double.infinity,
+              height: bannerHeight,
+              child: Stack(
+                children: [
+                  // 背景图轮播
+                  PageView.builder(
+                    controller: _pageController,
+                    itemCount: widget.items.length,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentPage = index;
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      return _buildBannerItem(widget.items[index], isDarkMode);
+                    },
+                  ),
+
+                  // 左右切换按钮
+                  if (widget.items.length > 1) ...[
+                    Positioned(
+                      left: 8,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _buildNavButton(
+                          Icons.chevron_left,
+                          () {
+                            if (_pageController.hasClients) {
+                              _pageController.previousPage(
+                                duration: const Duration(milliseconds: 500),
+                                curve: Curves.easeInOut,
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: 8,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _buildNavButton(
+                          Icons.chevron_right,
+                          () {
+                            if (_pageController.hasClients) {
+                              _pageController.nextPage(
+                                duration: const Duration(milliseconds: 500),
+                                curve: Curves.easeInOut,
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // 底部指示器
+                  Positioned(
+                    bottom: 12,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(
+                          widget.items.length,
+                          (index) => AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
+                            width: index == _currentPage ? 24 : 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: index == _currentPage
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.4),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
   }
 
-  /// 构建 Banner 内容
-  Widget _buildBannerContent(ThemeService themeService) {
-    final bool isPC = DeviceUtils.isPC();
-
-    if (isPC) {
-      return MouseRegion(
-        onEnter: (_) => setState(() => _isHovered = true),
-        onExit: (_) {
-          setState(() {
-            _isHovered = false;
-            _isPlayButtonHovered = false;
-          });
-        },
-        child: GestureDetector(
-          onTap: () => _onBannerTap(widget.items[_currentPage]),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Stack(
-              children: [
-                // PageView
-                _buildPageView(themeService),
-                // PC 端 hover 播放按钮叠加层
-                _buildPCPlayOverlay(),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 移动端
+  Widget _buildBannerItem(HeroBannerItem item, bool isDarkMode) {
     return GestureDetector(
-      onTap: () => _onBannerTap(widget.items[_currentPage]),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: _buildPageView(themeService),
-      ),
-    );
-  }
-
-  /// 构建 PageView
-  Widget _buildPageView(ThemeService themeService) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is ScrollStartNotification) {
-          _onPageDragStart();
-        } else if (notification is ScrollEndNotification) {
-          _onPageDragEnd();
-        }
-        return false;
-      },
-      child: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.items.length,
-        onPageChanged: (index) {
-          setState(() {
-            _currentPage = index;
-          });
-        },
-        itemBuilder: (context, index) {
-          return _buildBannerItem(widget.items[index], themeService);
-        },
-      ),
-    );
-  }
-
-  /// 构建单个 Banner 项
-  Widget _buildBannerItem(HeroBannerItem item, ThemeService themeService) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // 背景大图
-        CachedNetworkImage(
-          imageUrl: item.imageUrl,
-          fit: BoxFit.cover,
-          cacheKey: item.imageUrl,
-          placeholder: (context, url) => Container(
-            color: themeService.isDarkMode
-                ? const Color(0xFF333333)
-                : Colors.grey[300],
-          ),
-          errorWidget: (context, url, error) => Container(
-            color: themeService.isDarkMode
-                ? const Color(0xFF333333)
-                : Colors.grey[300],
-            child: const Icon(
-              Icons.movie,
-              color: Color(0xFF666666),
-              size: 40,
+      onTap: () => widget.onTap?.call(item),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 背景图
+          CachedNetworkImage(
+            imageUrl: item.imageUrl,
+            fit: BoxFit.cover,
+            placeholder: (context, url) => Container(
+              color: isDarkMode ? Colors.black : Colors.grey[300],
+            ),
+            errorWidget: (context, url, error) => Container(
+              color: isDarkMode ? Colors.black : Colors.grey[300],
+              child: const Icon(Icons.movie, color: Colors.white, size: 64),
             ),
           ),
-          fadeInDuration: const Duration(milliseconds: 300),
-          fadeOutDuration: const Duration(milliseconds: 100),
-        ),
-
-        // 底部渐变遮罩（从透明到黑色）
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: Container(
-            height: widget.height * 0.7,
-            decoration: BoxDecoration(
+          // 水平渐变遮罩
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0xCC000000),
+                  Color(0x99000000),
+                  Color(0x4D000000),
+                ],
+                stops: [0.0, 0.4, 1.0],
+              ),
+            ),
+          ),
+          // 垂直渐变遮罩
+          Container(
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.85),
+                  Color(0x66000000),
+                  Color(0x73000000),
+                  Color(0xF2000000),
                 ],
-                stops: const [0.0, 1.0],
+                stops: [0.0, 0.5, 1.0],
               ),
             ),
           ),
-        ),
-
-        // 文字内容区域
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 16,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 类型标签
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF27ae60),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  item.typeLabel,
-                  style: FontUtils.poppins(context,
-                                        fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+          // 内容
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 56),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 标签行
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      // 类型
+                      _buildPill(item.typeLabel, withBg: false),
+                      // 年份
+                      if (item.year != null && item.year!.isNotEmpty)
+                        _buildPill(item.year!, withBg: false),
+                      // 评分
+                      if (item.rate != null && item.rate!.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.ratingAmber.withOpacity(0.85),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.star,
+                                  size: 11, color: Colors.white),
+                              const SizedBox(width: 2),
+                              Text(
+                                item.rate!,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  // 标题
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      height: 1.2,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black54,
+                          offset: Offset(0, 2),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 描述
+                  if (item.description != null && item.description!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 60),
+                      child: Text(
+                        item.description!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.white70,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  // 按钮
+                  Row(
+                    children: [
+                      // 立即播放
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(24),
+                            onTap: () => widget.onTap?.call(item),
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 24, vertical: 10),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.play_arrow,
+                                      color: Colors.black, size: 20),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    '立即播放',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
-              // 标题
-              Text(
-                item.title,
-                style: FontUtils.poppins(context,
-                                    fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              // 副标题/描述
-              Text(
-                item.subtitle,
-                style: FontUtils.poppins(context,
-                                    fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  color: Colors.white.withOpacity(0.7),
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  /// PC 端 hover 播放按钮叠加层
-  Widget _buildPCPlayOverlay() {
-    return AnimatedOpacity(
-      opacity: _isHovered ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 200),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(8),
+  Widget _buildPill(String text, {bool withBg = true}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: withBg ? Colors.white.withOpacity(0.15) : Colors.transparent,
+        border: Border.all(
+          color: Colors.white.withOpacity(withBg ? 0.0 : 0.3),
+          width: 0.5,
         ),
-        child: Center(
-          child: MouseRegion(
-            onEnter: (_) => setState(() => _isPlayButtonHovered = true),
-            onExit: (_) => setState(() => _isPlayButtonHovered = false),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _isPlayButtonHovered
-                    ? const Color(0xFF27ae60)
-                    : Colors.white.withOpacity(0.9),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.play_arrow,
-                color: _isPlayButtonHovered
-                    ? Colors.white
-                    : const Color(0xFF27ae60),
-                size: 36,
-              ),
-            ),
-          ),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 11,
+          color: Colors.white,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
   }
 
-  /// 构建底部指示器
-  Widget _buildIndicator(ThemeService themeService) {
-    if (widget.items.length <= 1) {
-      return const SizedBox.shrink();
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(widget.items.length, (index) {
-        final bool isActive = index == _currentPage;
-
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          margin: const EdgeInsets.symmetric(horizontal: 3),
-          width: isActive ? 18 : 6,
-          height: 6,
-          decoration: BoxDecoration(
-            color: isActive
-                ? const Color(0xFF27ae60)
-                : (themeService.isDarkMode
-                    ? Colors.white.withOpacity(0.3)
-                    : const Color(0xFF2c3e50).withOpacity(0.3)),
-            borderRadius: BorderRadius.circular(3),
-          ),
-        );
-      }),
+  Widget _buildNavButton(IconData icon, VoidCallback onPressed) {
+    return Material(
+      color: Colors.black.withOpacity(0.3),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onPressed,
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          child: Icon(icon, color: Colors.white, size: 24),
+        ),
+      ),
     );
   }
 }
