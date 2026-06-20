@@ -159,6 +159,10 @@ class ApiService {
 
     // 处理成功响应
     try {
+      // 兼容空响应 (如 POST /api/playrecords 有些后端返回 200 + 空 body)
+      if (response.body.isEmpty) {
+        return ApiResponse.success(null as T, statusCode: response.statusCode);
+      }
       final responseData = json.decode(response.body);
 
       if (fromJson != null) {
@@ -455,6 +459,8 @@ class ApiService {
         'key': key,
         'record': playRecord.toJson(),
       };
+      // ignore: avoid_print
+      print('[playrecords] POST key=$key');
 
       final response = await post<void>(
         '/api/playrecords',
@@ -462,8 +468,12 @@ class ApiService {
         context: context,
       );
 
+      // ignore: avoid_print
+      print('[playrecords] POST resp code=${response.statusCode} ok=${response.success} msg=${response.message}');
       return response;
     } catch (e) {
+      // ignore: avoid_print
+      print('[playrecords] POST 异常: $e');
       return ApiResponse.error('保存播放记录异常: ${e.toString()}');
     }
   }
