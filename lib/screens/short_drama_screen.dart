@@ -1361,16 +1361,16 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    '选集',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                  if (_totalEpisodes >= 2) ...[
+                    Text(
+                      '选集',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_totalEpisodes >= 1)
+                    const SizedBox(height: 8),
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
@@ -1424,18 +1424,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                           ),
                         );
                       },
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text(
-                        '暂无可用集数',
-                        style: TextStyle(
-                          color: isDark ? Colors.white60 : Colors.black54,
-                          fontSize: 13,
-                        ),
-                      ),
                     ),
+                  ],
                 ],
               ),
             ),
