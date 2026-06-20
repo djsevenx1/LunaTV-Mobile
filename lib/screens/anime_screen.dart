@@ -514,12 +514,7 @@ class _AnimeScreenState extends State<AnimeScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => PlayerScreen(
-            source: videoInfo.source,
-            id: videoInfo.id,
-            title: videoInfo.title,
-            year: videoInfo.year,
-          ),
+          builder: (context) => PlayerScreen(videoInfo: videoInfo),
         ),
       );
     } else {
@@ -527,12 +522,7 @@ class _AnimeScreenState extends State<AnimeScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => PlayerScreen(
-            source: videoInfo.source,
-            id: videoInfo.id,
-            title: videoInfo.title,
-            year: videoInfo.year,
-          ),
+          builder: (context) => PlayerScreen(videoInfo: videoInfo),
         ),
       );
     }

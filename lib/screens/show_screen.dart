@@ -449,12 +449,7 @@ class _ShowScreenState extends State<ShowScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PlayerScreen(
-          source: videoInfo.source,
-          id: videoInfo.id,
-          title: videoInfo.title,
-          year: videoInfo.year,
-        ),
+        builder: (context) => PlayerScreen(videoInfo: videoInfo),
       ),
     );
   }

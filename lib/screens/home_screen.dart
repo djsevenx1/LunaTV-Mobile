@@ -281,15 +281,29 @@ class _HomeScreenState extends State<HomeScreen> {
               HeroBanner(
                 items: _bannerItems,
                 onTap: (item) {
-                  _navigateToPlayer(
-                    PlayerScreen(
-                      source: item.source,
+                _navigateToPlayer(
+                  PlayerScreen(
+                    videoInfo: VideoInfo(
                       id: item.id_,
+                      source: item.source,
                       title: item.title,
+                      sourceName: item.source,
                       year: item.year ?? '',
+                      cover: item.imageUrl,
+                      index: 0,
+                      totalEpisodes: 0,
+                      playTime: 0,
+                      totalTime: 0,
+                      saveTime: 0,
+                      searchTitle: item.title,
+                      doubanId: item.type == 'movie' || item.type == 'tv'
+                          ? item.id
+                          : null,
+                      rate: item.rate,
                     ),
-                  );
-                },
+                  ),
+                );
+              },
               ),
             const SizedBox(height: 8),
             // 继续观看组件
@@ -305,24 +319,14 @@ class _HomeScreenState extends State<HomeScreen> {
             HotMoviesSection(
               onMovieTap: (videoInfo) {
                 _navigateToPlayer(
-                  PlayerScreen(
-                    source: videoInfo.source,
-                    id: videoInfo.id,
-                    title: videoInfo.title,
-                    year: videoInfo.year,
-                  ),
+                  PlayerScreen(videoInfo: videoInfo),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(1),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
-                    PlayerScreen(
-                      source: videoInfo.source,
-                      id: videoInfo.id,
-                      title: videoInfo.title,
-                      year: videoInfo.year,
-                    ),
+                    PlayerScreen(videoInfo: videoInfo),
                   );
                 } else {
                   _onGlobalMenuActionFromVideoInfo(videoInfo, action);
@@ -333,24 +337,14 @@ class _HomeScreenState extends State<HomeScreen> {
             HotTvSection(
               onTvTap: (videoInfo) {
                 _navigateToPlayer(
-                  PlayerScreen(
-                    source: videoInfo.source,
-                    id: videoInfo.id,
-                    title: videoInfo.title,
-                    year: videoInfo.year,
-                  ),
+                  PlayerScreen(videoInfo: videoInfo),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(2),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
-                    PlayerScreen(
-                      source: videoInfo.source,
-                      id: videoInfo.id,
-                      title: videoInfo.title,
-                      year: videoInfo.year,
-                    ),
+                    PlayerScreen(videoInfo: videoInfo),
                   );
                 } else {
                   _onGlobalMenuActionFromVideoInfo(videoInfo, action);
@@ -361,24 +355,14 @@ class _HomeScreenState extends State<HomeScreen> {
             BangumiSection(
               onBangumiTap: (videoInfo) {
                 _navigateToPlayer(
-                  PlayerScreen(
-                    source: videoInfo.source,
-                    id: videoInfo.id,
-                    title: videoInfo.title,
-                    year: videoInfo.year,
-                  ),
+                  PlayerScreen(videoInfo: videoInfo),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(3),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
-                    PlayerScreen(
-                      source: videoInfo.source,
-                      id: videoInfo.id,
-                      title: videoInfo.title,
-                      year: videoInfo.year,
-                    ),
+                    PlayerScreen(videoInfo: videoInfo),
                   );
                 } else {
                   _onGlobalMenuActionFromVideoInfo(videoInfo, action);
@@ -389,24 +373,14 @@ class _HomeScreenState extends State<HomeScreen> {
             HotShowSection(
               onShowTap: (videoInfo) {
                 _navigateToPlayer(
-                  PlayerScreen(
-                    source: videoInfo.source,
-                    id: videoInfo.id,
-                    title: videoInfo.title,
-                    year: videoInfo.year,
-                  ),
+                  PlayerScreen(videoInfo: videoInfo),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(5),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
-                    PlayerScreen(
-                      source: videoInfo.source,
-                      id: videoInfo.id,
-                      title: videoInfo.title,
-                      year: videoInfo.year,
-                    ),
+                    PlayerScreen(videoInfo: videoInfo),
                   );
                 } else {
                   _onGlobalMenuActionFromVideoInfo(videoInfo, action);
@@ -648,10 +622,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onVideoTap(PlayRecord playRecord) {
     _navigateToPlayer(
       PlayerScreen(
-        source: playRecord.source,
-        id: playRecord.id,
-        title: playRecord.title,
-        year: playRecord.year,
+        videoInfo: VideoInfo.fromPlayRecord(playRecord),
       ),
     );
   }
@@ -683,10 +654,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case VideoMenuAction.play:
         _navigateToPlayer(
           PlayerScreen(
-            source: playRecord.source,
-            id: playRecord.id,
-            title: playRecord.title,
-            year: playRecord.year,
+            videoInfo: VideoInfo.fromPlayRecord(playRecord),
           ),
         );
         break;

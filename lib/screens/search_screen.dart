@@ -265,12 +265,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   void _navigateToPlayer(VideoInfo video) {
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          source: video.source,
-          id: video.id,
-          title: video.title,
-          year: video.year,
-        ),
+        builder: (_) => PlayerScreen(videoInfo: video),
       ),
     );
   }
