@@ -735,17 +735,16 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
         _detail = detail;
         _isLoadingDetail = false;
         if (detail == null) {
-          _detailError = '详情接口返回为空, 已用列表中的集数 (${_totalEpisodes})';
+          _detailError = '正在加载剧集信息…';
         } else if (detailTotal == 0 && widget.drama.episodeCount > 0) {
-          _detailError =
-              '详情接口未带集数字段, 已用列表中的集数 (${_totalEpisodes})';
+          _detailError = '正在加载剧集信息…';
         }
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoadingDetail = false;
-        _detailError = '加载详情失败: $e';
+        _detailError = '正在加载剧集信息…';
         if (widget.drama.episodeCount > 0) {
           _totalEpisodes = widget.drama.episodeCount;
         }
@@ -799,14 +798,17 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
           setState(() {
             _isLoading = false;
             _isError = true;
-            _errorMessage = '未获取到播放地址 (code=${result.code} msg=${result.msg})';
+            _errorMessage = '未获取到播放地址,请稍后重试';
           });
         }
       } else {
         setState(() {
           _isLoading = false;
           _isError = true;
-          _errorMessage = 'code=${result.code} ${result.msg.isNotEmpty ? result.msg : '解析失败'}';
+          // 优先显示后端 msg, 否则显示通用文案
+          _errorMessage = result.msg.isNotEmpty
+              ? '播放失败: ${result.msg}'
+              : '播放失败,请稍后重试';
         });
       }
     } catch (e) {
