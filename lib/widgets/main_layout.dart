@@ -905,122 +905,152 @@ class _MainLayoutState extends State<MainLayout> {
     ];
 
     final isTablet = DeviceUtils.isTablet(context);
+    final isPC = DeviceUtils.isPC();
 
     // 毛玻璃背景：半透明色 + 高斯模糊
     final glassColor = themeService.isDarkMode
-        ? Colors.black.withOpacity(0.25)
-        : Colors.white.withOpacity(0.3);
+        ? Colors.black.withOpacity(0.45)
+        : Colors.white.withOpacity(0.55);
     final borderColor = themeService.isDarkMode
         ? Colors.white.withOpacity(0.12)
         : Colors.black.withOpacity(0.08);
 
-    return ClipRect(
+    // 药丸式外壳（圆角大、悬浮感）
+    final pill = ClipRRect(
+      borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+        filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
         child: Container(
           decoration: BoxDecoration(
             color: glassColor,
-            border: Border(
-              top: BorderSide(color: borderColor, width: 0.5),
-            ),
+            border: Border.all(color: borderColor, width: 0.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          padding: EdgeInsets.only(
-            left: 0,
-            right: 0,
-            top: 8,
-            bottom: MediaQuery.of(context).padding.bottom + 8, // 手动处理底部安全区域
-          ),
-          child: Row(
-            mainAxisAlignment: isTablet
-                ? MainAxisAlignment.center
-                : MainAxisAlignment.spaceEvenly,
-            children: [
-              // 平板模式下添加左侧空白
-              if (isTablet) const Spacer(flex: 3),
-
-              // 导航按钮
-              ...navItems.asMap().entries.expand((entry) {
-                int index = entry.key;
-                Map<String, dynamic> item = entry.value;
-                bool isSelected =
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(navItems.length, (index) {
+                final item = navItems[index];
+                final isSelected =
                     !widget.isSearchMode &&
                         widget.currentBottomNavIndex == index;
-                bool isHovered =
-                    DeviceUtils.isPC() && _hoveredNavIndex == index;
+                final isHovered = isPC && _hoveredNavIndex == index;
 
-                return [
-                  MouseRegion(
-                    cursor: DeviceUtils.isPC()
-                        ? SystemMouseCursors.click
-                        : MouseCursor.defer,
-                    onEnter: DeviceUtils.isPC()
-                        ? (_) {
-                            setState(() {
-                              _hoveredNavIndex = index;
-                            });
-                          }
-                        : null,
-                    onExit: DeviceUtils.isPC()
-                        ? (_) {
-                            setState(() {
-                              _hoveredNavIndex = null;
-                            });
-                          }
-                        : null,
-                    child: GestureDetector(
-                      onTap: () {
-                        widget.onBottomNavChanged(index);
-                      },
-                      behavior: HitTestBehavior.opaque, // 确保整个区域都可以点击
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isTablet ? 16 : 12,
-                          vertical: 8,
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              item['icon'],
-                              color: isSelected
-                                  ? const Color(0xFF27ae60)
-                                  : isHovered
-                                      ? const Color(0xFF52c77a) // hover 时的浅绿色
-                                      : themeService.isDarkMode
-                                          ? const Color(0xFFb0b0b0)
-                                          : const Color(0xFF7f8c8d),
-                              size: 24,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              item['label'],
-                              style: FontUtils.poppins(context,
-                                fontSize: 12,
-                                fontWeight: isSelected
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                                color: isSelected
-                                    ? const Color(0xFF27ae60)
-                                    : isHovered
-                                        ? const Color(0xFF52c77a) // hover 时的浅绿色
-                                        : themeService.isDarkMode
-                                            ? const Color(0xFFb0b0b0)
-                                            : const Color(0xFF7f8c8d),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 平板模式下在按钮之间添加间距
-                  if (isTablet && index < navItems.length - 1)
-                    const SizedBox(width: 36),
-                ];
+                return _buildPillTab(
+                  item: item,
+                  index: index,
+                  isSelected: isSelected,
+                  isHovered: isHovered,
+                  isPC: isPC,
+                  isTablet: isTablet,
+                  themeService: themeService,
+                );
               }),
+            ),
+          ),
+        ),
+      ),
+    );
 
-              // 平板模式下添加右侧空白
-              if (isTablet) const Spacer(flex: 3),
+    // 平板/PC 居中显示，手机撑满大部分宽度
+    if (isTablet) {
+      return Padding(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 4,
+          bottom: MediaQuery.of(context).padding.bottom + 10,
+        ),
+        child: Center(child: pill),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 4,
+        bottom: MediaQuery.of(context).padding.bottom + 10,
+      ),
+      child: pill,
+    );
+  }
+
+  /// 单个药丸 Tab：选中态显示 icon+文字(绿色背景)，未选中只显示 icon
+  Widget _buildPillTab({
+    required Map<String, dynamic> item,
+    required int index,
+    required bool isSelected,
+    required bool isHovered,
+    required bool isPC,
+    required bool isTablet,
+    required ThemeService themeService,
+  }) {
+    return MouseRegion(
+      cursor: isPC ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: isPC
+          ? (_) => setState(() => _hoveredNavIndex = index)
+          : null,
+      onExit: isPC
+          ? (_) => setState(() => _hoveredNavIndex = null)
+          : null,
+      child: GestureDetector(
+        onTap: () => widget.onBottomNavChanged(index),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          padding: EdgeInsets.symmetric(
+            horizontal: isSelected ? 14 : 10,
+            vertical: 8,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF27ae60)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                item['icon'],
+                size: 22,
+                color: isSelected
+                    ? Colors.white
+                    : isHovered
+                        ? const Color(0xFF52c77a)
+                        : themeService.isDarkMode
+                            ? const Color(0xFFb0b0b0)
+                            : const Color(0xFF7f8c8d),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                child: isSelected
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text(
+                          item['label'],
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
             ],
           ),
         ),
