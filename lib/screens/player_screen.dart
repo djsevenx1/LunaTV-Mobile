@@ -36,6 +36,12 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
+/// 测速用的临时包装
+class _SourcePingItem {
+  final SearchResult source;
+  _SourcePingItem(this.source);
+}
+
 class _PlayerScreenState extends State<PlayerScreen> {
   // 播放器
   late final Player _player;
@@ -277,17 +283,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  /// 后台测速所有源
+  /// 后台测速所有源：并发测速，并按速度从快到慢排序源列表
   Future<void> _testAllSourcesInBackground() async {
+    // 先标记所有源为测速中
+    final pending = <_SourcePingItem>[];
     for (final s in _sourceResults) {
-      if (!mounted) return;
       if (s.episodes.isEmpty) continue;
       _pingState[s.source] = PingState.testing;
-      if (mounted) setState(() {});
-      final ms = await _pingSource(s.episodes.first);
-      if (!mounted) return;
-      _pingState[s.source] = _stateFromMs(ms);
+      pending.add(_SourcePingItem(s));
     }
+    if (mounted) setState(() {});
+
+    // 并发测速（最多同时 6 个，避免瞬时连接太多）
+    const maxConcurrent = 6;
+    for (var i = 0; i < pending.length; i += maxConcurrent) {
+      final batch = pending.skip(i).take(maxConcurrent);
+      await Future.wait(batch.map((item) async {
+        final ms = await _pingSource(item.source.episodes.first);
+        if (!mounted) return;
+        _pingState[item.source.source] = _stateFromMs(ms);
+        if (mounted) setState(() {});
+      }));
+    }
+
+    if (!mounted) return;
     if (mounted) setState(() {});
 
     // 自动选最快源 (除非用户已经主动选过)
@@ -295,7 +314,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       int bestMs = 1 << 30;
       String? bestSource;
       for (final s in _sourceResults) {
-        final ms = _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
+        final ms =
+            _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
         if (ms != null && ms < bestMs) {
           bestMs = ms;
           bestSource = s.source;
@@ -309,6 +329,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
     }
+
+    // 按速度从快到慢重排源列表（已测速成功的排前面；测失败的放最后）
+    _sortSourcesBySpeed();
+  }
+
+  /// 按测速速度从快到慢排序源列表
+  void _sortSourcesBySpeed() {
+    int scoreOf(SearchResult s) {
+      if (s.episodes.isEmpty) return 1 << 30;
+      final ms = _pingCache[s.episodes.first];
+      if (ms == null) return 1 << 30;
+      return ms;
+    }
+
+    setState(() {
+      _sourceResults.sort((a, b) => scoreOf(a).compareTo(scoreOf(b)));
+      // _selectedSource 是 SearchResult 引用，sort 后引用仍然指向同一对象，不需要调整
+    });
   }
 
   PingState _stateFromMs(int ms) {
@@ -321,18 +359,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<int> _pingSource(String url) async {
     if (_pingCache.containsKey(url)) return _pingCache[url]!;
     final start = DateTime.now();
+    final httpClient = http.Client();
     try {
       final req = http.Request('HEAD', Uri.parse(url))
         ..followRedirects = true
-        ..maxRedirects = 3;
+        ..maxRedirects = 2;
       final response =
-          await req.send().timeout(const Duration(seconds: 3));
-      try {
-        await response.stream.drain();
-      } catch (_) {}
-    } catch (_) {}
+          await httpClient.send(req).timeout(const Duration(milliseconds: 1500));
+      // 测首字节即可，不等响应体流
+      response.stream.drain().catchError((_) {});
+    } catch (_) {
+      // 超时或失败统一记为 3000ms
+      _pingCache[url] = 3000;
+      httpClient.close();
+      return 3000;
+    }
     final ms = DateTime.now().difference(start).inMilliseconds;
     _pingCache[url] = ms;
+    httpClient.close();
     return ms;
   }
 

@@ -64,7 +64,6 @@ class _MainLayoutState extends State<MainLayout> {
 
   // 用于跟踪主题切换按钮的 hover 状态
   bool _isThemeButtonHovered = false;
-  bool _isSettingsButtonHovered = false;
 
   // 用于跟踪用户按钮的 hover 状态
   bool _isUserButtonHovered = false;
@@ -841,56 +840,6 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ),
         const SizedBox(width: 12),
-// 设置按钮
-MouseRegion(
-  cursor: DeviceUtils.isPC() ? SystemMouseCursors.click : MouseCursor.defer,
-  onEnter: DeviceUtils.isPC()
-      ? (_) {
-          setState(() {
-            _isSettingsButtonHovered = true;
-          });
-        }
-      : null,
-  onExit: DeviceUtils.isPC()
-      ? (_) {
-          setState(() {
-            _isSettingsButtonHovered = false;
-          });
-        }
-      : null,
-  child: GestureDetector(
-    onTap: () {
-      // 设置入口已合并到弹窗里：直接打开用户菜单
-      setState(() {
-        _showUserMenu = true;
-      });
-    },
-    behavior: HitTestBehavior.opaque,
-    child: Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: DeviceUtils.isPC() && _isSettingsButtonHovered
-            ? (themeService.isDarkMode
-                ? const Color(0xFF333333)
-                : const Color(0xFFe0e0e0))
-            : Colors.transparent,
-      ),
-      child: Center(
-        child: Icon(
-          LucideIcons.settings,
-          color: themeService.isDarkMode
-              ? const Color(0xFFffffff)
-              : const Color(0xFF2c3e50),
-          size: 24,
-          weight: 1.0,
-        ),
-      ),
-    ),
-  ),
-),
-const SizedBox(width: 12),
         // 用户按钮
         MouseRegion(
           cursor:
