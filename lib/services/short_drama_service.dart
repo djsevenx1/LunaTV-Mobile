@@ -156,13 +156,17 @@ class ShortDramaService {
     print('[shortdrama/detail] id=$id');
     try {
       String url = await _buildUrl('/api/shortdrama/detail');
-      final uri = Uri.parse(url).replace(queryParameters: {
-        'id': id,
-      });
       final headers = await _buildHeaders();
 
+      // ignore: avoid_print
+      print('[shortdrama/detail] POST $url body={"id": $id}');
+
       final response = await http
-          .get(uri, headers: headers)
+          .post(
+            Uri.parse(url),
+            headers: headers,
+            body: json.encode({'id': id}),
+          )
           .timeout(_timeout);
 
       // ignore: avoid_print
@@ -233,25 +237,26 @@ class ShortDramaService {
   }) async {
     try {
       String url = await _buildUrl('/api/shortdrama/parse');
-      final queryParams = <String, String>{
-        'id': id.toString(),
-        'episode': episode.toString(),
-      };
-      if (useProxy) {
-        queryParams['proxy'] = 'true';
-      }
-      if (name != null && name.isNotEmpty) {
-        queryParams['name'] = name;
-      }
-
-      final uri = Uri.parse(url).replace(queryParameters: queryParams);
       final headers = await _buildHeaders();
+      // 短剧后端 (LOMI 兼容): 用 POST JSON body 传参
+      final body = <String, dynamic>{
+        'id': id,
+        'episode': episode,
+        'proxy': useProxy,
+      };
+      if (name != null && name.isNotEmpty) {
+        body['name'] = name;
+      }
 
       // ignore: avoid_print
-      print('[shortdrama/parse] GET $uri');
+      print('[shortdrama/parse] POST $url body=$body');
 
       final response = await http
-          .get(uri, headers: headers)
+          .post(
+            Uri.parse(url),
+            headers: headers,
+            body: json.encode(body),
+          )
           .timeout(_timeout);
 
       // ignore: avoid_print
