@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/search_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
@@ -956,114 +957,124 @@ const SizedBox(width: 12),
 
     final isTablet = DeviceUtils.isTablet(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: themeService.isDarkMode
-            ? const Color(0xFF1e1e1e).withOpacity(0.9)
-            : Colors.white.withOpacity(0.9),
-        border: Border(
-          top: BorderSide(
-            color: themeService.isDarkMode
-                ? const Color(0xFF333333).withOpacity(0.3)
-                : Colors.white.withOpacity(0.2),
-            width: 1,
+    // 毛玻璃背景：半透明色 + 高斯模糊
+    final glassColor = themeService.isDarkMode
+        ? Colors.black.withOpacity(0.45)
+        : Colors.white.withOpacity(0.65);
+    final borderColor = themeService.isDarkMode
+        ? Colors.white.withOpacity(0.08)
+        : Colors.black.withOpacity(0.06);
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: glassColor,
+            border: Border(
+              top: BorderSide(color: borderColor, width: 0.5),
+            ),
           ),
-        ),
-      ),
-      padding: EdgeInsets.only(
-        left: 0,
-        right: 0,
-        top: 8,
-        bottom: MediaQuery.of(context).padding.bottom + 8, // 手动处理底部安全区域
-      ),
-      child: Row(
-        mainAxisAlignment:
-            isTablet ? MainAxisAlignment.center : MainAxisAlignment.spaceEvenly,
-        children: [
-          // 平板模式下添加左侧空白
-          if (isTablet) const Spacer(flex: 3),
+          padding: EdgeInsets.only(
+            left: 0,
+            right: 0,
+            top: 8,
+            bottom: MediaQuery.of(context).padding.bottom + 8, // 手动处理底部安全区域
+          ),
+          child: Row(
+            mainAxisAlignment: isTablet
+                ? MainAxisAlignment.center
+                : MainAxisAlignment.spaceEvenly,
+            children: [
+              // 平板模式下添加左侧空白
+              if (isTablet) const Spacer(flex: 3),
 
-          // 导航按钮
-          ...navItems.asMap().entries.expand((entry) {
-            int index = entry.key;
-            Map<String, dynamic> item = entry.value;
-            bool isSelected =
-                !widget.isSearchMode && widget.currentBottomNavIndex == index;
-            bool isHovered = DeviceUtils.isPC() && _hoveredNavIndex == index;
+              // 导航按钮
+              ...navItems.asMap().entries.expand((entry) {
+                int index = entry.key;
+                Map<String, dynamic> item = entry.value;
+                bool isSelected =
+                    !widget.isSearchMode &&
+                        widget.currentBottomNavIndex == index;
+                bool isHovered =
+                    DeviceUtils.isPC() && _hoveredNavIndex == index;
 
-            return [
-              MouseRegion(
-                cursor: DeviceUtils.isPC()
-                    ? SystemMouseCursors.click
-                    : MouseCursor.defer,
-                onEnter: DeviceUtils.isPC()
-                    ? (_) {
-                        setState(() {
-                          _hoveredNavIndex = index;
-                        });
-                      }
-                    : null,
-                onExit: DeviceUtils.isPC()
-                    ? (_) {
-                        setState(() {
-                          _hoveredNavIndex = null;
-                        });
-                      }
-                    : null,
-                child: GestureDetector(
-                  onTap: () {
-                    widget.onBottomNavChanged(index);
-                  },
-                  behavior: HitTestBehavior.opaque, // 确保整个区域都可以点击
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isTablet ? 16 : 12,
-                      vertical: 8,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          item['icon'],
-                          color: isSelected
-                              ? const Color(0xFF27ae60)
-                              : isHovered
-                                  ? const Color(0xFF52c77a) // hover 时的浅绿色
-                                  : themeService.isDarkMode
-                                      ? const Color(0xFFb0b0b0)
-                                      : const Color(0xFF7f8c8d),
-                          size: 24,
+                return [
+                  MouseRegion(
+                    cursor: DeviceUtils.isPC()
+                        ? SystemMouseCursors.click
+                        : MouseCursor.defer,
+                    onEnter: DeviceUtils.isPC()
+                        ? (_) {
+                            setState(() {
+                              _hoveredNavIndex = index;
+                            });
+                          }
+                        : null,
+                    onExit: DeviceUtils.isPC()
+                        ? (_) {
+                            setState(() {
+                              _hoveredNavIndex = null;
+                            });
+                          }
+                        : null,
+                    child: GestureDetector(
+                      onTap: () {
+                        widget.onBottomNavChanged(index);
+                      },
+                      behavior: HitTestBehavior.opaque, // 确保整个区域都可以点击
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isTablet ? 16 : 12,
+                          vertical: 8,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item['label'],
-                          style: FontUtils.poppins(context,
-                                                        fontSize: 12,
-                            fontWeight:
-                                isSelected ? FontWeight.w600 : FontWeight.w400,
-                            color: isSelected
-                                ? const Color(0xFF27ae60)
-                                : isHovered
-                                    ? const Color(0xFF52c77a) // hover 时的浅绿色
-                                    : themeService.isDarkMode
-                                        ? const Color(0xFFb0b0b0)
-                                        : const Color(0xFF7f8c8d),
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              item['icon'],
+                              color: isSelected
+                                  ? const Color(0xFF27ae60)
+                                  : isHovered
+                                      ? const Color(0xFF52c77a) // hover 时的浅绿色
+                                      : themeService.isDarkMode
+                                          ? const Color(0xFFb0b0b0)
+                                          : const Color(0xFF7f8c8d),
+                              size: 24,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              item['label'],
+                              style: FontUtils.poppins(context,
+                                fontSize: 12,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: isSelected
+                                    ? const Color(0xFF27ae60)
+                                    : isHovered
+                                        ? const Color(0xFF52c77a) // hover 时的浅绿色
+                                        : themeService.isDarkMode
+                                            ? const Color(0xFFb0b0b0)
+                                            : const Color(0xFF7f8c8d),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-              // 平板模式下在按钮之间添加间距
-              if (isTablet && index < navItems.length - 1)
-                const SizedBox(width: 36),
-            ];
-          }),
+                  // 平板模式下在按钮之间添加间距
+                  if (isTablet && index < navItems.length - 1)
+                    const SizedBox(width: 36),
+                ];
+              }),
 
-          // 平板模式下添加右侧空白
-          if (isTablet) const Spacer(flex: 3),
-        ],
+              // 平板模式下添加右侧空白
+              if (isTablet) const Spacer(flex: 3),
+            ],
+          ),
+        ),
       ),
     );
   }
