@@ -827,7 +827,9 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
             }
           },
           child: Scaffold(
-            backgroundColor: Colors.black,
+            backgroundColor: isDark
+                ? const Color(0xFF121212)
+                : const Color(0xFFF5F5F7),
             body: _phase == 'detail'
                 ? _buildDetailView(themeService)
                 : _buildPlayingView(themeService),
@@ -936,7 +938,9 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
               12 + MediaQuery.of(context).padding.bottom,
             ),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1a1a1a) : Colors.white,
+              color: isDark
+                  ? const Color(0xFF1a1a1a)
+                  : Colors.white,
               border: Border(
                 top: BorderSide(
                   color: isDark
@@ -1010,8 +1014,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    (isDark ? Colors.black : Colors.white).withOpacity(0.4),
-                    isDark ? const Color(0xFF121212) : Colors.white,
+                    Colors.black.withOpacity(0.55),
+                    isDark ? const Color(0xFF121212) : const Color(0xFFF5F5F7),
                   ],
                 ),
               ),
@@ -1182,12 +1186,12 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                   child: Container(
                     decoration: BoxDecoration(
                       color: isDark
-                          ? Colors.white.withOpacity(0.08)
-                          : Colors.grey[100],
+                          ? const Color(0xFF1e1e1e)
+                          : Colors.white,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isDark
-                            ? Colors.white.withOpacity(0.1)
+                            ? Colors.white.withOpacity(0.18)
                             : Colors.grey.shade300!,
                       ),
                     ),
