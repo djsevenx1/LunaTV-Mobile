@@ -126,7 +126,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       _selectSource(toSelect);
 
-      // 启动自动测速
+      // 默认自动开始播放第1集,用户可在播放页用上下集按钮切换
+      if (toSelect.episodes.isNotEmpty) {
+        _playEpisode(0);
+      }
+
+      // 启动后台测速,测完后自动切到最快源
       _testAllSourcesInBackground();
     } catch (e) {
       if (!mounted) return;
@@ -504,7 +509,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final state = _pingState[s.source] ?? PingState.idle;
     final ms = _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
     return InkWell(
-      onTap: () => _selectSource(s),
+      onTap: () {
+        _selectSource(s);
+        // 切换源后立即用新源第1集开始播放
+        if (s.episodes.isNotEmpty) {
+          _playEpisode(0);
+        }
+      },
       borderRadius: BorderRadius.circular(8),
       child: Container(
         margin: const EdgeInsets.only(bottom: 6),
@@ -676,9 +687,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ? source.episodesTitles[index]
                     : '${index + 1}';
                 return InkWell(
-                  onTap: () => setState(() {
-                    _currentEpisodeIndex = index;
-                  }),
+                  onTap: () {
+                    // 点击集数直接开始播放
+                    if (index != _currentEpisodeIndex || _phase != 'playing') {
+                      _playEpisode(index);
+                    } else {
+                      setState(() {
+                        _currentEpisodeIndex = index;
+                      });
+                    }
+                  },
                   borderRadius: BorderRadius.circular(6),
                   child: Container(
                     decoration: BoxDecoration(
