@@ -702,6 +702,10 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   String _videoUrl = '';
   String _videoName = '';
 
+  // 调试面板
+  bool _showDebug = false;
+  String _debugInfo = '';
+
   @override
   void initState() {
     super.initState();
@@ -734,9 +738,19 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       } else if (widget.drama.episodeCount > 0) {
         _totalEpisodes = widget.drama.episodeCount;
       }
+      // 拼装调试信息 (用户可见)
+      final dbg = StringBuffer();
+      dbg.writeln('list.episodeCount=${widget.drama.episodeCount}');
+      dbg.writeln('detail.title=${detail?.title ?? "<空>"}');
+      dbg.writeln('detail.poster=${detail?.poster ?? "<空>"}');
+      dbg.writeln('detail.episodes=${detail?.episodes.length ?? 0}');
+      dbg.writeln('detail.episodesTitles=${detail?.episodesTitles.length ?? 0}');
+      dbg.writeln('detail.episodeCount=${detail?.episodeCount ?? 0}');
+      dbg.writeln('final._totalEpisodes=$_totalEpisodes');
       setState(() {
         _detail = detail;
         _isLoadingDetail = false;
+        _debugInfo = dbg.toString();
         if (detail == null) {
           _detailError = '正在加载剧集信息…';
         } else if (detailTotal == 0 && widget.drama.episodeCount > 0) {
@@ -748,6 +762,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
       setState(() {
         _isLoadingDetail = false;
         _detailError = '正在加载剧集信息…';
+        _debugInfo = 'detail 异常: $e';
         if (widget.drama.episodeCount > 0) {
           _totalEpisodes = widget.drama.episodeCount;
         }
@@ -887,6 +902,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                 // 简介
                 if (widget.drama.description.isNotEmpty)
                   _buildDescription(isDark),
+                // 调试面板 (折叠)
+                _buildDebugPanel(isDark),
                 const SizedBox(height: 100),
               ],
             ),
@@ -1163,6 +1180,72 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDebugPanel(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1a1a1a) : const Color(0xFFf3f4f6),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () => setState(() => _showDebug = !_showDebug),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.bug_report,
+                      size: 16,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '调试信息 (点开)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color:
+                            isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      _showDebug
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_showDebug)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: SelectableText(
+                  _debugInfo.isEmpty
+                      ? '(暂无, 请等待详情接口加载完成)'
+                      : _debugInfo,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    height: 1.4,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
