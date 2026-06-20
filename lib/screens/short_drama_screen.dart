@@ -20,15 +20,10 @@ class ShortDramaScreen extends StatefulWidget {
 
 class _ShortDramaScreenState extends State<ShortDramaScreen> {
   final ScrollController _scrollController = ScrollController();
-  final TextEditingController _searchController = TextEditingController();
 
   // 分类数据
   List<ShortDramaCategory> _categories = [];
   int? _selectedCategoryId;
-
-  // 搜索
-  String _searchQuery = '';
-  bool _isSearchMode = false;
 
   // 列表数据
   final List<ShortDrama> _dramaList = [];
@@ -49,7 +44,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   void dispose() {
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -92,31 +86,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
 
-    // 搜索模式或分类模式
-    if (_isSearchMode && _searchQuery.isNotEmpty) {
-      setState(() {
-        _isLoading = true;
-        if (isRefresh) {
-          _dramaList.clear();
-          _page = 1;
-          _hasMore = true;
-        }
-        _errorMessage = null;
-      });
-
-      final result = await ShortDramaService.search(_searchQuery, page: _page);
-
-      if (!mounted) return;
-
-      setState(() {
-        _dramaList.addAll(result.list);
-        _hasMore = result.hasMore;
-        _isLoading = false;
-      });
-      return;
-    }
-
-    // 分类模式
     if (_selectedCategoryId == null) {
       setState(() {
         _isLoading = false;
@@ -146,7 +115,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _hasMore = result.hasMore;
       _isLoading = false;
       // 如果当前分类为空，自动跳到下一个分类
-      if (result.list.isEmpty && _categories.isNotEmpty && !_isSearchMode) {
+      if (result.list.isEmpty && _categories.isNotEmpty) {
         _autoSwitchToNextCategory();
       }
     });
@@ -181,15 +150,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
 
     _page++;
 
-    if (_isSearchMode && _searchQuery.isNotEmpty) {
-      final result = await ShortDramaService.search(_searchQuery, page: _page);
-      if (!mounted) return;
-      setState(() {
-        _dramaList.addAll(result.list);
-        _hasMore = result.hasMore;
-        _isLoadingMore = false;
-      });
-    } else if (_selectedCategoryId != null) {
+    if (_selectedCategoryId != null) {
       final result = await ShortDramaService.getList(
         categoryId: _selectedCategoryId!,
         page: _page,
@@ -217,31 +178,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     if (!mounted) return;
     setState(() {
       _selectedCategoryId = categoryId;
-      _isSearchMode = false;
-      _searchController.clear();
-    });
-    _fetchDramaList(isRefresh: true);
-  }
-
-  /// 执行搜索
-  void _onSearch(String query) {
-    if (query.isEmpty) {
-      _onClearSearch();
-      return;
-    }
-    setState(() {
-      _searchQuery = query;
-      _isSearchMode = true;
-    });
-    _fetchDramaList(isRefresh: true);
-  }
-
-  /// 清除搜索
-  void _onClearSearch() {
-    setState(() {
-      _searchQuery = '';
-      _isSearchMode = false;
-      _searchController.clear();
     });
     _fetchDramaList(isRefresh: true);
   }
@@ -285,14 +221,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
               SliverToBoxAdapter(
                 child: _buildHeader(themeService),
               ),
-              // 搜索栏
+              // 筛选区（与电视剧页风格一致）
               SliverToBoxAdapter(
-                child: _buildSearchBar(themeService),
-              ),
-              const SliverToBoxAdapter(child: SizedBox(height: 8)),
-              // 分类横向滚动标签
-              SliverToBoxAdapter(
-                child: _buildCategoryTabs(themeService),
+                child: _buildFilterSection(themeService),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 12)),
               // 内容区域
@@ -336,25 +267,21 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '短剧频道',
+            '短剧',
             style: FontUtils.poppins(context,
               fontSize: 28,
               fontWeight: FontWeight.w600,
-              color: themeService.isDarkMode
-                  ? const Color(0xFFffffff)
-                  : const Color(0xFF2c3e50),
+              color: Theme.of(context).textTheme.titleLarge?.color,
             ),
           ),
           const SizedBox(height: 4),
           SizedBox(
-            height: 20,
+            height: 20, // 固定高度确保一致性
             child: Text(
               '精彩短剧，一刷到底',
               style: FontUtils.poppins(context,
                 fontSize: 14,
-                color: themeService.isDarkMode
-                    ? const Color(0xFFb0b0b0)
-                    : const Color(0xFF7f8c8d),
+                color: Theme.of(context).textTheme.bodySmall?.color,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -365,59 +292,34 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
-  /// 构建搜索栏
-  Widget _buildSearchBar(ThemeService themeService) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: themeService.isDarkMode
-              ? Colors.white.withOpacity(0.08)
-              : Colors.grey[100],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: themeService.isDarkMode
-                ? Colors.white.withOpacity(0.1)
-                : Colors.grey[300]!,
-            width: 0.5,
-          ),
-        ),
-        child: TextField(
-          controller: _searchController,
-          onSubmitted: _onSearch,
-          style: FontUtils.poppins(context, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: '搜索短剧...',
-            hintStyle: FontUtils.poppins(context,
-              fontSize: 14,
-              color: themeService.isDarkMode
-                  ? const Color(0xFF888888)
-                  : const Color(0xFF999999),
+  /// 构建筛选区（与电视剧页一致：白底圆角容器，分类标签）
+  Widget _buildFilterSection(ThemeService themeService) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      decoration: BoxDecoration(
+        color: themeService.isDarkMode
+            ? Colors.white.withOpacity(0.1)
+            : Colors.white.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(
+              '分类',
+              style: FontUtils.poppins(context,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
             ),
-            prefixIcon: Icon(
-              Icons.search,
-              color: themeService.isDarkMode
-                  ? const Color(0xFF888888)
-                  : const Color(0xFF999999),
-              size: 20,
-            ),
-            suffixIcon: _isSearchMode
-                ? IconButton(
-                    icon: Icon(
-                      Icons.close,
-                      color: themeService.isDarkMode
-                          ? const Color(0xFF888888)
-                          : const Color(0xFF999999),
-                      size: 18,
-                    ),
-                    onPressed: _onClearSearch,
-                  )
-                : null,
-            border: InputBorder.none,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
-        ),
+          _buildCategoryTabs(themeService),
+        ],
       ),
     );
   }
@@ -431,10 +333,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       height: 40,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
         children: _categories.map((category) {
           return Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.only(right: 8, left: 4),
             child: _buildCategoryChip(
               label: category.typeName,
               isSelected: _selectedCategoryId == category.typeId,
@@ -447,7 +348,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
-  /// 构建单个分类标签
+  /// 构建单个分类标签（与剧集页胶囊风格一致）
   Widget _buildCategoryChip({
     required String label,
     required bool isSelected,
@@ -459,26 +360,14 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          gradient: isSelected
-              ? const LinearGradient(
-                  colors: [Color(0xFF22C55E), Color(0xFF10B981)],
-                )
-              : null,
-          color: !isSelected
-              ? (themeService.isDarkMode
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.grey[200])
-              : null,
+          color: isSelected
+              ? const Color(0xFF22C55E)
+              : (themeService.isDarkMode
+                  ? Colors.white.withOpacity(0.08)
+                  : Colors.grey[200]),
           borderRadius: BorderRadius.circular(20),
-          border: isSelected
-              ? null
-              : Border.all(
-                  color: themeService.isDarkMode
-                      ? Colors.white.withOpacity(0.2)
-                      : Colors.grey[400]!,
-                  width: 0.5,
-                ),
         ),
         child: Text(
           label,
@@ -562,7 +451,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            _isSearchMode ? '未找到相关短剧' : '暂无短剧内容',
+            '暂无短剧内容',
             style: FontUtils.poppins(context,
               fontSize: 16,
               fontWeight: FontWeight.w500,
