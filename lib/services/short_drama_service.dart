@@ -164,11 +164,45 @@ class ShortDramaService {
   /// 解析短剧集数获取播放地址
   /// GET /api/shortdrama/parse?id={id}&episode={episode}&proxy=true
   /// 返回: {code, msg, data: {videoId, videoName, currentEpisode, totalEpisodes, parsedUrl, ...}}
+  /// proxy=true 失败时自动重试 proxy=false
   static Future<ShortDramaParseResult> parseEpisode({
     required int id,
     required int episode,
     String? name,
     bool useProxy = true,
+  }) async {
+    // ignore: avoid_print
+    print('[shortdrama/parse] id=$id episode=$episode name=$name useProxy=$useProxy');
+    final result = await _parseEpisodeOnce(
+      id: id,
+      episode: episode,
+      name: name,
+      useProxy: useProxy,
+    );
+    // ignore: avoid_print
+    print('[shortdrama/parse] code=${result.code} msg=${result.msg} url=${result.data?.parsedUrl} proxyUrl=${result.data?.proxyUrl}');
+    // proxy 失败时回退到直连
+    if (result.code != 0 && useProxy) {
+      // ignore: avoid_print
+      print('[shortdrama/parse] proxy failed, retry without proxy');
+      final fallback = await _parseEpisodeOnce(
+        id: id,
+        episode: episode,
+        name: name,
+        useProxy: false,
+      );
+      // ignore: avoid_print
+      print('[shortdrama/parse] fallback code=${fallback.code} msg=${fallback.msg} url=${fallback.data?.parsedUrl}');
+      return fallback;
+    }
+    return result;
+  }
+
+  static Future<ShortDramaParseResult> _parseEpisodeOnce({
+    required int id,
+    required int episode,
+    String? name,
+    required bool useProxy,
   }) async {
     try {
       String url = await _buildUrl('/api/shortdrama/parse');

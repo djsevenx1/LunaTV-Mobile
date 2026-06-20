@@ -787,14 +787,14 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
           setState(() {
             _isLoading = false;
             _isError = true;
-            _errorMessage = '未获取到播放地址';
+            _errorMessage = '未获取到播放地址 (code=${result.code} msg=${result.msg})';
           });
         }
       } else {
         setState(() {
           _isLoading = false;
           _isError = true;
-          _errorMessage = result.msg.isNotEmpty ? result.msg : '解析失败';
+          _errorMessage = 'code=${result.code} ${result.msg.isNotEmpty ? result.msg : '解析失败'}';
         });
       }
     } catch (e) {
@@ -1169,7 +1169,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                 color: isDark ? Colors.white60 : Colors.black54,
               ),
             )
-          else if (_totalEpisodes > 1)
+          else if (_totalEpisodes >= 1)
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -1344,7 +1344,7 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (_totalEpisodes > 1)
+                  if (_totalEpisodes >= 1)
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
