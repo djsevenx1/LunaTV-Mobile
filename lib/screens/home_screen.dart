@@ -17,8 +17,6 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
-import 'package:luna_tv/services/version_service.dart';
-import 'package:luna_tv/widgets/update_dialog.dart';
 import 'package:luna_tv/screens/movie_screen.dart';
 import 'package:luna_tv/screens/tv_screen.dart';
 import 'package:luna_tv/screens/anime_screen.dart';
@@ -49,32 +47,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _bottomNavPageController = PageController(initialPage: 0);
     // 进入首页时直接刷新播放记录和收藏夹缓存
     _refreshCacheOnHomeEnter();
-    // 检查应用更新
-    _checkForUpdates();
-  }
-
-  /// 检查应用更新
-  void _checkForUpdates() async {
-    // 延迟3秒后检查更新，避免影响页面加载
-    await Future.delayed(const Duration(seconds: 3));
-    if (!mounted) return;
-
-    try {
-      final versionInfo = await VersionService.checkForUpdate();
-
-      if (versionInfo != null && mounted) {
-        final shouldShow = await VersionService.shouldShowUpdatePrompt(
-          versionInfo.latestVersion,
-        );
-
-        if (shouldShow && mounted) {
-          UpdateDialog.show(context, versionInfo);
-        }
-      }
-    } catch (e) {
-      // 静默失败，不影响用户体验
-      print('检查更新失败: $e');
-    }
   }
 
   @override
