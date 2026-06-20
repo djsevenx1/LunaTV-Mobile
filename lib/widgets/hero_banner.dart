@@ -118,107 +118,114 @@ class _HeroBannerState extends State<HeroBanner> {
         final isDarkMode = themeService.isDarkMode;
         return LayoutBuilder(
           builder: (context, constraints) {
-            // 响应式高度
+            // 响应式高度 - 移动端约 32vh，桌面端约 45vh，整体小一些
             final screenWidth = constraints.maxWidth;
             final screenHeight = MediaQuery.of(context).size.height;
             double bannerHeight;
             if (screenWidth < 640) {
-              bannerHeight = screenHeight * 0.55; // 移动端 55vh
+              bannerHeight = screenHeight * 0.32; // 移动端 32vh
             } else if (screenWidth < 768) {
-              bannerHeight = screenHeight * 0.6; // sm 60vh
+              bannerHeight = screenHeight * 0.38; // sm 38vh
             } else if (screenWidth < 1024) {
-              bannerHeight = screenHeight * 0.7; // md 70vh
+              bannerHeight = screenHeight * 0.42; // md 42vh
             } else {
-              bannerHeight = screenHeight * 0.75; // lg+ 75vh
+              bannerHeight = screenHeight * 0.45; // lg+ 45vh
             }
-            bannerHeight = bannerHeight.clamp(380.0, 720.0);
+            bannerHeight = bannerHeight.clamp(220.0, 480.0);
 
-            return Container(
-              width: double.infinity,
-              height: bannerHeight,
-              child: Stack(
-                children: [
-                  // 背景图轮播
-                  PageView.builder(
-                    controller: _pageController,
-                    itemCount: widget.items.length,
-                    onPageChanged: (index) {
-                      setState(() {
-                        _currentPage = index;
-                      });
-                    },
-                    itemBuilder: (context, index) {
-                      return _buildBannerItem(widget.items[index], isDarkMode);
-                    },
-                  ),
-
-                  // 左右切换按钮
-                  if (widget.items.length > 1) ...[
-                    Positioned(
-                      left: 8,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: _buildNavButton(
-                          Icons.chevron_left,
-                          () {
-                            if (_pageController.hasClients) {
-                              _pageController.previousPage(
-                                duration: const Duration(milliseconds: 500),
-                                curve: Curves.easeInOut,
-                              );
-                            }
-                          },
-                        ),
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: double.infinity,
+                  height: bannerHeight,
+                  child: Stack(
+                    children: [
+                      // 背景图轮播
+                      PageView.builder(
+                        controller: _pageController,
+                        itemCount: widget.items.length,
+                        onPageChanged: (index) {
+                          setState(() {
+                            _currentPage = index;
+                          });
+                        },
+                        itemBuilder: (context, index) {
+                          return _buildBannerItem(
+                              widget.items[index], isDarkMode);
+                        },
                       ),
-                    ),
-                    Positioned(
-                      right: 8,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: _buildNavButton(
-                          Icons.chevron_right,
-                          () {
-                            if (_pageController.hasClients) {
-                              _pageController.nextPage(
-                                duration: const Duration(milliseconds: 500),
-                                curve: Curves.easeInOut,
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
 
-                  // 底部指示器
-                  Positioned(
-                    bottom: 12,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: List.generate(
-                          widget.items.length,
-                          (index) => AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            margin: const EdgeInsets.symmetric(horizontal: 3),
-                            width: index == _currentPage ? 24 : 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: index == _currentPage
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.4),
-                              borderRadius: BorderRadius.circular(3),
+                      // 左右切换按钮
+                      if (widget.items.length > 1) ...[
+                        Positioned(
+                          left: 8,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: _buildNavButton(
+                              Icons.chevron_left,
+                              () {
+                                if (_pageController.hasClients) {
+                                  _pageController.previousPage(
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeInOut,
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 8,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: _buildNavButton(
+                              Icons.chevron_right,
+                              () {
+                                if (_pageController.hasClients) {
+                                  _pageController.nextPage(
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeInOut,
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+
+                      // 底部指示器
+                      Positioned(
+                        bottom: 8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              widget.items.length,
+                              (index) => AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                margin: const EdgeInsets.symmetric(horizontal: 3),
+                                width: index == _currentPage ? 20 : 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: index == _currentPage
+                                      ? Colors.white
+                                      : Colors.white.withOpacity(0.5),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
             );
           },
@@ -245,33 +252,32 @@ class _HeroBannerState extends State<HeroBanner> {
               child: const Icon(Icons.movie, color: Colors.white, size: 64),
             ),
           ),
-          // 水平渐变遮罩
+          // 底部柔和渐变遮罩 - 让图片更通透
           Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  Color(0xCC000000),
-                  Color(0x99000000),
-                  Color(0x4D000000),
-                ],
-                stops: [0.0, 0.4, 1.0],
-              ),
-            ),
-          ),
-          // 垂直渐变遮罩
-          Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0x66000000),
-                  Color(0x73000000),
-                  Color(0xF2000000),
+                  Colors.transparent,
+                  Colors.black.withOpacity(0.25),
+                  Colors.black.withOpacity(0.55),
                 ],
-                stops: [0.0, 0.5, 1.0],
+                stops: const [0.0, 0.5, 1.0],
+              ),
+            ),
+          ),
+          // 左侧柔和渐变 - 保护标题可读性
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Colors.black.withOpacity(0.35),
+                  Colors.transparent,
+                ],
+                stops: const [0.0, 0.6],
               ),
             ),
           ),
@@ -281,7 +287,7 @@ class _HeroBannerState extends State<HeroBanner> {
             right: 0,
             bottom: 0,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 56),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -324,43 +330,27 @@ class _HeroBannerState extends State<HeroBanner> {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 6),
                   // 标题
                   Text(
                     item.title,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 28,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                       height: 1.2,
                       shadows: [
                         Shadow(
                           color: Colors.black54,
-                          offset: Offset(0, 2),
-                          blurRadius: 8,
+                          offset: Offset(0, 1),
+                          blurRadius: 4,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  // 描述
-                  if (item.description != null && item.description!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 60),
-                      child: Text(
-                        item.description!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.white70,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 10),
                   // 按钮
                   Row(
                     children: [
@@ -368,33 +358,33 @@ class _HeroBannerState extends State<HeroBanner> {
                       Container(
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity(0.3),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
                             ),
                           ],
                         ),
                         child: Material(
                           color: Colors.transparent,
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(24),
+                            borderRadius: BorderRadius.circular(20),
                             onTap: () => widget.onTap?.call(item),
                             child: const Padding(
                               padding: EdgeInsets.symmetric(
-                                  horizontal: 24, vertical: 10),
+                                  horizontal: 16, vertical: 6),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(Icons.play_arrow,
-                                      color: Colors.black, size: 20),
-                                  SizedBox(width: 6),
+                                      color: Colors.black, size: 18),
+                                  SizedBox(width: 4),
                                   Text(
                                     '立即播放',
                                     style: TextStyle(
-                                      fontSize: 15,
+                                      fontSize: 13,
                                       fontWeight: FontWeight.w600,
                                       color: Colors.black,
                                     ),
