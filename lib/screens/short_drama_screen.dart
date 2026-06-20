@@ -718,6 +718,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     }
     // 加载详情拿准确集数
     _loadDetail();
+    // 主动用 parseEpisode 探测集数 (后端 detail 接口没实现时兜底)
+    _probeEpisodes();
   }
 
   /// 加载详情 (只拉集数列表, 不解析播放地址)
@@ -777,6 +779,41 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     } catch (_) {}
     _player.dispose();
     super.dispose();
+  }
+
+  /// 用 parseEpisode 探测第 0 集, 拿 totalEpisodes 字段作为集数兜底
+  /// 后端的 detail 接口没返回任何集数字段时, parseEpisode 返回的 totalEpisodes 才是真值
+  Future<void> _probeEpisodes() async {
+    try {
+      // 等详情接口先跑一会儿, 避免两个请求竞争
+      await Future.delayed(const Duration(milliseconds: 200));
+      final result = await ShortDramaService.parseEpisode(
+        id: widget.drama.id,
+        episode: 0,
+        name: widget.drama.name,
+      );
+      if (!mounted) return;
+      if (result.code == 0 &&
+          result.data != null &&
+          result.data!.totalEpisodes > 0) {
+        // 强制用 parse 探测结果覆盖
+        setState(() {
+          _totalEpisodes = result.data!.totalEpisodes;
+          _debugInfo = '${_debugInfo}\nprobe._totalEpisodes=${_totalEpisodes}';
+        });
+      } else {
+        // 把 probe 的错误也写进调试
+        setState(() {
+          _debugInfo =
+              '${_debugInfo}\nprobe.code=${result.code} msg=${result.msg}';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _debugInfo = '${_debugInfo}\nprobe.error=$e';
+      });
+    }
   }
 
   /// 解析并播放指定集数
