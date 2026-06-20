@@ -908,15 +908,15 @@ class _MainLayoutState extends State<MainLayout> {
 
     // 毛玻璃背景：半透明色 + 高斯模糊
     final glassColor = themeService.isDarkMode
-        ? Colors.black.withOpacity(0.45)
-        : Colors.white.withOpacity(0.65);
+        ? Colors.black.withOpacity(0.35)
+        : Colors.white.withOpacity(0.45);
     final borderColor = themeService.isDarkMode
-        ? Colors.white.withOpacity(0.08)
+        ? Colors.white.withOpacity(0.1)
         : Colors.black.withOpacity(0.06);
 
     return ClipRect(
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ui.ImageFilter.blur(sigmaX: 35, sigmaY: 35),
         child: Container(
           decoration: BoxDecoration(
             color: glassColor,
