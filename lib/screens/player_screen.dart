@@ -61,11 +61,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _firstRecordSaved = false;
   String? _lastSavedKey; // 避免重复保存同一条
 
+  // 视频尺寸（用于判断横竖屏全屏）
+  int _videoWidth = 0;
+  int _videoHeight = 0;
+  StreamSubscription<VideoParams>? _videoParamsSub;
+
   @override
   void initState() {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
+    // 监听视频参数，获取宽高用于全屏方向判断
+    _videoParamsSub = _player.streams.videoParams.listen((params) {
+      final w = params.dw ?? params.w ?? 0;
+      final h = params.dh ?? params.h ?? 0;
+      if (w > 0 && h > 0 && (w != _videoWidth || h != _videoHeight)) {
+        setState(() {
+          _videoWidth = w;
+          _videoHeight = h;
+        });
+      }
+    });
     // 不再自动播下一集,由用户控制
     _loadSources();
   }
@@ -75,6 +91,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 退出时最后一次保存
     _saveCurrentProgress(force: true);
     _progressTimer?.cancel();
+    _videoParamsSub?.cancel();
     // 强制停止播放器,避免关页面后还在后台继续播
     try {
       _player.stop();
@@ -82,6 +99,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
+  }
+
+  /// 判断视频是否为竖屏（高度 > 宽度）
+  bool get _isPortraitVideo {
+    if (_videoWidth > 0 && _videoHeight > 0) {
+      return _videoHeight > _videoWidth;
+    }
+    return false; // 默认横屏
+  }
+
+  /// 进入全屏：根据视频宽高比设置屏幕方向
+  Future<void> _onEnterFullscreen() async {
+    if (_isPortraitVideo) {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+    } else {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+  }
+
+  /// 退出全屏：恢复竖屏
+  Future<void> _onExitFullscreen() async {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
   }
 
   /// 构造并保存当前播放记录
@@ -318,8 +364,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // 从播放页返回详情页: 先保存一次
+              // 从播放页返回详情页: 先保存一次, 恢复竖屏
               await _saveCurrentProgress(force: true);
+              await _onExitFullscreen();
               if (mounted) {
                 setState(() {
                   _phase = 'detail';
@@ -946,11 +993,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
             color: Colors.black,
             child: Center(
               child: AspectRatio(
-                aspectRatio: 16 / 9,
+                aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
+                    ? _videoWidth / _videoHeight
+                    : 16 / 9,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    Video(controller: _controller),
+                    Video(
+                      controller: _controller,
+                      onEnterFullscreen: _onEnterFullscreen,
+                      onExitFullscreen: _onExitFullscreen,
+                    ),
                     if (_isBuffering)
                       const SizedBox(
                         width: 36,
@@ -973,9 +1026,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => setState(() {
-                  _phase = 'detail';
-                }),
+                onPressed: () {
+                  _onExitFullscreen();
+                  setState(() {
+                    _phase = 'detail';
+                  });
+                },
               ),
               Expanded(
                 child: Text(
