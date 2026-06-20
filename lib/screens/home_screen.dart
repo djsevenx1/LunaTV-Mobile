@@ -18,6 +18,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
+import 'package:luna_tv/services/bangumi_service.dart';
 import 'package:luna_tv/widgets/hero_banner.dart';
 import 'package:luna_tv/screens/movie_screen.dart';
 import 'package:luna_tv/screens/tv_screen.dart';
@@ -105,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final moviesResult = await DoubanService.getHotMovies(context);
       final tvResult = await DoubanService.getHotTvShows(context);
-      final animeResult = await DoubanService.getBangumiCalendar(context);
+      final animeResult = await BangumiService.getTodayCalendar(context);
 
       if (!mounted) return;
 
@@ -143,16 +144,26 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (animeResult.success && animeResult.data != null) {
         for (final a in animeResult.data!.take(2)) {
+          final name = (a.nameCn != null && a.nameCn!.isNotEmpty)
+              ? a.nameCn!
+              : a.name;
+          final year = a.airDate.isNotEmpty
+              ? a.airDate.split('-').first
+              : null;
+          final imageUrl = a.images.bestImageUrl;
+          if (imageUrl.isEmpty) continue;
           items.add(HeroBannerItem(
-            id: a.id,
-            title: a.title,
+            id: a.id.toString(),
+            title: name,
             subtitle: '新番放送',
-            imageUrl: a.poster,
+            imageUrl: imageUrl,
             type: 'anime',
-            source: 'douban',
-            id_: a.id,
-            year: a.year.isNotEmpty ? a.year : null,
-            rate: a.rate,
+            source: 'bangumi',
+            id_: a.id.toString(),
+            year: year,
+            rate: a.rating.score > 0
+                ? a.rating.score.toStringAsFixed(1)
+                : null,
           ));
         }
       }
