@@ -4,6 +4,7 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/bangumi_service.dart';
 import 'package:luna_tv/widgets/recommendation_section.dart';
+import 'package:luna_tv/widgets/section_title.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 
 /// 新番放送组件
@@ -109,7 +110,10 @@ class _BangumiSectionState extends State<BangumiSection> {
 
     return RecommendationSection(
       title: '新番放送',
-      moreText: '查看更多 >',
+      subtitle: '本季新番',
+      icon: Icons.auto_awesome,
+      sectionColor: SectionColor.pink,
+      moreText: '查看更多',
       onMoreTap: widget.onMoreTap,
       videoInfos: _convertToVideoInfos(),
       onItemTap: (videoInfo) {

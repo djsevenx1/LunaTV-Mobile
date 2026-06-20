@@ -4,6 +4,7 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/widgets/recommendation_section.dart';
+import 'package:luna_tv/widgets/section_title.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 
 /// 热门电影组件
@@ -97,7 +98,10 @@ class _HotMoviesSectionState extends State<HotMoviesSection> {
   Widget build(BuildContext context) {
     return RecommendationSection(
       title: '热门电影',
-      moreText: '查看更多 >',
+      subtitle: '每周精选',
+      icon: Icons.movie,
+      sectionColor: SectionColor.amber,
+      moreText: '查看更多',
       onMoreTap: widget.onMoreTap,
       videoInfos: _convertToVideoInfos(),
       onItemTap: (videoInfo) {

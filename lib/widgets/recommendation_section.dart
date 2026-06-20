@@ -1,12 +1,12 @@
 import 'package:luna_tv/widgets/shimmer_effect.dart';
 import 'package:luna_tv/widgets/video_card.dart';
+import 'package:luna_tv/widgets/section_title.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
-import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/video_card.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/widgets/shimmer_effect.dart';
@@ -24,6 +24,9 @@ class RecommendationSection extends StatefulWidget {
   final VoidCallback? onRetry; // 重试回调
   final double cardCount; // 显示的卡片数量（如2.75）
   final Map<String, String>? rateMap; // 评分映射，key为item.id，value为评分
+  final IconData? icon; // 标题图标
+  final SectionColor sectionColor; // 标题渐变色
+  final String? subtitle; // 副标题
 
   const RecommendationSection({
     super.key,
@@ -38,6 +41,9 @@ class RecommendationSection extends StatefulWidget {
     this.onRetry,
     this.cardCount = 2.75,
     this.rateMap,
+    this.icon,
+    this.sectionColor = SectionColor.amber,
+    this.subtitle,
   });
 
   @override
@@ -164,46 +170,39 @@ class _RecommendationSectionState extends State<RecommendationSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 标题和查看更多按钮
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Consumer<ThemeService>(
-                  builder: (context, themeService, child) {
-                    return Text(
-                      widget.title,
-                      style: FontUtils.poppins(context,
-                                                fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: themeService.isDarkMode
-                            ? const Color(0xFFffffff)
-                            : const Color(0xFF2c3e50),
-                      ),
-                    );
-                  },
-                ),
-                if (widget.moreText != null && widget.onMoreTap != null)
-                  MouseRegion(
-                    cursor: DeviceUtils.isPC()
-                        ? SystemMouseCursors.click
-                        : MouseCursor.defer,
-                    onEnter: DeviceUtils.isPC()
-                        ? (_) {
-                            setState(() {
-                              _isMoreButtonHovered = true;
-                            });
-                          }
-                        : null,
-                    onExit: DeviceUtils.isPC()
-                        ? (_) {
-                            setState(() {
-                              _isMoreButtonHovered = false;
-                            });
-                          }
-                        : null,
-                    child: TextButton(
+          // 标题和查看更多按钮 - 使用 LunaTV 风格的 SectionTitle
+          if (widget.icon != null)
+            SectionTitle(
+              title: widget.title,
+              subtitle: widget.subtitle,
+              icon: widget.icon!,
+              color: widget.sectionColor,
+              moreText: widget.moreText,
+              onMore: widget.onMoreTap,
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Consumer<ThemeService>(
+                    builder: (context, themeService, child) {
+                      return Text(
+                        widget.title,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: themeService.isDarkMode
+                              ? const Color(0xFFffffff)
+                              : const Color(0xFF2c3e50),
+                        ),
+                      );
+                    },
+                  ),
+                  if (widget.moreText != null && widget.onMoreTap != null)
+                    TextButton(
                       onPressed: widget.onMoreTap,
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
@@ -214,18 +213,17 @@ class _RecommendationSectionState extends State<RecommendationSection> {
                       ),
                       child: Text(
                         widget.moreText!,
-                        style: FontUtils.poppins(context,
-                                                    fontSize: 14,
+                        style: TextStyle(
+                          fontSize: 14,
                           color: DeviceUtils.isPC() && _isMoreButtonHovered
-                              ? const Color(0xFF27ae60) // hover 时绿色
+                              ? AppColors.primary
                               : const Color(0xFF7f8c8d),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: 12),
           // 内容区域
           if (widget.isLoading)

@@ -1,5 +1,6 @@
 import 'package:luna_tv/widgets/shimmer_effect.dart';
 import 'package:luna_tv/widgets/video_card.dart';
+import 'package:luna_tv/widgets/section_title.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -11,7 +12,6 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/widgets/video_card.dart';
 import 'package:luna_tv/utils/image_url.dart';
-import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/widgets/shimmer_effect.dart';
 
@@ -422,111 +422,76 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 标题、清空按钮和查看更多按钮
+          // 标题、清空按钮和查看更多按钮 - LunaTV 风格
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // 左侧：标题和清空按钮
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Consumer<ThemeService>(
-                      builder: (context, themeService, child) {
-                        return Text(
-                          '继续观看',
-                          style: FontUtils.poppins(context,
-                                                        fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: themeService.isDarkMode
-                                ? const Color(0xFFffffff)
-                                : const Color(0xFF2c3e50),
-                          ),
-                        );
-                      },
+                // 渐变图标
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF22C55E), Color(0xFF10B981)],
                     ),
-                    if (_playRecords.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      MouseRegion(
-                        cursor: DeviceUtils.isPC()
-                            ? SystemMouseCursors.click
-                            : MouseCursor.defer,
-                        onEnter: DeviceUtils.isPC()
-                            ? (_) {
-                                setState(() {
-                                  _isClearButtonHovered = true;
-                                });
-                              }
-                            : null,
-                        onExit: DeviceUtils.isPC()
-                            ? (_) {
-                                setState(() {
-                                  _isClearButtonHovered = false;
-                                });
-                              }
-                            : null,
-                        child: TextButton(
-                          onPressed: _showClearConfirmation,
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 0),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            overlayColor: Colors.transparent,
-                          ),
-                          child: Text(
-                            '清空',
-                            style: FontUtils.poppins(context,
-                                                            fontSize: 14,
-                              color: DeviceUtils.isPC() && _isClearButtonHovered
-                                  ? const Color(0xFFe74c3c) // hover 时红色
-                                  : const Color(0xFF7f8c8d),
-                            ),
-                          ),
-                        ),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF22C55E).withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
                       ),
                     ],
-                  ],
+                  ),
+                  child: const Icon(Icons.play_circle_outline,
+                      color: Colors.white, size: 20),
                 ),
-                // 右侧：查看更多按钮
+                const SizedBox(width: 12),
+                // 标题文字
+                Expanded(
+                  child: Consumer<ThemeService>(
+                    builder: (context, themeService, child) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '继续观看',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: themeService.isDarkMode
+                                  ? const Color(0xFFE5E7EB)
+                                  : const Color(0xFF1F2937),
+                            ),
+                          ),
+                          const Text(
+                            '最近观看的影片',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF6B7280),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
                 if (_playRecords.isNotEmpty)
-                  MouseRegion(
-                    cursor: DeviceUtils.isPC()
-                        ? SystemMouseCursors.click
-                        : MouseCursor.defer,
-                    onEnter: DeviceUtils.isPC()
-                        ? (_) {
-                            setState(() {
-                              _isMoreButtonHovered = true;
-                            });
-                          }
-                        : null,
-                    onExit: DeviceUtils.isPC()
-                        ? (_) {
-                            setState(() {
-                              _isMoreButtonHovered = false;
-                            });
-                          }
-                        : null,
-                    child: TextButton(
-                      onPressed: widget.onViewAll,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        overlayColor: Colors.transparent,
-                      ),
-                      child: Text(
-                        '查看全部 >',
-                        style: FontUtils.poppins(context,
-                                                    fontSize: 14,
-                          color: DeviceUtils.isPC() && _isMoreButtonHovered
-                              ? const Color(0xFF27ae60) // hover 时绿色
-                              : const Color(0xFF7f8c8d),
-                        ),
+                  TextButton(
+                    onPressed: _showClearConfirmation,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 32),
+                    ),
+                    child: const Text(
+                      '清空',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF6B7280),
                       ),
                     ),
                   ),

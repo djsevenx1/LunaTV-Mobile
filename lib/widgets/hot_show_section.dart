@@ -5,6 +5,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/widgets/recommendation_section.dart';
+import 'package:luna_tv/widgets/section_title.dart';
 
 /// 热门综艺组件
 class HotShowSection extends StatefulWidget {
@@ -97,7 +98,10 @@ class _HotShowSectionState extends State<HotShowSection> {
   Widget build(BuildContext context) {
     return RecommendationSection(
       title: '热门综艺',
-      moreText: '查看更多 >',
+      subtitle: '精选综艺',
+      icon: Icons.celebration,
+      sectionColor: SectionColor.purple,
+      moreText: '查看更多',
       onMoreTap: widget.onMoreTap,
       videoInfos: _convertToVideoInfos(),
       onItemTap: (videoInfo) {
