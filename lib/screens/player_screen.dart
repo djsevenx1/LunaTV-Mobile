@@ -105,7 +105,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     int totalTime = 0;
     try {
       final state = _player.state;
-      if (state.playing || state.paused) {
+      // 正在播放 或 视频已加载但暂停 (用 !completed 表示)
+      if (state.playing || (state.position > Duration.zero && !state.completed)) {
         playTime = state.position.inMilliseconds;
         totalTime = state.duration.inMilliseconds;
       }
