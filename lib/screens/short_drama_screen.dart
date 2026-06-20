@@ -682,16 +682,22 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
 
-  bool _isLoading = true;
+  // 阶段: detail (先看海报选集) / playing (全屏播放)
+  String _phase = 'detail';
+
+  // 详情
+  bool _isLoadingDetail = true;
+  ShortDramaDetail? _detail;
+  String? _detailError;
+
+  // 当前播放
+  bool _isLoading = false;
   bool _isError = false;
   String _errorMessage = '';
   int _currentEpisode = 1;
   int _totalEpisodes = 1;
   String _videoUrl = '';
   String _videoName = '';
-  bool _isAutoPlay = false; // 是否自动连播
-  bool _isLoadingDetail = true;
-  ShortDramaDetail? _detail;
 
   @override
   void initState() {
@@ -699,37 +705,22 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     _player = Player();
     _controller = VideoController(_player);
     _videoName = widget.drama.name;
-    _setupPlayerListener();
-    _loadDetailAndPlay(1);
+    _loadDetail();
   }
 
-  /// 监听播放结束事件
-  void _setupPlayerListener() {
-    _player.stream.playing.listen((playing) {
-      if (!playing && _isAutoPlay && !_isLoading) {
-        // 播放结束,自动播放下一集
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (!mounted || !_isAutoPlay) return;
-          _onEpisodeEnded();
-        });
-      }
-    });
-  }
-
-  /// 先加载详情获取总集数,再解析播放
-  Future<void> _loadDetailAndPlay(int episode) async {
+  /// 加载详情 (只拉集数列表, 不解析播放地址)
+  Future<void> _loadDetail() async {
     if (!mounted) return;
     setState(() {
       _isLoadingDetail = true;
-      _currentEpisode = episode;
+      _detailError = null;
     });
     try {
-      final detail = await ShortDramaService.getDetail(
-          widget.drama.id.toString());
+      final detail =
+          await ShortDramaService.getDetail(widget.drama.id.toString());
       if (!mounted) return;
       setState(() {
         _detail = detail;
-        // 优先使用 getDetail 返回的 episodes 列表长度
         if (detail != null && detail.episodes.isNotEmpty) {
           _totalEpisodes = detail.episodes.length;
         } else if (widget.drama.episodeCount > 0) {
@@ -737,17 +728,16 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
         }
         _isLoadingDetail = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoadingDetail = false;
-        // fallback to episodeCount from the drama list
+        _detailError = '加载详情失败: $e';
         if (widget.drama.episodeCount > 0) {
           _totalEpisodes = widget.drama.episodeCount;
         }
       });
     }
-    await _parseAndPlay(episode);
   }
 
   @override
@@ -757,10 +747,11 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
   }
 
   /// 解析并播放指定集数
-  Future<void> _parseAndPlay(int episode) async {
+  Future<void> _playEpisode(int episode) async {
     if (!mounted) return;
 
     setState(() {
+      _phase = 'playing';
       _isLoading = true;
       _isError = false;
       _errorMessage = '';
@@ -783,9 +774,8 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
         if (_totalEpisodes <= 1 && data.totalEpisodes > 0) {
           _totalEpisodes = data.totalEpisodes;
         }
-        _videoName = data.videoName.isNotEmpty
-            ? data.videoName
-            : widget.drama.name;
+        _videoName =
+            data.videoName.isNotEmpty ? data.videoName : widget.drama.name;
 
         if (_videoUrl.isNotEmpty) {
           await _player.open(Media(_videoUrl));
@@ -817,309 +807,610 @@ class _ShortDramaPlayerScreenState extends State<ShortDramaPlayerScreen> {
     }
   }
 
-  /// 自动连播 - 播放下一集
-  void _onEpisodeEnded() {
-    if (!_isAutoPlay) return;
-    if (_currentEpisode >= _totalEpisodes) return;
-    _parseAndPlay(_currentEpisode + 1);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
-        final isDark = themeService.isDarkMode;
-        const greenColor = Color(0xFF22C55E);
-        const greenColorLight = Color(0xFF10B981);
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: Column(
-            children: [
-              // 播放器区域
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Video(controller: _controller),
-                    if (_isLoading)
-                      const CircularProgressIndicator(
-                        color: Color(0xFF22C55E),
-                      ),
-                    if (_isError)
-                      Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.error_outline,
-                            color: Colors.redAccent,
-                            size: 48,
-                          ),
-                          const SizedBox(height: 12),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32),
-                            child: Text(
-                              _errorMessage,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextButton(
-                            onPressed: () => _parseAndPlay(_currentEpisode),
-                            child: const Text(
-                              '重试',
-                              style: TextStyle(color: greenColor),
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
+        return PopScope(
+          canPop: _phase == 'detail',
+          onPopInvoked: (didPop) {
+            if (didPop) return;
+            if (_phase == 'playing') {
+              // 从播放态退回 detail,清空视频
+              setState(() {
+                _phase = 'detail';
+                _videoUrl = '';
+              });
+              try {
+                _player.stop();
+              } catch (_) {}
+            }
+          },
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: _phase == 'detail'
+                ? _buildDetailView(themeService)
+                : _buildPlayingView(themeService),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 详情视图: 海报 + 标题 + 简介 + 集数网格 + 播放按钮
+  Widget _buildDetailView(ThemeService themeService) {
+    final isDark = themeService.isDarkMode;
+    const greenColor = Color(0xFF22C55E);
+    const greenColorLight = Color(0xFF10B981);
+    final cover = widget.drama.backdrop.isNotEmpty
+        ? widget.drama.backdrop
+        : widget.drama.cover;
+    final canPlay = _totalEpisodes > 0;
+
+    return Stack(
+      children: [
+        // 主滚动内容
+        Positioned.fill(
+          child: CustomScrollView(
+            slivers: [
+              // 顶部条
+              SliverAppBar(
+                pinned: true,
+                backgroundColor: isDark
+                    ? const Color(0xFF1a1a1a)
+                    : Colors.white,
+                foregroundColor: isDark ? Colors.white : Colors.black87,
+                elevation: 0,
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                title: Text(
+                  widget.drama.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
-              // 信息和选集区域
-              Expanded(
-                child: Container(
-                  color: isDark
-                      ? const Color(0xFF1e1e1e)
-                      : Colors.white,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
+
+              // 海报 + 简介头部
+              SliverToBoxAdapter(
+                child: _buildPosterHeader(cover, isDark),
+              ),
+
+              // 集数
+              SliverToBoxAdapter(
+                child: _buildEpisodeSection(themeService),
+              ),
+
+              // 简介
+              if (widget.drama.description.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // 标题
                         Text(
-                          _videoName,
-                          style: FontUtils.poppins(context,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
+                          '简介',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
                             color: isDark
-                                ? const Color(0xFFffffff)
+                                ? Colors.white
                                 : const Color(0xFF2c3e50),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        // 集数信息 + 全部播放按钮
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: greenColor.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '第$_currentEpisode集 / 共$_totalEpisodes集',
-                                style: FontUtils.poppins(context,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: greenColor,
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            if (_totalEpisodes > 1)
-                              GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _isAutoPlay = !_isAutoPlay;
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          _isAutoPlay ? '已开启自动连播' : '已关闭自动连播'),
-                                      backgroundColor:
-                                          _isAutoPlay ? greenColor : null,
-                                      duration: const Duration(seconds: 2),
-                                    ),
-                                  );
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: _isAutoPlay
-                                          ? [greenColor, greenColorLight]
-                                          : (isDark
-                                              ? [Colors.white12, Colors.white10]
-                                              : [Colors.grey.shade200,
-                                                  Colors.grey.shade200]),
-                                    ),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        _isAutoPlay
-                                            ? Icons.play_circle_filled
-                                            : Icons.play_circle_outline,
-                                        size: 14,
-                                        color: _isAutoPlay
-                                            ? Colors.white
-                                            : (isDark
-                                                ? Colors.white70
-                                                : Colors.black87),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        _isAutoPlay ? '连播中' : '全部播放',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: _isAutoPlay
-                                              ? Colors.white
-                                              : (isDark
-                                                  ? Colors.white70
-                                                  : Colors.black87),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                          ],
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.drama.description,
+                          style: TextStyle(
+                            fontSize: 14,
+                            height: 1.5,
+                            color: isDark
+                                ? const Color(0xFFb0b0b0)
+                                : const Color(0xFF7f8c8d),
+                          ),
                         ),
-                        const SizedBox(height: 16),
-                        // 简介
-                        if (widget.drama.description.isNotEmpty) ...[
-                          Text(
-                            '简介',
-                            style: FontUtils.poppins(context,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                              color: isDark
-                                  ? const Color(0xFFffffff)
-                                  : const Color(0xFF2c3e50),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            widget.drama.description,
-                            style: FontUtils.poppins(context,
-                              fontSize: 14,
-                              color: isDark
-                                  ? const Color(0xFFb0b0b0)
-                                  : const Color(0xFF7f8c8d),
-                            ).copyWith(height: 1.5),
-                          ),
-                        ],
-                        const SizedBox(height: 16),
-                        // 选集
-                        Row(
-                          children: [
-                            Text(
-                              '选集',
-                              style: FontUtils.poppins(context,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
-                                color: isDark
-                                    ? const Color(0xFFffffff)
-                                    : const Color(0xFF2c3e50),
-                              ),
-                            ),
-                            const Spacer(),
-                            if (_isLoadingDetail)
-                              const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 1.5,
-                                  color: greenColor,
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        // 集数网格
-                        if (_totalEpisodes > 1)
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 5,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 8,
-                              childAspectRatio: 1.5,
-                            ),
-                            itemCount: _totalEpisodes,
-                            itemBuilder: (context, index) {
-                              final episodeNum = index + 1;
-                              final isCurrent = episodeNum == _currentEpisode;
-                              return GestureDetector(
-                                onTap: () => _parseAndPlay(episodeNum),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    gradient: isCurrent
-                                        ? const LinearGradient(
-                                            colors: [
-                                              greenColor,
-                                              greenColorLight
-                                            ],
-                                          )
-                                        : null,
-                                    color: !isCurrent
-                                        ? (isDark
-                                            ? Colors.white.withOpacity(0.08)
-                                            : Colors.grey[100])
-                                        : null,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: !isCurrent
-                                        ? Border.all(
-                                            color: isDark
-                                                ? Colors.white.withOpacity(0.1)
-                                                : Colors.grey.shade300!,
-                                          )
-                                        : null,
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    '$episodeNum',
-                                    style: FontUtils.poppins(context,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: isCurrent
-                                          ? Colors.white
-                                          : (isDark
-                                              ? const Color(0xFFffffff)
-                                              : const Color(0xFF2c3e50)),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Text(
-                              _isLoadingDetail
-                                  ? '正在加载集数...'
-                                  : '暂无可用集数,请尝试重新解析',
-                              style: TextStyle(
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.black54,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
                       ],
                     ),
                   ),
                 ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            ],
+          ),
+        ),
+
+        // 底部固定播放按钮
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              12,
+              16,
+              12 + MediaQuery.of(context).padding.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1a1a1a) : Colors.white,
+              border: Border(
+                top: BorderSide(
+                  color: isDark
+                      ? Colors.white.withOpacity(0.08)
+                      : Colors.grey.withOpacity(0.2),
+                ),
+              ),
+            ),
+            child: GestureDetector(
+              onTap: canPlay ? () => _playEpisode(1) : null,
+              child: Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  gradient: canPlay
+                      ? const LinearGradient(
+                          colors: [greenColor, greenColorLight],
+                        )
+                      : null,
+                  color: canPlay
+                      ? null
+                      : (isDark
+                          ? Colors.white.withOpacity(0.08)
+                          : Colors.grey[300]),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.play_arrow,
+                        color: Colors.white, size: 22),
+                    const SizedBox(width: 6),
+                    Text(
+                      canPlay ? '播放 第1集' : '暂无可播放集数',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 海报 + 元信息 header
+  Widget _buildPosterHeader(String cover, bool isDark) {
+    return Stack(
+      children: [
+        // 背景封面 (模糊,半透明)
+        if (cover.isNotEmpty)
+          Positioned.fill(
+            child: Image.network(
+              cover,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                color: isDark ? const Color(0xFF1e1e1e) : Colors.grey[200],
+              ),
+            ),
+          ),
+        if (cover.isNotEmpty)
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    (isDark ? Colors.black : Colors.white).withOpacity(0.4),
+                    isDark ? const Color(0xFF121212) : Colors.white,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左侧海报
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 110,
+                  height: 160,
+                  child: cover.isNotEmpty
+                      ? Image.network(
+                          cover,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: isDark
+                                ? const Color(0xFF1e1e1e)
+                                : Colors.grey[200],
+                            child: const Icon(Icons.movie, color: Colors.white54),
+                          ),
+                        )
+                      : Container(
+                          color: isDark
+                              ? const Color(0xFF1e1e1e)
+                              : Colors.grey[200],
+                          child: const Icon(Icons.movie, color: Colors.white54),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              // 右侧元信息
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 80),
+                    Text(
+                      widget.drama.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (widget.drama.score > 0)
+                      Row(
+                        children: [
+                          const Icon(Icons.star_rounded,
+                              color: Color(0xFFFBBF24), size: 18),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.drama.score.toStringAsFixed(1),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF2c3e50),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 6),
+                    if (widget.drama.author.isNotEmpty)
+                      Text(
+                        '导演: ${widget.drama.author}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark
+                              ? const Color(0xFFb0b0b0)
+                              : const Color(0xFF7f8c8d),
+                        ),
+                      ),
+                    if (widget.drama.updateTime.isNotEmpty)
+                      Text(
+                        '更新: ${widget.drama.updateTime}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark
+                              ? const Color(0xFFb0b0b0)
+                              : const Color(0xFF7f8c8d),
+                        ),
+                      ),
+                    Text(
+                      _totalEpisodes > 1 ? '共 $_totalEpisodes 集' : '',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark
+                            ? const Color(0xFFb0b0b0)
+                            : const Color(0xFF7f8c8d),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      ],
+    );
+  }
+
+  /// 集数网格
+  Widget _buildEpisodeSection(ThemeService themeService) {
+    final isDark = themeService.isDarkMode;
+    const greenColor = Color(0xFF22C55E);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '选集',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                ),
+              ),
+              const Spacer(),
+              if (_isLoadingDetail)
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: greenColor,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_detailError != null)
+            Text(
+              _detailError!,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            )
+          else if (_totalEpisodes > 1)
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1.6,
+              ),
+              itemCount: _totalEpisodes,
+              itemBuilder: (context, index) {
+                final episodeNum = index + 1;
+                return GestureDetector(
+                  onTap: () => _playEpisode(episodeNum),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withOpacity(0.08)
+                          : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.1)
+                            : Colors.grey.shade300!,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$episodeNum',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            )
+          else
+            Text(
+              _isLoadingDetail ? '正在加载集数...' : '暂无可用集数',
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 播放视图
+  Widget _buildPlayingView(ThemeService themeService) {
+    final isDark = themeService.isDarkMode;
+    const greenColor = Color(0xFF22C55E);
+    const greenColorLight = Color(0xFF10B981);
+
+    return Column(
+      children: [
+        // 顶部条 (从播放退回到 detail)
+        Container(
+          color: isDark ? const Color(0xFF1a1a1a) : Colors.white,
+          padding: EdgeInsets.fromLTRB(
+            8,
+            MediaQuery.of(context).padding.top + 4,
+            8,
+            4,
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  Icons.arrow_back_ios_new,
+                  size: 20,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                onPressed: () {
+                  setState(() => _phase = 'detail');
+                  try {
+                    _player.stop();
+                  } catch (_) {}
+                },
+              ),
+              Expanded(
+                child: Text(
+                  _videoName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 48),
+            ],
+          ),
+        ),
+
+        // 播放器
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Video(controller: _controller),
+              if (_isLoading)
+                const CircularProgressIndicator(color: greenColor),
+              if (_isError)
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline,
+                        color: Colors.redAccent, size: 48),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _errorMessage,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => _playEpisode(_currentEpisode),
+                      child: const Text('重试',
+                          style: TextStyle(color: greenColor)),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+
+        // 集数选择条
+        Expanded(
+          child: Container(
+            color: isDark ? const Color(0xFF1e1e1e) : Colors.white,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: greenColor.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '第$_currentEpisode集 / 共$_totalEpisodes集',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: greenColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '选集',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : const Color(0xFF2c3e50),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_totalEpisodes > 1)
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 5,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        childAspectRatio: 1.6,
+                      ),
+                      itemCount: _totalEpisodes,
+                      itemBuilder: (context, index) {
+                        final episodeNum = index + 1;
+                        final isCurrent = episodeNum == _currentEpisode;
+                        return GestureDetector(
+                          onTap: () => _playEpisode(episodeNum),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: isCurrent
+                                  ? const LinearGradient(
+                                      colors: [greenColor, greenColorLight],
+                                    )
+                                  : null,
+                              color: !isCurrent
+                                  ? (isDark
+                                      ? Colors.white.withOpacity(0.08)
+                                      : Colors.grey[100])
+                                  : null,
+                              borderRadius: BorderRadius.circular(8),
+                              border: !isCurrent
+                                  ? Border.all(
+                                      color: isDark
+                                          ? Colors.white.withOpacity(0.1)
+                                          : Colors.grey.shade300!,
+                                    )
+                                  : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '$episodeNum',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: isCurrent
+                                    ? Colors.white
+                                    : (isDark
+                                        ? Colors.white
+                                        : const Color(0xFF2c3e50)),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        '暂无可用集数',
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.black54,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
