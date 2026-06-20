@@ -8,7 +8,7 @@ import 'package:luna_tv/services/user_data_service.dart';
 Future<String> getImageUrl(String originalUrl, String? source) async {
   if (source == 'douban' && originalUrl.isNotEmpty) {
     final imageSourceKey = await UserDataService.getDoubanImageSourceKey();
-    
+
     switch (imageSourceKey) {
       case 'official_cdn':
         return originalUrl.replaceAll(
@@ -30,11 +30,19 @@ Future<String> getImageUrl(String originalUrl, String? source) async {
         return originalUrl;
     }
   }
+  // Bangumi 图片 URL 统一使用 HTTPS
+  if (source == 'bangumi' && originalUrl.isNotEmpty) {
+    if (originalUrl.startsWith('//')) {
+      return 'https:$originalUrl';
+    }
+    return originalUrl.replaceFirst('http://', 'https://');
+  }
   return originalUrl;
 }
 
 /// 返回加载网络图片所需的 HTTP 头（主要用于绕过特定站点的反盗链）。
-/// 注意：只有当 [source] 为 'douban' 或 URL 指向 douban 域名时才添加 Referer/UA。其他来源返回空头。
+/// 注意：只有当 [source] 为 'douban' 或 URL 指向 douban 域名时才添加 Referer/UA。
+/// bangumi 源（lain.bgm.tv）也需要 UA，否则图片请求会被拒绝。
 Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
   final bool isDoubanSource = (source == 'douban') ||
       RegExp(r'https?://([^/]+\.)?douban(io|)\.com', caseSensitive: false)
@@ -48,6 +56,18 @@ Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
       'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     };
   }
+
+  // Bangumi 图片服务器 lain.bgm.tv 需要 User-Agent
+  final bool isBangumiSource = (source == 'bangumi') ||
+      RegExp(r'https?://([^/]+\.)?bgm\.tv', caseSensitive: false)
+          .hasMatch(imageUrl);
+  if (isBangumiSource) {
+    return <String, String>{
+      'User-Agent': 'senshinya/LunaTV/1.0.0 (Android) (http://github.com/senshinya/LunaTV)',
+      'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
+
   return null;
 }
 
