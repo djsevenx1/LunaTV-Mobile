@@ -12,6 +12,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/widgets/video_card.dart';
 import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/widgets/shimmer_effect.dart';
 
