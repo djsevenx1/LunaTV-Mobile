@@ -126,7 +126,7 @@ class _HotShortDramaSectionState extends State<HotShortDramaSection> {
     return RecommendationSection(
       title: '热门短剧',
       subtitle: '精彩短剧',
-      icon: Icons.clapperboard,
+      icon: Icons.movie,
       sectionColor: SectionColor.red,
       moreText: '查看更多',
       onMoreTap: widget.onMoreTap,
