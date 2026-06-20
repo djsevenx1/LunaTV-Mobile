@@ -14,7 +14,6 @@ import 'package:luna_tv/screens/m3u_import_screen.dart';
 import 'package:luna_tv/screens/netdisk_search_screen.dart';
 import 'package:luna_tv/screens/play_stats_screen.dart';
 import 'package:luna_tv/screens/release_calendar_screen.dart';
-import 'package:luna_tv/screens/settings_screen.dart';
 import 'package:luna_tv/screens/short_drama_screen.dart';
 import 'package:luna_tv/screens/youtube_screen.dart';
 import 'package:luna_tv/services/api_service.dart';
