@@ -86,6 +86,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 退出时最后一次保存
     _saveCurrentProgress(force: true);
     _progressTimer?.cancel();
+    // 强制停止播放器,避免关页面后还在后台继续播
+    try {
+      _player.stop();
+    } catch (_) {}
     _player.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
@@ -198,10 +202,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       _selectSource(toSelect);
 
-      // 默认自动开始播放第1集,用户可在播放页用上下集按钮切换
-      if (toSelect.episodes.isNotEmpty) {
-        _playEpisode(0);
-      }
+      // 进入详情页不自动播放,等用户点"播放"按钮
+      // (电视剧在第1集播完后会自动播第2集,可点暂停控制)
 
       // 启动后台测速,测完后自动切到最快源
       _testAllSourcesInBackground();
@@ -367,10 +369,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
               children: [
                 // 海报 + 信息头部
                 _buildPosterHeader(isDark),
+                // 集数 (放在源上面,LunaTV Web 风格)
+                _buildEpisodeSection(isDark),
                 // 源 + 测速
                 _buildSourceSection(isDark),
-                // 集数
-                _buildEpisodeSection(isDark),
                 const SizedBox(height: 100),
               ],
             ),
@@ -869,6 +871,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildBottomPlayButton(bool isDark) {
     final source = _selectedSource;
     final canPlay = source != null && source.episodes.isNotEmpty;
+    final isPlaying = _phase == 'playing';
+    final btnText = source == null
+        ? '请选择播放源'
+        : (source.episodes.isEmpty
+            ? '该源无集数'
+            : (isPlaying
+                ? '继续播放 第${_currentEpisodeIndex + 1}集'
+                : '播放 第${_currentEpisodeIndex + 1}集'));
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: BoxDecoration(
@@ -906,23 +916,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: canPlay
-                  ? () => _playEpisode(_currentEpisodeIndex)
-                  : null,
+              onTap: canPlay ? () => _playEpisode(_currentEpisodeIndex) : null,
               borderRadius: BorderRadius.circular(12),
               child: Center(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.play_arrow,
-                        color: Colors.white, size: 22),
+                    Icon(
+                      isPlaying
+                          ? Icons.play_circle_outline
+                          : Icons.play_arrow,
+                      color: Colors.white,
+                      size: 22,
+                    ),
                     const SizedBox(width: 6),
                     Text(
-                      source == null
-                          ? '请选择播放源'
-                          : (source.episodes.isEmpty
-                              ? '该源无集数'
-                              : '播放 第${_currentEpisodeIndex + 1}集'),
+                      btnText,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 15,
