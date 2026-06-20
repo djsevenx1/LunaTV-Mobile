@@ -317,9 +317,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             // 热门电影组件
             HotMoviesSection(
-              onMovieTap: (videoInfo) {
+              onMovieTap: (playRecord) {
                 _navigateToPlayer(
-                  PlayerScreen(videoInfo: videoInfo),
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(1),
@@ -335,9 +335,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             // 热门剧集组件
             HotTvSection(
-              onTvTap: (videoInfo) {
+              onTvTap: (playRecord) {
                 _navigateToPlayer(
-                  PlayerScreen(videoInfo: videoInfo),
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(2),
@@ -353,9 +353,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             // 新番放送组件
             BangumiSection(
-              onBangumiTap: (videoInfo) {
+              onBangumiTap: (playRecord) {
                 _navigateToPlayer(
-                  PlayerScreen(videoInfo: videoInfo),
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(3),
@@ -371,9 +371,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             // 热门综艺组件
             HotShowSection(
-              onShowTap: (videoInfo) {
+              onShowTap: (playRecord) {
                 _navigateToPlayer(
-                  PlayerScreen(videoInfo: videoInfo),
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
                 );
               },
               onMoreTap: () => _onBottomNavChanged(5),
