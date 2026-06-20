@@ -17,6 +17,8 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/douban_service.dart';
+import 'package:luna_tv/widgets/hero_banner.dart';
 import 'package:luna_tv/screens/movie_screen.dart';
 import 'package:luna_tv/screens/tv_screen.dart';
 import 'package:luna_tv/screens/anime_screen.dart';
@@ -38,6 +40,10 @@ class _HomeScreenState extends State<HomeScreen> {
   late PageController _pageController;
   late PageController _bottomNavPageController;
 
+  // Hero Banner 数据
+  List<HeroBannerItem> _bannerItems = [];
+  bool _bannerLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +53,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _bottomNavPageController = PageController(initialPage: 0);
     // 进入首页时直接刷新播放记录和收藏夹缓存
     _refreshCacheOnHomeEnter();
+    // 加载 Hero Banner 数据
+    _loadBannerData();
   }
 
   @override
@@ -88,6 +96,75 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       // 静默处理错误，不影响首页正常显示
+    }
+  }
+
+  /// 加载 Hero Banner 数据（从热门电影/剧集/番剧取前几项）
+  Future<void> _loadBannerData() async {
+    if (_bannerLoaded) return;
+    try {
+      final moviesResult = await DoubanService.getHotMovies(context);
+      final tvResult = await DoubanService.getHotTvShows(context);
+      final animeResult = await DoubanService.getBangumiCalendar(context);
+
+      if (!mounted) return;
+
+      final List<HeroBannerItem> items = [];
+
+      if (moviesResult.success && moviesResult.data != null) {
+        for (final m in moviesResult.data!.take(3)) {
+          items.add(HeroBannerItem(
+            id: m.id,
+            title: m.title,
+            subtitle: '热门电影',
+            imageUrl: m.poster,
+            type: 'movie',
+            source: 'douban',
+            id_: m.id,
+            year: m.year.isNotEmpty ? m.year : null,
+            rate: m.rate,
+          ));
+        }
+      }
+      if (tvResult.success && tvResult.data != null) {
+        for (final t in tvResult.data!.take(2)) {
+          items.add(HeroBannerItem(
+            id: t.id,
+            title: t.title,
+            subtitle: '热播剧集',
+            imageUrl: t.poster,
+            type: 'tv',
+            source: 'douban',
+            id_: t.id,
+            year: t.year.isNotEmpty ? t.year : null,
+            rate: t.rate,
+          ));
+        }
+      }
+      if (animeResult.success && animeResult.data != null) {
+        for (final a in animeResult.data!.take(2)) {
+          items.add(HeroBannerItem(
+            id: a.id,
+            title: a.title,
+            subtitle: '新番放送',
+            imageUrl: a.poster,
+            type: 'anime',
+            source: 'douban',
+            id_: a.id,
+            year: a.year.isNotEmpty ? a.year : null,
+            rate: a.rate,
+          ));
+        }
+      }
+
+      if (mounted && items.isNotEmpty) {
+        setState(() {
+          _bannerItems = items;
+          _bannerLoaded = true;
+        });
+      }
+    } catch (_) {
+      // banner 加载失败不影响首页
     }
   }
 
@@ -188,6 +265,21 @@ class _HomeScreenState extends State<HomeScreen> {
       child: SingleChildScrollView(
         child: Column(
           children: [
+            // Hero Banner 幻灯片
+            if (_bannerItems.isNotEmpty)
+              HeroBanner(
+                items: _bannerItems,
+                onTap: (item) {
+                  _navigateToPlayer(
+                    PlayerScreen(
+                      source: item.source,
+                      id: item.id_,
+                      title: item.title,
+                      year: item.year ?? '',
+                    ),
+                  );
+                },
+              ),
             const SizedBox(height: 8),
             // 继续观看组件
             ContinueWatchingSection(
