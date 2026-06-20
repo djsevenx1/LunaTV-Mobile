@@ -281,51 +281,46 @@ class _MainLayoutState extends State<MainLayout> {
               ? themeService.darkTheme
               : themeService.lightTheme,
           child: Scaffold(
+            backgroundColor: themeService.isDarkMode
+                ? const Color(0xFF000000)
+                : Colors.transparent,
             resizeToAvoidBottomInset: !widget.isSearchMode,
-            body: Stack(
-              children: [
-                // 主要内容区域
-                Column(
-                  children: [
-                    // 主内容区域（包含header和content）
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: themeService.isDarkMode
-                              ? const Color(0xFF000000) // 深色模式纯黑色
-                              : null,
-                          gradient: themeService.isDarkMode
-                              ? null
-                              : const LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Color(0xFFe6f3fb), // 浅色模式渐变
-                                    Color(0xFFeaf3f7),
-                                    Color(0xFFf7f7f3),
-                                    Color(0xFFe9ecef),
-                                    Color(0xFFdbe3ea),
-                                    Color(0xFFd3dde6),
-                                  ],
-                                  stops: [0.0, 0.18, 0.38, 0.60, 0.80, 1.0],
-                                ),
-                        ),
-                        child: Column(
-                          children: [
-                            // Windows 自定义标题栏
-                            _buildHeader(context, themeService),
-                            // 主要内容区域
-                            Expanded(
-                              child: widget.content,
-                            ),
-                          ],
-                        ),
+            body: Container(
+              decoration: BoxDecoration(
+                color: themeService.isDarkMode
+                    ? const Color(0xFF000000)
+                    : null,
+                gradient: themeService.isDarkMode
+                    ? null
+                    : const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0xFFe6f3fb),
+                          Color(0xFFeaf3f7),
+                          Color(0xFFf7f7f3),
+                          Color(0xFFe9ecef),
+                          Color(0xFFdbe3ea),
+                          Color(0xFFd3dde6),
+                        ],
+                        stops: [0.0, 0.18, 0.38, 0.60, 0.80, 1.0],
                       ),
-                    ),
-                    // 底部导航栏（可选）
-                    if (widget.showBottomNav) _buildBottomNavBar(themeService),
-                  ],
-                ),
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    children: [
+                      // Windows 自定义标题栏
+                      _buildHeader(context, themeService),
+                      // 主要内容区域
+                      Expanded(
+                        child: widget.content,
+                      ),
+                      // 底部导航栏（可选）
+                      if (widget.showBottomNav)
+                        _buildBottomNavBar(themeService),
+                    ],
+                  ),
                 // 用户菜单覆盖层 - 现在会覆盖整个屏幕包括navbar
                 if (_showUserMenu)
                   UserMenu(
