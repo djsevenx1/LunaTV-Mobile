@@ -247,9 +247,15 @@ class ShortDramaService {
       final uri = Uri.parse(url).replace(queryParameters: queryParams);
       final headers = await _buildHeaders();
 
+      // ignore: avoid_print
+      print('[shortdrama/parse] GET $uri');
+
       final response = await http
           .get(uri, headers: headers)
           .timeout(_timeout);
+
+      // ignore: avoid_print
+      print('[shortdrama/parse] status=${response.statusCode} body=${response.body}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
