@@ -359,24 +359,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 }
               },
             ),
-            // 热门短剧组件（放在热门电影之后，更显眼）
-            HotShortDramaSection(
-              onDramaTap: (playRecord) {
-                _navigateToPlayer(
-                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
-                );
-              },
-              onMoreTap: () => _onBottomNavChanged(4),
-              onGlobalMenuAction: (videoInfo, action) {
-                if (action == VideoMenuAction.play) {
-                  _navigateToPlayer(
-                    PlayerScreen(videoInfo: videoInfo),
-                  );
-                } else {
-                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                }
-              },
-            ),
             // 热门剧集组件
             HotTvSection(
               onTvTap: (playRecord) {
@@ -421,6 +403,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
               onMoreTap: () => _onBottomNavChanged(5),
+              onGlobalMenuAction: (videoInfo, action) {
+                if (action == VideoMenuAction.play) {
+                  _navigateToPlayer(
+                    PlayerScreen(videoInfo: videoInfo),
+                  );
+                } else {
+                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                }
+              },
+            ),
+            // 热门短剧组件 - 放在最底部
+            HotShortDramaSection(
+              onDramaTap: (playRecord) {
+                _navigateToPlayer(
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+                );
+              },
+              onMoreTap: () => _onBottomNavChanged(4),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
