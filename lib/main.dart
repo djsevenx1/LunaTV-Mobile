@@ -37,16 +37,20 @@ void main() async {
   // 启动定期清理
   cacheService.startPeriodicCleanup();
 
-  runApp(const LunaTVApp());
+  // 异步初始化 ThemeService,恢复上次保存的主题模式
+  final themeService = await ThemeService.create();
+
+  runApp(LunaTVApp(themeService: themeService));
 }
 
 class LunaTVApp extends StatelessWidget {
-  const LunaTVApp({super.key});
+  final ThemeService themeService;
+  const LunaTVApp({super.key, required this.themeService});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => ThemeService(),
+    return ChangeNotifierProvider<ThemeService>.value(
+      value: themeService,
       child: Consumer<ThemeService>(
         builder: (context, themeService, child) {
           return MaterialApp(
