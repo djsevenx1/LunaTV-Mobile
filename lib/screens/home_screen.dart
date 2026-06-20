@@ -102,8 +102,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 加载 Hero Banner 数据（从热门电影/剧集/番剧取前几项）
-  Future<void> _loadBannerData() async {
-    if (_bannerLoaded) return;
+  /// [force] = true 时强制重新加载（用于下拉刷新）
+  Future<void> _loadBannerData({bool force = false}) async {
+    if (_bannerLoaded && !force) return;
+    if (force) {
+      // 强制刷新时先清空旧数据，触发 HeroBanner 重建
+      if (mounted) {
+        setState(() {
+          _bannerItems = [];
+          _bannerLoaded = false;
+        });
+      }
+    }
     try {
       final moviesResult = await DoubanService.getHotMovies(context);
       final tvResult = await DoubanService.getHotTvShows(context);
@@ -185,6 +195,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     try {
+      // 强制刷新 Hero Banner（下拉刷新时重新拉取轮播数据）
+      _loadBannerData(force: true);
+
       // 调用各个组件的刷新方法
       // 刷新继续观看组件
       await ContinueWatchingSection.refreshPlayRecords();
@@ -337,6 +350,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 }
               },
             ),
+            // 热门短剧组件（放在热门电影之后，更显眼）
+            HotShortDramaSection(
+              onDramaTap: (playRecord) {
+                _navigateToPlayer(
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+                );
+              },
+              onMoreTap: () => _onBottomNavChanged(4),
+              onGlobalMenuAction: (videoInfo, action) {
+                if (action == VideoMenuAction.play) {
+                  _navigateToPlayer(
+                    PlayerScreen(videoInfo: videoInfo),
+                  );
+                } else {
+                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                }
+              },
+            ),
             // 热门剧集组件
             HotTvSection(
               onTvTap: (playRecord) {
@@ -381,24 +412,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
               onMoreTap: () => _onBottomNavChanged(5),
-              onGlobalMenuAction: (videoInfo, action) {
-                if (action == VideoMenuAction.play) {
-                  _navigateToPlayer(
-                    PlayerScreen(videoInfo: videoInfo),
-                  );
-                } else {
-                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                }
-              },
-            ),
-            // 热门短剧组件
-            HotShortDramaSection(
-              onDramaTap: (playRecord) {
-                _navigateToPlayer(
-                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
-                );
-              },
-              onMoreTap: () => _onBottomNavChanged(4),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
