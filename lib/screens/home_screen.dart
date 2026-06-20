@@ -6,6 +6,7 @@ import 'package:luna_tv/widgets/hot_movies_section.dart';
 import 'package:luna_tv/widgets/hot_tv_section.dart';
 import 'package:luna_tv/widgets/hot_show_section.dart';
 import 'package:luna_tv/widgets/bangumi_section.dart';
+import 'package:luna_tv/widgets/hot_short_drama_section.dart';
 import 'package:luna_tv/widgets/main_layout.dart';
 import 'package:luna_tv/widgets/top_tab_switcher.dart';
 import 'package:luna_tv/widgets/favorites_grid.dart';
@@ -206,6 +207,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // 刷新热门综艺组件
       await HotShowSection.refreshHotShows();
 
+      // 刷新热门短剧组件
+      await HotShortDramaSection.refreshHotShortDramas();
+
       if (!mounted) return;
       // 强制重建页面
       setState(() {});
@@ -377,6 +381,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
               onMoreTap: () => _onBottomNavChanged(5),
+              onGlobalMenuAction: (videoInfo, action) {
+                if (action == VideoMenuAction.play) {
+                  _navigateToPlayer(
+                    PlayerScreen(videoInfo: videoInfo),
+                  );
+                } else {
+                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                }
+              },
+            ),
+            // 热门短剧组件
+            HotShortDramaSection(
+              onDramaTap: (playRecord) {
+                _navigateToPlayer(
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+                );
+              },
+              onMoreTap: () => _onBottomNavChanged(4),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
