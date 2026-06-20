@@ -22,14 +22,10 @@ class ShortDramaScreen extends StatefulWidget {
 class _ShortDramaScreenState extends State<ShortDramaScreen> {
   final ScrollController _scrollController = ScrollController();
 
-  // 一级筛选：分类
-  final List<String> _primaryTabs = const ['全部', '最近热门'];
-  String _selectedPrimaryTab = '最近热门';
-
-  // 二级筛选：类型（来自 API 的分类列表，前面会拼一个"全部"）
-  List<String> _typeTabs = const ['全部'];
-  String _selectedTypeTab = '全部';
-  // 类型 -> 分类 typeId 的映射（"全部" 对应 null）
+  // 类型筛选（来自 API 的分类列表，去掉名字为"全部"和"短剧"的项）
+  List<String> _typeTabs = const [];
+  String _selectedTypeTab = '';
+  // 类型 -> 分类 typeId 的映射
   final Map<String, int> _typeToCategoryId = {};
 
   // 列表数据
@@ -59,13 +55,16 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     final categories = await ShortDramaService.getCategories();
     if (!mounted) return;
 
-    final typeTabs = <String>['全部'];
-    final typeToId = <String, int>{'全部': -1};
+    // 过滤掉"全部"、"短剧"这些不需要的项
+    final typeTabs = <String>[];
+    final typeToId = <String, int>{};
     for (final c in categories) {
-      if (!typeTabs.contains(c.typeName)) {
-        typeTabs.add(c.typeName);
-        typeToId[c.typeName] = c.typeId;
-      }
+      final name = c.typeName.trim();
+      if (name.isEmpty) continue;
+      if (name == '全部' || name == '短剧') continue;
+      if (typeTabs.contains(name)) continue;
+      typeTabs.add(name);
+      typeToId[name] = c.typeId;
     }
 
     setState(() {
@@ -73,10 +72,16 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _typeToCategoryId
         ..clear()
         ..addAll(typeToId);
+      // 默认选中第一个类型
+      if (typeTabs.isNotEmpty) {
+        _selectedTypeTab = typeTabs.first;
+      }
     });
 
-    // 初次加载：根据当前筛选状态拉取
-    _fetchDramaList(isRefresh: true);
+    // 初次加载：根据当前筛选状态拉取（仅在有类型时才拉）
+    if (typeTabs.isNotEmpty) {
+      _fetchDramaList(isRefresh: true);
+    }
   }
 
   /// 处理滚动事件，上拉加载更多
@@ -114,29 +119,12 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _errorMessage = null;
     });
 
-    ShortDramaListResponse result;
     final selectedTypeId = _typeToCategoryId[_selectedTypeTab];
-
-    if (_selectedPrimaryTab == '最近热门' ||
-        _selectedTypeTab == '全部' ||
-        selectedTypeId == null ||
-        selectedTypeId == -1) {
-      // 最近热门 / 全部类型 -> 走推荐接口
-      result = await ShortDramaService.getRecommendResponse(
-        category: selectedTypeId != null && selectedTypeId > 0
-            ? selectedTypeId
-            : null,
-        page: _page,
-        size: 20,
-      );
-    } else {
-      // 指定类型 -> 走分类列表接口
-      result = await ShortDramaService.getList(
-        categoryId: selectedTypeId,
-        page: _page,
-        size: 20,
-      );
-    }
+    final result = await ShortDramaService.getList(
+      categoryId: selectedTypeId ?? -1,
+      page: _page,
+      size: 20,
+    );
 
     if (!mounted) return;
 
@@ -158,27 +146,12 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
 
     _page++;
 
-    ShortDramaListResponse result;
     final selectedTypeId = _typeToCategoryId[_selectedTypeTab];
-
-    if (_selectedPrimaryTab == '最近热门' ||
-        _selectedTypeTab == '全部' ||
-        selectedTypeId == null ||
-        selectedTypeId == -1) {
-      result = await ShortDramaService.getRecommendResponse(
-        category: selectedTypeId != null && selectedTypeId > 0
-            ? selectedTypeId
-            : null,
-        page: _page,
-        size: 20,
-      );
-    } else {
-      result = await ShortDramaService.getList(
-        categoryId: selectedTypeId,
-        page: _page,
-        size: 20,
-      );
-    }
+    final result = await ShortDramaService.getList(
+      categoryId: selectedTypeId ?? -1,
+      page: _page,
+      size: 20,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -193,16 +166,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     await _fetchDramaList(isRefresh: true);
   }
 
-  /// 切换一级分类
-  void _onPrimaryTabChanged(String tab) {
-    if (_selectedPrimaryTab == tab) return;
-    setState(() {
-      _selectedPrimaryTab = tab;
-    });
-    _fetchDramaList(isRefresh: true);
-  }
-
-  /// 切换二级类型
+  /// 切换类型
   void _onTypeTabChanged(String tab) {
     if (_selectedTypeTab == tab) return;
     setState(() {
@@ -321,8 +285,11 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
-  /// 构建筛选区（与电视剧页风格一致：白底圆角容器 + 双行胶囊标签）
+  /// 构建筛选区（白底圆角容器，仅保留类型胶囊标签）
   Widget _buildFilterSection(ThemeService themeService) {
+    if (_typeTabs.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.all(16),
@@ -333,23 +300,11 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
             : Colors.white.withOpacity(0.8),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildFilterRow(
-            label: '分类',
-            tabs: _primaryTabs,
-            selectedTab: _selectedPrimaryTab,
-            onTabChanged: _onPrimaryTabChanged,
-          ),
-          const SizedBox(height: 16),
-          _buildFilterRow(
-            label: '类型',
-            tabs: _typeTabs,
-            selectedTab: _selectedTypeTab,
-            onTabChanged: _onTypeTabChanged,
-          ),
-        ],
+      child: _buildFilterRow(
+        label: '类型',
+        tabs: _typeTabs,
+        selectedTab: _selectedTypeTab,
+        onTabChanged: _onTypeTabChanged,
       ),
     );
   }
