@@ -401,16 +401,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// 退出全屏：恢复系统UI + 恢复竖屏
+  /// 退出全屏：恢复系统UI + 解除方向锁定
   Future<void> _onExitFullscreen() async {
     // 恢复系统UI
     await SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
-    // 恢复竖屏
-    await SystemChrome.setPreferredOrientations([
+    // 解除方向锁定,让系统方向(横屏/竖屏)由系统决定
+    await SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
     ]);
   }
 
