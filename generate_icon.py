@@ -60,26 +60,27 @@ def draw_icon(size: int = 1024) -> Image.Image:
         fill=WHITE + (255,),
     )
 
-    # 2. 月亮背景 (浅蓝灰新月)
+    # 2. 月亮背景 (浅蓝灰新月,开口朝下,月亮在上方)
     moon_color = MOON_COLOR + (255,)
+    # 月亮主体圆 - 偏上方
     draw.ellipse(
-        [(int(140 * s), int(120 * s)), (int(880 * s), int(860 * s))],
+        [(int(180 * s), int(80 * s)), (int(860 * s), int(760 * s))],
         fill=moon_color,
     )
-    # 挖出右下角形成新月
+    # 挖出下方形成新月(开口朝下)
     draw.ellipse(
-        [(int(280 * s), int(200 * s)), (int(980 * s), int(900 * s))],
+        [(int(260 * s), int(380 * s)), (int(940 * s), int(1060 * s))],
         fill=WHITE + (255,),
     )
 
-    # 3. 绿色播放按钮圆形 (中心)
+    # 3. 绿色播放按钮圆形 (中心,缩小)
     cx = size // 2
-    cy = size // 2 + int(30 * s)
-    r_circle = int(220 * s)
+    cy = size // 2 + int(40 * s)
+    r_circle = int(170 * s)  # 从 220 缩小到 170
 
     # 外圈柔光晕
-    for i in range(12):
-        alpha = max(0, 50 - i * 4)
+    for i in range(10):
+        alpha = max(0, 45 - i * 4)
         draw.ellipse(
             [(cx - r_circle - i * 2, cy - r_circle - i * 2),
              (cx + r_circle + i * 2, cy + r_circle + i * 2)],
@@ -94,20 +95,20 @@ def draw_icon(size: int = 1024) -> Image.Image:
 
     # 内圈高光边
     draw.ellipse(
-        [(cx - r_circle + int(15 * s), cy - r_circle + int(15 * s)),
-         (cx + r_circle - int(15 * s), cy + r_circle - int(15 * s))],
+        [(cx - r_circle + int(12 * s), cy - r_circle + int(12 * s)),
+         (cx + r_circle - int(12 * s), cy + r_circle - int(12 * s))],
         outline=GREEN_LIGHT + (200,),
-        width=max(2, int(5 * s)),
+        width=max(2, int(4 * s)),
     )
 
-    # 4. 白色播放三角形
-    tri_size = int(130 * s)
-    tx = cx + int(30 * s)  # 视觉居中向右偏移
+    # 4. 白色播放三角形 (缩小)
+    tri_size = int(95 * s)  # 从 130 缩小到 95
+    tx = cx + int(22 * s)  # 视觉居中向右偏移
     ty = cy
     triangle = [
         (tx - tri_size // 2, ty - tri_size // 2),
         (tx - tri_size // 2, ty + tri_size // 2),
-        (tx + tri_size // 2 + int(20 * s), ty),
+        (tx + tri_size // 2 + int(15 * s), ty),
     ]
     draw.polygon(triangle, fill=WHITE + (255,))
 
