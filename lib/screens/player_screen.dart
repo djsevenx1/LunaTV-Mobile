@@ -1402,7 +1402,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!_showControls) return const SizedBox.shrink();
     final totalEps = _selectedSource?.episodes.length ?? 0;
     // 竖屏窄药丸, 全屏稍宽但仍限宽
-    final maxW = _isFullscreen ? 560.0 : 360.0;
+    final maxW = _isFullscreen ? 420.0 : 280.0;
     return Positioned(
       left: 0,
       right: 0,
