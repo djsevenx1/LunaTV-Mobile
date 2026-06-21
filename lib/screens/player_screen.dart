@@ -1565,22 +1565,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 icon: Icons.settings_outlined,
                 onTap: _showSettingsSheet,
               ),
-              // 集数胶囊徽章
+              // 集数胶囊徽章 (灰白主题)
               if (totalEps > 0)
                 Container(
                   margin: const EdgeInsets.only(left: 4),
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [
-                        kLunaEpisodeBadgeStart,
-                        kLunaEpisodeBadgeEnd,
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
+                    color: Colors.white.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.3),
+                      width: 0.5,
+                    ),
                   ),
                   child: Text(
                     totalEps > 1 ? '$currentEp/$totalEps' : '第$currentEp集',
