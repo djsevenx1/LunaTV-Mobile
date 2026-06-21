@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
 /// Hero Banner 轮播项数据模型
@@ -241,16 +242,31 @@ class _HeroBannerState extends State<HeroBanner> {
         fit: StackFit.expand,
         children: [
           // 背景图
-          CachedNetworkImage(
-            imageUrl: item.imageUrl,
-            fit: BoxFit.cover,
-            placeholder: (context, url) => Container(
-              color: isDarkMode ? Colors.black : Colors.grey[300],
-            ),
-            errorWidget: (context, url, error) => Container(
-              color: isDarkMode ? Colors.black : Colors.grey[300],
-              child: const Icon(Icons.movie, color: Colors.white, size: 64),
-            ),
+          FutureBuilder<String>(
+            future: getImageUrl(item.imageUrl, item.source,
+                upgradeDouban: true),
+            builder: (context, snapshot) {
+              final imageUrl = snapshot.data ?? item.imageUrl;
+              final headers = getImageRequestHeaders(imageUrl, item.source);
+              // 按实际显示尺寸 × devicePixelRatio 解码，
+              // 避免在小尺寸源图（如 Douban s_ratio_poster）下被拉伸变糊
+              final screenWidth = MediaQuery.of(context).size.width;
+              final dpr = MediaQuery.of(context).devicePixelRatio;
+              final targetWidth = (screenWidth * dpr).round();
+              return CachedNetworkImage(
+                imageUrl: imageUrl,
+                fit: BoxFit.cover,
+                httpHeaders: headers,
+                memCacheWidth: targetWidth,
+                placeholder: (context, url) => Container(
+                  color: isDarkMode ? Colors.black : Colors.grey[300],
+                ),
+                errorWidget: (context, url, error) => Container(
+                  color: isDarkMode ? Colors.black : Colors.grey[300],
+                  child: const Icon(Icons.movie, color: Colors.white, size: 64),
+                ),
+              );
+            },
           ),
           // 底部柔和渐变遮罩 - 让图片更通透
           Container(

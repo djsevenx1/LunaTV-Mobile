@@ -43,16 +43,29 @@ class _HotShortDramaSectionState extends State<HotShortDramaSection> {
     _loadHotDramas();
   }
 
-  /// 加载热门短剧（取第一个分类的第一页数据）
+  /// 加载热门短剧
   Future<void> _loadHotDramas() async {
     if (!mounted) return;
 
-    try {
-      setState(() {
-        _isLoading = true;
-        _hasError = false;
-      });
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
 
+    try {
+      // 策略1（推荐）: 直接调用 recommend 接口,适合首页"热门"
+      final recommended = await ShortDramaService.getRecommend(size: 12);
+      if (!mounted) return;
+
+      if (recommended.isNotEmpty) {
+        setState(() {
+          _dramas = recommended;
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // 策略2（兜底）: recommend 失败/为空时,回退到 categories + list
       final categories = await ShortDramaService.getCategories();
       if (!mounted) return;
 
@@ -84,6 +97,8 @@ class _HotShortDramaSectionState extends State<HotShortDramaSection> {
       }
     } catch (e) {
       if (!mounted) return;
+      // ignore: avoid_print
+      print('[HotShortDrama] load error=$e');
       setState(() {
         _hasError = true;
         _isLoading = false;

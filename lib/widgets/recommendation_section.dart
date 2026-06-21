@@ -159,8 +159,9 @@ class _RecommendationSectionState extends State<RecommendationSection> {
     // 获取当前使用的数据列表
     final currentItems = widget.videoInfos ?? [];
 
-    // 如果没有数据且不在加载中，隐藏组件
-    if (!widget.isLoading && currentItems.isEmpty) {
+    // 如果没有数据且不在加载中,且不是错误状态，则隐藏整个分区
+    // 错误状态下也要显示分区标题和错误提示，方便用户知道这个分区存在
+    if (!widget.isLoading && currentItems.isEmpty && !widget.hasError) {
       return const SizedBox.shrink();
     }
 

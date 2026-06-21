@@ -317,4 +317,22 @@ class ShortDramaService {
       return [];
     }
   }
+
+  /// 分页形式的推荐短剧：与 getRecommend 走同一接口，
+  /// 用客户端分页：当返回数量等于 size 时认为还有更多。
+  static Future<ShortDramaListResponse> getRecommendResponse({
+    int? category,
+    int page = 1,
+    int size = 20,
+  }) async {
+    try {
+      final list = await getRecommend(category: category, size: size);
+      return ShortDramaListResponse(
+        list: list,
+        hasMore: list.length >= size,
+      );
+    } catch (e) {
+      return const ShortDramaListResponse(list: [], hasMore: false);
+    }
+  }
 }

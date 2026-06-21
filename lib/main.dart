@@ -14,7 +14,6 @@ import 'package:luna_tv/screens/m3u_import_screen.dart';
 import 'package:luna_tv/screens/netdisk_search_screen.dart';
 import 'package:luna_tv/screens/play_stats_screen.dart';
 import 'package:luna_tv/screens/release_calendar_screen.dart';
-import 'package:luna_tv/screens/settings_screen.dart';
 import 'package:luna_tv/screens/short_drama_screen.dart';
 import 'package:luna_tv/screens/youtube_screen.dart';
 import 'package:luna_tv/services/api_service.dart';
@@ -38,16 +37,20 @@ void main() async {
   // 启动定期清理
   cacheService.startPeriodicCleanup();
 
-  runApp(const LunaTVApp());
+  // 异步初始化 ThemeService,恢复上次保存的主题模式
+  final themeService = await ThemeService.create();
+
+  runApp(LunaTVApp(themeService: themeService));
 }
 
 class LunaTVApp extends StatelessWidget {
-  const LunaTVApp({super.key});
+  final ThemeService themeService;
+  const LunaTVApp({super.key, required this.themeService});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => ThemeService(),
+    return ChangeNotifierProvider<ThemeService>.value(
+      value: themeService,
       child: Consumer<ThemeService>(
         builder: (context, themeService, child) {
           return MaterialApp(
@@ -57,7 +60,6 @@ class LunaTVApp extends StatelessWidget {
             darkTheme: themeService.darkTheme,
             themeMode: themeService.themeMode,
             routes: {
-              '/settings': (_) => const SettingsScreen(),
               '/filter-settings': (_) => const FilterSettingsScreen(),
               '/m3u-import': (_) => const M3uImportScreen(),
               '/douban-detail': (ctx) => DoubanDetailScreen.fromArgs(ctx),
