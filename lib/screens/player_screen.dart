@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -102,12 +103,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    developer.log('=== PlayerScreen initState ===', name: 'LunaTV.Player');
     _player = Player();
     _controller = VideoController(_player);
     // 监听视频参数，获取宽高用于全屏方向判断
     _videoParamsSub = _player.streams.videoParams.listen((params) {
       final w = params.dw ?? params.w ?? 0;
       final h = params.dh ?? params.h ?? 0;
+      developer.log('videoParams: w=$w h=$h', name: 'LunaTV.Player');
       if (w > 0 && h > 0 && (w != _videoWidth || h != _videoHeight)) {
         setState(() {
           _videoWidth = w;
@@ -271,6 +274,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     });
     _player.streams.playing.listen((playing) {
+      developer.log('playing stream: $playing', name: 'LunaTV.Player');
       _playingN.value = playing;
       if (mounted) {
         setState(() => _isPlaying = playing);
@@ -422,12 +426,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (index < 0 || index >= source.episodes.length) return;
     final url = source.episodes[index];
     if (url.isEmpty) return;
+    developer.log('_playEpisode: index=$index url=$url', name: 'LunaTV.Player');
 
     setState(() {
       _currentEpisodeIndex = index;
       _isBuffering = true;
       _phase = 'playing';
     });
+    developer.log('_playEpisode: setState done, _phase=playing', name: 'LunaTV.Player');
 
     // 切集时先保存上一条的进度
     if (_firstRecordSaved) {
@@ -436,7 +442,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       await _player.stop();
+      developer.log('_playEpisode: stopped, opening url...', name: 'LunaTV.Player');
       await _player.open(Media(url));
+      developer.log('_playEpisode: opened OK', name: 'LunaTV.Player');
       if (!mounted) return;
       setState(() => _isBuffering = false);
       // 启动定时器,并立即保存一条(标记已开始)
@@ -444,6 +452,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _firstRecordSaved = false; // 重置,让定时器先存一次
       _saveCurrentProgress();
     } catch (e) {
+      developer.log('_playEpisode: ERROR $e', name: 'LunaTV.Player', error: e);
       if (!mounted) return;
       setState(() {
         _isBuffering = false;
@@ -1907,6 +1916,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 主播放视图 (1:1 LunaTV Web)
   Widget _buildPlayingView(bool isDark) {
+    developer.log('_buildPlayingView: w=${_videoWidth} h=${_videoHeight} '
+        'pos=$_currentPosition dur=$_currentDuration '
+        'isPlaying=$_isPlaying buffering=$_isBuffering '
+        'phase=$_phase showControls=$_showControls '
+        'aspectRatio=$_aspectRatio',
+        name: 'LunaTV.Player');
     return ColoredBox(
       color: Colors.black,
       child: LayoutBuilder(
@@ -1922,8 +1937,53 @@ class _PlayerScreenState extends State<PlayerScreen> {
               setState(() => _isPlaying = !_isPlaying);
               _scheduleHideControls();
             },
+            onLongPress: () {
+              // 长按弹调试信息
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: Colors.black87,
+                  title: const Text('DEBUG', style: TextStyle(color: Colors.greenAccent)),
+                  content: SingleChildScrollView(
+                    child: Text(
+                      'phase: $_phase\n'
+                      'isPlaying: $_isPlaying\n'
+                      'isBuffering: $_isBuffering\n'
+                      'isFullscreen: $_isFullscreen\n'
+                      'controlsLocked: $_controlsLocked\n'
+                      'showControls: $_showControls\n'
+                      'videoW x videoH: $_videoWidth x $_videoHeight\n'
+                      'position: $_currentPosition\n'
+                      'duration: $_currentDuration\n'
+                      'aspectRatio: $_aspectRatio\n'
+                      'error: $_error',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('OK', style: TextStyle(color: Colors.greenAccent)),
+                    ),
+                  ],
+                ),
+              );
+            },
             child: Stack(
               children: [
+                // DEBUG: 左上角小状态条 (方便判断白屏时是否还有渲染)
+                Positioned(
+                  left: 4,
+                  top: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    color: Colors.red,
+                    child: Text(
+                      'P$_isPlaying B$_isBuffering ${_videoWidth}x${_videoHeight}',
+                      style: const TextStyle(color: Colors.white, fontSize: 9),
+                    ),
+                  ),
+                ),
                 // 视频 (铺满, 黑底兜底, Video 自带 fit 控制缩放)
                 Positioned.fill(
                   child: ColoredBox(
