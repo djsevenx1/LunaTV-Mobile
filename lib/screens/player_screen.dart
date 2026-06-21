@@ -1594,46 +1594,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   /// 中央双圆快进/快退按钮 (中线 ±40px/±60px, LunaTV Web 风格)
-  Widget _buildSideSeekButtons(BoxConstraints constraints) {
+  /// 使用 Positioned 在外层 Stack 里, 避免 LayoutBuilder 触发 video 重建
+  Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
-    final centerY = constraints.maxHeight / 2;
-    final offset = _isFullscreen ? 60.0 : 40.0;
     final size = _isFullscreen ? 72.0 : 64.0;
-    return Stack(
-      children: [
-        // 左: 快退
-        Positioned(
-          left: (constraints.maxWidth / 2) - offset - size / 2,
-          top: centerY - size / 2,
-          child: _buildSeekCircleButton(
-            size: size,
-            onTap: () {
-              final newPos =
-                  _currentPosition - const Duration(seconds: 10);
-              _player.seek(
-                  newPos < Duration.zero ? Duration.zero : newPos);
-              _scheduleHideControls();
-            },
-            child: _buildSeekIcon(forward: false),
-          ),
+    final offset = _isFullscreen ? 60.0 : 40.0;
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: false,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 左: 快退
+            Transform.translate(
+              offset: Offset(-offset, 0),
+              child: _buildSeekCircleButton(
+                size: size,
+                onTap: () {
+                  final newPos =
+                      _currentPosition - const Duration(seconds: 10);
+                  _player.seek(
+                      newPos < Duration.zero ? Duration.zero : newPos);
+                  _scheduleHideControls();
+                },
+                child: _buildSeekIcon(forward: false),
+              ),
+            ),
+            // 右: 快进
+            Transform.translate(
+              offset: Offset(offset, 0),
+              child: _buildSeekCircleButton(
+                size: size,
+                onTap: () {
+                  final newPos =
+                      _currentPosition + const Duration(seconds: 10);
+                  final max = _currentDuration;
+                  _player.seek(newPos > max ? max : newPos);
+                  _scheduleHideControls();
+                },
+                child: _buildSeekIcon(forward: true),
+              ),
+            ),
+          ],
         ),
-        // 右: 快进
-        Positioned(
-          left: (constraints.maxWidth / 2) + offset - size / 2,
-          top: centerY - size / 2,
-          child: _buildSeekCircleButton(
-            size: size,
-            onTap: () {
-              final newPos =
-                  _currentPosition + const Duration(seconds: 10);
-              final max = _currentDuration;
-              _player.seek(newPos > max ? max : newPos);
-              _scheduleHideControls();
-            },
-            child: _buildSeekIcon(forward: true),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -2034,72 +2038,73 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 主播放视图 (LunaTV Web 风格控件 + 12ce29d 视频渲染结构)
+  /// 主播放视图 (12ce29d 简单 Stack 结构 + LunaTV Web 风格控件)
+  /// 不用 LayoutBuilder / GestureDetector, 避免 video 纹理被重建导致白屏
   Widget _buildPlayingView(bool isDark) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return GestureDetector(
-          onTap: _toggleControls,
-          onDoubleTap: _togglePlayPause,
-          child: Stack(
-            children: [
-              // 视频 (12ce29d 结构: Container+AspectRatio+Stack+Video(NoVideoControls), 已知能正常播放)
-              Positioned.fill(
-                child: Container(
-                  color: Colors.black,
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
-                          ? _videoWidth / _videoHeight
-                          : 16 / 9,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Video(
-                            controller: _controller,
-                            controls: NoVideoControls,
-                            onEnterFullscreen: _onEnterFullscreen,
-                            onExitFullscreen: _onExitFullscreen,
-                          ),
-                          if (_isBuffering)
-                            const SizedBox(
-                              width: 36,
-                              height: 36,
-                              child: CircularProgressIndicator(
-                                  color: kLunaLoadingColor,
-                                  strokeWidth: 3),
-                            ),
-                        ],
-                      ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 视频 (12ce29d 结构: Container+AspectRatio+Stack+Video(NoVideoControls))
+        Positioned.fill(
+          child: Container(
+            color: Colors.black,
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
+                    ? _videoWidth / _videoHeight
+                    : 16 / 9,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Video(
+                      controller: _controller,
+                      controls: NoVideoControls,
+                      onEnterFullscreen: _onEnterFullscreen,
+                      onExitFullscreen: _onExitFullscreen,
                     ),
-                  ),
+                    if (_isBuffering)
+                      const SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: CircularProgressIndicator(
+                            color: kLunaLoadingColor, strokeWidth: 3),
+                      ),
+                  ],
                 ),
               ),
-              // 中央双圆快进/快退 (LunaTV Web 风格)
-              _buildSideSeekButtons(constraints),
-              // 顶部栏 (80px 渐变 + 集数胶囊)
-              _buildLunaTopBar(),
-              // 底部毛玻璃控制栏 (横屏改短)
-              _buildLunaBottomBar(),
-              // 跳过片头按钮(右下角浮层)
-              if (_showSkipIntro && _isControlsVisible)
-                Positioned(
-                  right: 16,
-                  bottom: 100,
-                  child: _skipButton('跳过片头', kLunaTheme, _skipIntro),
-                ),
-              // 跳过片尾按钮(右下角浮层)
-              if (_showSkipOutro && _isControlsVisible)
-                Positioned(
-                  right: 16,
-                  bottom: 100,
-                  child: _skipButton(
-                      '跳过片尾', const Color(0xFF3B82F6), _skipOutro),
-                ),
-            ],
+            ),
           ),
-        );
-      },
+        ),
+        // 点击空白区切换控制栏显隐 (单独 GestureDetector, 不包整个 Stack)
+        if (_isControlsVisible)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _toggleControls,
+            ),
+          ),
+        // 中央双圆快进/快退 (LunaTV Web 风格)
+        _buildSideSeekButtons(),
+        // 顶部栏 (80px 渐变 + 集数胶囊)
+        _buildLunaTopBar(),
+        // 底部毛玻璃控制栏 (横屏改短)
+        _buildLunaBottomBar(),
+        // 跳过片头按钮(右下角浮层)
+        if (_showSkipIntro && _isControlsVisible)
+          Positioned(
+            right: 16,
+            bottom: 100,
+            child: _skipButton('跳过片头', kLunaTheme, _skipIntro),
+          ),
+        // 跳过片尾按钮(右下角浮层)
+        if (_showSkipOutro && _isControlsVisible)
+          Positioned(
+            right: 16,
+            bottom: 100,
+            child: _skipButton(
+                '跳过片尾', const Color(0xFF3B82F6), _skipOutro),
+          ),
+      ],
     );
   }
 
