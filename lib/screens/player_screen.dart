@@ -461,8 +461,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             }
           },
           child: Scaffold(
-            backgroundColor:
-                isDark ? const Color(0xFF0F1117) : const Color(0xFFF5F7F5),
+            backgroundColor: _phase == 'playing'
+                ? Colors.black
+                : (isDark ? const Color(0xFF0F1117) : const Color(0xFFF5F7F5)),
             body: SafeArea(
               child: _phase == 'playing'
                   ? _buildPlayingView(isDark)
@@ -1412,14 +1413,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
           constraints: BoxConstraints(maxWidth: maxW),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: BackdropFilter(
-              filter: _blurFilter(12),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(_controlBarOpacity),
-                  borderRadius: BorderRadius.circular(10),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.white.withOpacity(0.08 + _controlBarOpacity * 0.3),
+                    Colors.black.withOpacity(0.5 + _controlBarOpacity * 0.4),
+                  ],
                 ),
-                padding: const EdgeInsets.fromLTRB(6, 0, 6, 4),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.15),
+                  width: 0.5,
+                ),
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.4),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.fromLTRB(6, 0, 6, 4),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1878,73 +1895,76 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 主播放视图 (1:1 LunaTV Web)
   Widget _buildPlayingView(bool isDark) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return GestureDetector(
-          onTap: _toggleControls,
-          onDoubleTap: () {
-            if (_isPlaying) {
-              _player.pause();
-            } else {
-              _player.play();
-            }
-            setState(() => _isPlaying = !_isPlaying);
-            _scheduleHideControls();
-          },
-          child: Stack(
-            children: [
-              // 视频 (铺满, 黑底兜底, Video 自带 fit 控制缩放)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: Center(
-                    child: SizedBox.expand(
-                      child: Video(
-                        controller: _controller,
-                        fit: _videoFitFor(),
-                        onEnterFullscreen: _onEnterFullscreen,
-                        onExitFullscreen: _onExitFullscreen,
+    return ColoredBox(
+      color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return GestureDetector(
+            onTap: _toggleControls,
+            onDoubleTap: () {
+              if (_isPlaying) {
+                _player.pause();
+              } else {
+                _player.play();
+              }
+              setState(() => _isPlaying = !_isPlaying);
+              _scheduleHideControls();
+            },
+            child: Stack(
+              children: [
+                // 视频 (铺满, 黑底兜底, Video 自带 fit 控制缩放)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: Center(
+                      child: SizedBox.expand(
+                        child: Video(
+                          controller: _controller,
+                          fit: _videoFitFor(),
+                          onEnterFullscreen: _onEnterFullscreen,
+                          onExitFullscreen: _onExitFullscreen,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              // 缓冲指示器 (叠在视频上)
-              if (_isBuffering)
-                Positioned.fill(
-                  child: Center(
-                    child: SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: CircularProgressIndicator(
-                          color: kLunaLoadingColor,
-                          strokeWidth: 3),
+                // 缓冲指示器 (叠在视频上)
+                if (_isBuffering)
+                  Positioned.fill(
+                    child: Center(
+                      child: SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: CircularProgressIndicator(
+                            color: kLunaLoadingColor,
+                            strokeWidth: 3),
+                      ),
                     ),
                   ),
+                // 中央双圆快进/快退按钮 (中线 ±36px/54px)
+                Positioned.fill(
+                  child: _buildSideSeekButtons(constraints),
                 ),
-              // 中央双圆快进/快退按钮 (中线 ±36px/54px)
-              Positioned.fill(
-                child: _buildSideSeekButtons(constraints),
-              ),
-              // 顶部栏
-              _buildLunaTopBar(),
-              // 底部毛玻璃控制栏
-              _buildLunaBottomBar(),
-              // 锁定按钮 (全屏时显示)
-              if (_isFullscreen)
-                Positioned(
-                  right: 16,
-                  top: constraints.maxHeight / 2 - 20,
-                  child: _iconBtn(
-                    icon: _controlsLocked ? Icons.lock : Icons.lock_open,
-                    onTap: () => setState(
-                        () => _controlsLocked = !_controlsLocked),
+                // 顶部栏
+                _buildLunaTopBar(),
+                // 底部毛玻璃控制栏
+                _buildLunaBottomBar(),
+                // 锁定按钮 (全屏时显示)
+                if (_isFullscreen)
+                  Positioned(
+                    right: 16,
+                    top: constraints.maxHeight / 2 - 20,
+                    child: _iconBtn(
+                      icon: _controlsLocked ? Icons.lock : Icons.lock_open,
+                      onTap: () => setState(
+                          () => _controlsLocked = !_controlsLocked),
+                    ),
                   ),
-                ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
