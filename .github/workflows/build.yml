@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +33,30 @@ jobs:
           flutter-version: '3.22.2'
 
       - run: flutter pub get
+
+      # 用固定 keystore 签名 release APK (从 GitHub Secrets 解码 base64)
+      # 这样每次 CI 构建的签名一致, 可以正常覆盖安装
+      - name: Setup signing key
+        env:
+          LUNA_KEYSTORE_BASE64: ${{ secrets.LUNA_KEYSTORE_BASE64 }}
+          LUNA_KEYSTORE_PASSWORD: ${{ secrets.LUNA_KEYSTORE_PASSWORD }}
+          LUNA_KEY_ALIAS: ${{ secrets.LUNA_KEY_ALIAS }}
+          LUNA_KEY_PASSWORD: ${{ secrets.LUNA_KEY_PASSWORD }}
+        run: |
+          if [ -n "$LUNA_KEYSTORE_BASE64" ]; then
+            echo "🔑 使用固定 release keystore 签名"
+            echo "$LUNA_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
+            cat > android/key.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$LUNA_KEYSTORE_PASSWORD
+          keyAlias=$LUNA_KEY_ALIAS
+          keyPassword=$LUNA_KEY_PASSWORD
+          EOF
+            echo "✓ key.properties 已生成"
+            cat android/key.properties
+          else
+            echo "⚠️ 未配置 LUNA_KEYSTORE_BASE64, 使用 debug 签名 (每次构建签名不同)"
+          fi
 
       - run: flutter build apk --release
 
