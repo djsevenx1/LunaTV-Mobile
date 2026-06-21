@@ -102,6 +102,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // 全屏状态
   bool _isFullscreen = false;
 
+  // 快进/快退提示文字 (点击后短暂显示, 如 "快进60s")
+  String? _seekHintText;
+  Timer? _seekHintTimer;
+
   // LunaTV Web 主题色
   static const Color kLunaTheme = Color(0xFF22C55E);
   static const Color kLunaEpisodeBadgeStart = Color(0xFF10B981);
@@ -164,6 +168,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveCurrentProgress(force: true);
     _progressTimer?.cancel();
     _hideControlsTimer?.cancel();
+    _seekHintTimer?.cancel();
     _videoParamsSub?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
@@ -1593,52 +1598,120 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 中央双圆快进/快退按钮 (中线 ±40px/±60px, LunaTV Web 风格)
-  /// 使用 Positioned 在外层 Stack 里, 避免 LayoutBuilder 触发 video 重建
+  /// 中央控制区: 左右整个区域点击快退/快进60s + 中间播放/暂停
+  /// 左右两侧不显示数字, 点击后短暂显示提示文字
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
     final size = _isFullscreen ? 72.0 : 64.0;
     final offset = _isFullscreen ? 60.0 : 40.0;
     return Positioned.fill(
-      child: IgnorePointer(
-        ignoring: false,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // 左: 快退
-            Transform.translate(
-              offset: Offset(-offset, 0),
-              child: _buildSeekCircleButton(
-                size: size,
-                onTap: () {
-                  final newPos =
-                      _currentPosition - const Duration(seconds: 10);
-                  _player.seek(
-                      newPos < Duration.zero ? Duration.zero : newPos);
-                  _scheduleHideControls();
-                },
-                child: _buildSeekIcon(forward: false),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 左半屏: 点击快退60s (整个区域可点)
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: double.infinity,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => _seekBySeconds(-60, '快退60s'),
+                child: Container(
+                  color: Colors.transparent,
+                  alignment: Alignment.center,
+                  child: Transform.translate(
+                    offset: Offset(offset, 0),
+                    child: _buildSeekCircleButton(
+                      size: size,
+                      onTap: () => _seekBySeconds(-60, '快退60s'),
+                      child: _buildSeekIcon(forward: false),
+                    ),
+                  ),
+                ),
               ),
             ),
-            // 右: 快进
-            Transform.translate(
-              offset: Offset(offset, 0),
-              child: _buildSeekCircleButton(
-                size: size,
-                onTap: () {
-                  final newPos =
-                      _currentPosition + const Duration(seconds: 10);
-                  final max = _currentDuration;
-                  _player.seek(newPos > max ? max : newPos);
-                  _scheduleHideControls();
-                },
-                child: _buildSeekIcon(forward: true),
+          ),
+          // 右半屏: 点击快进60s (整个区域可点)
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: double.infinity,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => _seekBySeconds(60, '快进60s'),
+                child: Container(
+                  color: Colors.transparent,
+                  alignment: Alignment.center,
+                  child: Transform.translate(
+                    offset: Offset(-offset, 0),
+                    child: _buildSeekCircleButton(
+                      size: size,
+                      onTap: () => _seekBySeconds(60, '快进60s'),
+                      child: _buildSeekIcon(forward: true),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+          // 中间: 播放/暂停按钮
+          _buildSeekCircleButton(
+            size: size,
+            onTap: _togglePlayPause,
+            child: Icon(
+              _isPlaying ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+              size: 36,
+            ),
+          ),
+          // 快进/快退提示文字 (点击后短暂显示)
+          if (_seekHintText != null)
+            Positioned(
+              bottom: 120,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _seekHintText!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  /// 快进/快退指定秒数, 并显示提示文字
+  void _seekBySeconds(int seconds, String hint) {
+    final newPos = _currentPosition + Duration(seconds: seconds);
+    if (seconds < 0) {
+      _player.seek(newPos < Duration.zero ? Duration.zero : newPos);
+    } else {
+      final max = _currentDuration;
+      _player.seek(newPos > max ? max : newPos);
+    }
+    // 显示提示文字, 1秒后消失
+    _seekHintTimer?.cancel();
+    setState(() => _seekHintText = hint);
+    _seekHintTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _seekHintText = null);
+    });
+    _scheduleHideControls();
   }
 
   /// 圆形毛玻璃快进/快退按钮
@@ -1681,40 +1754,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 圆弧箭头 + 数字 "10" 图标 (YouTube 风格快进/快退)
+  /// 圆弧箭头图标 (YouTube 风格快进/快退, 不显示数字)
   Widget _buildSeekIcon({required bool forward}) {
     return SizedBox(
       width: 32,
       height: 32,
-      child: Stack(
+      child: Transform(
         alignment: Alignment.center,
-        children: [
-          Transform(
-            alignment: Alignment.center,
-            transform: forward
-                ? (Matrix4.identity())
-                : (Matrix4.rotationY(3.14159)),
-            child: CustomPaint(
-              size: const Size(32, 32),
-              painter: _ArcArrowPainter(
-                color: Colors.white,
-                forward: true,
-              ),
-            ),
+        transform: forward
+            ? (Matrix4.identity())
+            : (Matrix4.rotationY(3.14159)),
+        child: CustomPaint(
+          size: const Size(32, 32),
+          painter: _ArcArrowPainter(
+            color: Colors.white,
+            forward: true,
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: const Text(
-              '10',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'Arial',
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
