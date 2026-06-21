@@ -1747,17 +1747,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return SizedBox(
       width: 32,
       height: 32,
-      child: Transform(
-        alignment: Alignment.center,
-        transform: forward
-            ? (Matrix4.identity())
-            : (Matrix4.rotationY(3.14159)),
-        child: CustomPaint(
-          size: const Size(32, 32),
-          painter: _ArcArrowPainter(
-            color: Colors.white,
-            forward: true,
-          ),
+      child: CustomPaint(
+        size: const Size(32, 32),
+        painter: _ArcArrowPainter(
+          color: Colors.white,
+          forward: forward,
         ),
       ),
     );

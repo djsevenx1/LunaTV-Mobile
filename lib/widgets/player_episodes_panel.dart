@@ -195,15 +195,15 @@ class _EpisodePanelItemWithHoverState extends State<_EpisodePanelItemWithHover> 
         child: Container(
           decoration: BoxDecoration(
             color: widget.isCurrentEpisode
-                ? Colors.green.withOpacity( 0.2)
+                ? Colors.grey.withOpacity(0.2)
                 : (_isHovering && DeviceUtils.isPC()
                     ? (widget.isDarkMode 
-                        ? const Color(0xFF1A3D2E)  // 深色模式下的浅绿色
-                        : const Color(0xFFE8F5E9))  // 浅色模式下的浅绿色
+                        ? const Color(0xFF3A3A3A)  // 深色模式下的浅灰色
+                        : const Color(0xFFE8E8E8))  // 浅色模式下的浅灰色
                     : (widget.isDarkMode ? Colors.grey[800] : Colors.grey[200])),
             borderRadius: BorderRadius.circular(8),
             border: widget.isCurrentEpisode
-                ? Border.all(color: Colors.green, width: 2)
+                ? Border.all(color: Colors.grey, width: 2)
                 : null,
           ),
           child: Center(
@@ -216,7 +216,7 @@ class _EpisodePanelItemWithHoverState extends State<_EpisodePanelItemWithHover> 
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: widget.isCurrentEpisode
-                      ? Colors.green
+                      ? Colors.grey[300]
                       : (widget.isDarkMode
                           ? Colors.white
                           : Colors.black),
