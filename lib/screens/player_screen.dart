@@ -681,15 +681,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
         return;
       }
+      // 去重: 按 source+id 去重,保留第一个出现的 (后端可能返回重复源)
+      final seen = <String>{};
+      final unique = <SearchResult>[];
+      for (final r in results) {
+        final key = '${r.source}_${r.id}';
+        if (seen.add(key)) {
+          unique.add(r);
+        }
+      }
       setState(() {
-        _sourceResults = results;
+        _sourceResults = unique;
         _sourcesLoading = false;
       });
 
       // 默认选第一个
-      SearchResult toSelect = results.first;
+      SearchResult toSelect = unique.first;
       if (widget.preferredSource != null && widget.preferredSource!.isNotEmpty) {
-        for (final r in results) {
+        for (final r in unique) {
           if (r.source == widget.preferredSource) {
             toSelect = r;
             break;
