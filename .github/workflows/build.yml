@@ -55,13 +55,39 @@ jobs:
           echo "APK copied to release/"
           ls -la release/
 
-      - name: Commit APK to release branch
+      - name: Prepare release branch
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b release
+          # 切换到 release 分支
+          git fetch origin release:release 2>/dev/null || true
+          git checkout release 2>/dev/null || git checkout --orphan release
+          # 清理工作区
+          git rm -rf --cached . 2>/dev/null || true
+          git clean -fdx 2>/dev/null || true
+          # 恢复 main 的内容
+          git checkout main -- . 2>/dev/null || true
+          # 拷贝 APK
+          mkdir -p release
+          cp ${GITHUB_WORKSPACE}/release/lunatv-${GITHUB_REF_NAME}.apk release/
+          cp ${GITHUB_WORKSPACE}/release/lunatv-latest.apk release/
+          # 写 release index
+          cat > release/README.md << 'EOF'
+          # LunaTV Mobile Releases
+
+          下载最新版本: [lunatv-latest.apk](./lunatv-latest.apk)
+          EOF
           git add release/
+          git status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push release branch
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "release: ${GITHUB_REF_NAME}" || echo "No changes to commit"
           git push origin release --force
         env:
