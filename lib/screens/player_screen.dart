@@ -60,6 +60,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<SearchResult> _sourceResults = [];
   bool _sourcesLoading = true;
   final Map<String, int> _pingCache = {};
+  final Map<String, double> _speedCache = {};
   final Map<String, PingState> _pingState = {};
   String? _autoSelectedSource;
 
@@ -790,12 +791,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   /// 按测速速度从快到慢排序源列表
+  /// 优先按延迟排序,延迟相同时按下载速度 (KB/s) 降序
   void _sortSourcesBySpeed() {
     int scoreOf(SearchResult s) {
       if (s.episodes.isEmpty) return 1 << 30;
-      final ms = _pingCache[s.episodes.first];
-      if (ms == null) return 1 << 30;
-      return ms;
+      final url = s.episodes.first;
+      final ms = _pingCache[url] ?? 1 << 30;
+      // 已测速且有速度数据时, 用 (ms, -speedKBps) 组合排序
+      final speed = _speedCache[url];
+      if (speed == null || speed <= 0) return ms;
+      // 合成排序键: 主键 ms, 次键 -speed (速度大者优先)
+      // 用 ms * 1000000 - speed 保持数值比较
+      return ms * 1000000 - speed.toInt();
     }
 
     setState(() {
@@ -817,23 +824,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       // 测速也走代理（若启用），保证测速路径与实际播放路径一致
       final proxiedUrl = await UserDataService.buildProxiedUrl(url);
-      final req = http.Request('HEAD', Uri.parse(proxiedUrl))
+      // GET Range 下载前 100KB 测速, 比 HEAD 更接近真实播放体验
+      final req = http.Request('GET', Uri.parse(proxiedUrl))
         ..followRedirects = true
-        ..maxRedirects = 2;
+        ..maxRedirects = 2
+        ..headers['Range'] = 'bytes=0-102399';
       final response =
-          await httpClient.send(req).timeout(const Duration(milliseconds: 1500));
-      // 测首字节即可，不等响应体流
-      response.stream.drain().catchError((_) {});
+          await httpClient.send(req).timeout(const Duration(milliseconds: 3000));
+      // 读前 100KB 后立即停止 (拿到首字节时间, 不等响应体流)
+      final start2 = DateTime.now();
+      int bytesRead = 0;
+      await for (final chunk in response.stream) {
+        bytesRead += chunk.length;
+        if (bytesRead >= 102400) break;
+      }
+      final ms = DateTime.now().difference(start).inMilliseconds;
+      _pingCache[url] = ms;
+      // 计算下载速度 (KB/s)
+      final speedKBps = (bytesRead / 1024.0) / ((DateTime.now().difference(start2).inMilliseconds) / 1000.0);
+      _speedCache[url] = speedKBps;
+      httpClient.close();
+      return ms;
     } catch (_) {
       // 超时或失败统一记为 3000ms
       _pingCache[url] = 3000;
+      _speedCache[url] = 0;
       httpClient.close();
       return 3000;
     }
-    final ms = DateTime.now().difference(start).inMilliseconds;
-    _pingCache[url] = ms;
-    httpClient.close();
-    return ms;
   }
 
   /// 播放指定集数
@@ -1191,6 +1209,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final selected = _selectedSource?.source == s.source;
     final state = _pingState[s.source] ?? PingState.idle;
     final ms = _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
+    final speed = s.episodes.isNotEmpty
+        ? _speedCache[s.episodes.first]
+        : null;
     return InkWell(
       onTap: () {
         // 切源后只更新选中状态,不自动播放 (由用户点"播放"按钮或集数触发)
@@ -1245,8 +1266,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ],
               ),
             ),
-            // 测速文字
-            _buildPingLabel(state, ms),
+            // 测速文字 (延迟 + 速度)
+            _buildPingLabel(state, ms, speed),
           ],
         ),
       ),
@@ -1281,7 +1302,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildPingLabel(PingState state, int? ms) {
+  Widget _buildPingLabel(PingState state, int? ms, double? speed) {
     String text;
     Color color;
     if (state == PingState.testing) {
@@ -1294,7 +1315,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       text = '不可用';
       color = const Color(0xFFEF4444);
     } else {
-      text = '${ms}ms';
+      // 显示延迟 + 速度 (有速度数据时)
+      if (speed != null && speed > 0) {
+        if (speed >= 1024) {
+          text = '${ms}ms · ${(speed / 1024).toStringAsFixed(1)}MB/s';
+        } else {
+          text = '${ms}ms · ${speed.toStringAsFixed(0)}KB/s';
+        }
+      } else {
+        text = '${ms}ms';
+      }
       color = _stateToColor(state);
     }
     return Container(

@@ -1,5 +1,4 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:luna_tv/services/preferred_ip.dart';
 
 class UserDataService {
   static const String _serverUrlKey = 'server_url';
@@ -241,56 +240,31 @@ class UserDataService {
     return prefs.getString(_cfWorkerUrlKey) ?? '';
   }
 
-  // 通用工具：根据目标 URL 构造代理后的 URL
-  // 优选IP: 可选开启, 用最优 Cloudflare IP 替换 CF Worker 域名, 提升访问速度
-  // 注意: 优选IP 需配合支持 SNI 反代的 CF Worker 使用, 启用前请先在优选IP页测试
+  // 通用工具：根据目标 URL 构造代理后的 URL（仅当启用且配置了 URL 时）
+  // - 普通 URL:  {CF_Worker_URL}/{URL编码后的目标URL}  (走 /?url= 通用代理)
+  // - m3u8 URL: {CF_Worker_URL}/m3u8?url={URL编码后的目标URL}  (走专用 m3u8 端点,
+  //             Worker 会解析 m3u8 并把所有 .ts 分片也重写为走 Worker, 实现端到端加速)
+  // 优选IP 由 Worker 端实现, 客户端无感, 详见 CORSAPI 仓库
   static Future<String> buildProxiedUrl(String targetUrl) async {
-    // CF Worker 加速未启用 -> 直连
     final enabled = await getCfWorkerEnabled();
     final workerUrl = await getCfWorkerUrl();
     if (!enabled || workerUrl.isEmpty) return targetUrl;
     final clean = workerUrl.endsWith('/')
         ? workerUrl.substring(0, workerUrl.length - 1)
         : workerUrl;
-
-    final baseUrl = '$clean/${Uri.encodeComponent(targetUrl)}';
-
-    // 优选IP 仅在用户明确开启时启用 (优选IP 页面里的开关)
-    final usePreferred = await getUsePreferredIp();
-    if (usePreferred) {
-      final bestIp = await PreferredIp.getBestIp();
-      if (bestIp != null && bestIp.isNotEmpty) {
-        return _applyPreferredIp(baseUrl, bestIp);
-      }
-    }
-    return baseUrl;
+    final isM3u8 = _isM3u8Url(targetUrl);
+    final endpoint = isM3u8 ? '/m3u8?url=' : '/?url=';
+    return '$clean$endpoint${Uri.encodeComponent(targetUrl)}';
   }
 
-  // 优选IP 开关
-  static const String _usePreferredIpKey = 'use_preferred_ip';
-
-  static Future<bool> getUsePreferredIp() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_usePreferredIpKey) ?? false;
-  }
-
-  static Future<void> saveUsePreferredIp(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_usePreferredIpKey, enabled);
-  }
-
-  /// 把 URL 中的域名替换成优选IP
-  /// 例子: https://your.workers.dev/xxx -> https://104.16.123.96/xxx
-  /// 适合支持 SNI 反代的 CF Worker (需要在 Worker 端配置 IP+SSL/TLS)
-  static String _applyPreferredIp(String targetUrl, String preferredIp) {
-    try {
-      final uri = Uri.parse(targetUrl);
-      if (uri.host.isEmpty) return targetUrl;
-      final newUri = uri.replace(host: preferredIp);
-      return newUri.toString();
-    } catch (_) {
-      return targetUrl;
-    }
+  // 判断 URL 是否为 m3u8 播放列表 (兼容 ?type=m3u8 或 .m3u8 后缀)
+  static bool _isM3u8Url(String url) {
+    if (url.isEmpty) return false;
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8')) return true;
+    if (lower.contains('type=m3u8')) return true;
+    if (lower.contains('format=m3u8')) return true;
+    return false;
   }
 
   // 保存优选测速设置

@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:luna_tv/services/preferred_ip.dart';
-import 'package:luna_tv/services/user_data_service.dart';
 
-/// 优选IP设置页面
+/// 优选IP查看页面
 /// 仿 cmliu/edgetunnel:
 ///   - 配置IP源URL
 ///   - 检测用户运营商 (移动/电信/联通)
 ///   - 一键测速优选, 显示前 N 快的IP
-///   - 设置自动测速开关
+///   - 测速结果展示, 实际应用交给 CF Worker 端处理
 class PreferredIpScreen extends StatefulWidget {
   const PreferredIpScreen({super.key});
 
@@ -18,7 +17,6 @@ class PreferredIpScreen extends StatefulWidget {
 class _PreferredIpScreenState extends State<PreferredIpScreen> {
   final _urlController = TextEditingController();
   bool _autoTest = true;
-  bool _usePreferred = false;
   bool _loading = true;
   bool _testing = false;
   int _progress = 0;
@@ -36,7 +34,6 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
   Future<void> _load() async {
     final url = await PreferredIp.getSourceUrl();
     final auto = await PreferredIp.getAutoTest();
-    final usePreferred = await UserDataService.getUsePreferredIp();
     final best = await PreferredIp.getBestIp();
     final isp = await PreferredIp.getBestIsp();
     final lastTime = await PreferredIp.getLastTestTime();
@@ -45,7 +42,6 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
       setState(() {
         _urlController.text = url;
         _autoTest = auto;
-        _usePreferred = usePreferred;
         _bestIp = best;
         _userIsp = isp;
         _lastTestTime = lastTime;
@@ -246,7 +242,7 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // 应用到播放请求开关
+                // 使用说明卡片
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -254,51 +250,36 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
                         ? const Color(0xFF1F2937)
                         : Colors.white,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: _usePreferred
-                          ? const Color(0xFF22C55E).withOpacity(0.5)
-                          : Colors.transparent,
-                      width: 1,
-                    ),
                   ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.wifi, color: Color(0xFF22C55E)),
-                      const SizedBox(width: 12),
+                      const Icon(Icons.info_outline,
+                          color: Color(0xFF3B82F6), size: 18),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('应用到播放请求',
+                            const Text('说明',
                                 style: TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w600)),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
                             Text(
-                              _bestIp == null
-                                  ? '请先测速获取最优IP, 默认关闭避免 SSL 错误'
-                                  : '当前最优: $_bestIp',
+                              '此页测速结果仅供参考。\n'
+                              '优选IP 实际应用请在 CF Worker 端 (CORSAPI) 部署, \n'
+                              '所有客户端请求统一走 Worker 优选入口, 免证书问题。',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: isDark
                                     ? Colors.white60
                                     : Colors.black54,
+                                height: 1.5,
                               ),
                             ),
                           ],
                         ),
-                      ),
-                      Switch(
-                        value: _usePreferred,
-                        onChanged: (v) async {
-                          if (v && _bestIp == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('请先测速获取最优IP')),
-                            );
-                            return;
-                          }
-                          await UserDataService.saveUsePreferredIp(v);
-                          if (mounted) setState(() => _usePreferred = v);
-                        },
-                        activeColor: const Color(0xFF22C55E),
                       ),
                     ],
                   ),
