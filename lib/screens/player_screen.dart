@@ -4,7 +4,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -858,7 +857,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 读前 100KB 后立即停止 (拿到首字节时间, 不等响应体流)
       int bytesRead = 0;
       await for (final chunk in response.stream) {
-        bytesRead += chunk.length;
+        bytesRead += (chunk.length as int);
         if (bytesRead >= 102400) break;
       }
       // 用整段请求 (建连+拉数据) 的总耗时算速度, 防止 await for 内耗时为 0 导致除零
@@ -910,13 +909,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final sniDomain = await UserDataService.getEffectiveWorkerDomain();
         if (sniDomain != null && Uri.parse(playUrl).host != sniDomain) {
           try {
-            // 通过 demuxer-lavf-o 把 tls_sni_hostname 传给 FFmpeg
-            await _player.setProperty(
+            // media_kit Player 用 command() 发 mpv 命令
+            // demuxer-lavf-o=tls_sni_hostname 传给 FFmpeg 强制 SNI
+            await _player.command([
+              'set',
               'demuxer-lavf-o',
               'tls_sni_hostname=$sniDomain',
-            );
+            ]);
             // 同时设 Host header (mpv option)
-            await _player.setProperty('http-header-fields', 'Host: $sniDomain');
+            await _player.command([
+              'set',
+              'http-header-fields',
+              'Host: $sniDomain',
+            ]);
           } catch (_) {
             // 旧版 mpv 可能不支持, 忽略
           }

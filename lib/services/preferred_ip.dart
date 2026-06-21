@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// App 端 CF 优选 IP 服务
