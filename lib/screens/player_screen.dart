@@ -880,7 +880,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // 从播放页返回详情页: 先保存一次, 恢复竖屏
+              // 从播放页返回详情页: 先暂停播放 + 保存一次 + 恢复竖屏
+              try { _player.pause(); } catch (_) {}
               await _saveCurrentProgress(force: true);
               await _onExitFullscreen();
               if (mounted) {
@@ -889,7 +890,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 });
               }
             } else if (didPop && _phase == 'detail') {
-              // 真正退出页面: 最后保存一次
+              // 真正退出页面: 停止播放器 + 最后保存一次
+              try { _player.stop(); } catch (_) {}
               await _saveCurrentProgress(force: true);
             }
           },
@@ -945,7 +947,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(
             icon: Icon(Icons.arrow_back,
                 color: isDark ? Colors.white : Colors.black),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () async {
+              // 详情状态直接返回: 先停止播放再 pop
+              if (_phase == 'detail') {
+                try { _player.stop(); } catch (_) {}
+                await _saveCurrentProgress(force: true);
+              }
+              if (context.mounted) {
+                Navigator.pop(context);
+              }
+            },
           ),
           Expanded(
             child: Text(
@@ -1535,9 +1546,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // 返回箭头
               _iconBtn(
                 icon: Icons.arrow_back,
-                onTap: () {
-                  _onExitFullscreen();
-                  setState(() => _phase = 'detail');
+                onTap: () async {
+                  try { _player.pause(); } catch (_) {}
+                  await _saveCurrentProgress(force: true);
+                  await _onExitFullscreen();
+                  if (mounted) {
+                    setState(() => _phase = 'detail');
+                  }
                 },
               ),
               const SizedBox(width: 4),
