@@ -1573,16 +1573,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
                   ),
-                  // 跳过设置
+                  // 齿轮 (设置菜单: 跳过片头片尾 / 倍速 / 比例 等)
                   Material(
                     color: Colors.transparent,
                     shape: const CircleBorder(),
                     child: InkWell(
                       customBorder: const CircleBorder(),
-                      onTap: _showSkipSettingsDialog,
+                      onTap: _showSettingsSheet,
                       child: const Padding(
                         padding: EdgeInsets.all(10),
-                        child: Icon(Icons.cut, color: Colors.white, size: 22),
+                        child: Icon(Icons.settings_outlined,
+                            color: Colors.white, size: 22),
                       ),
                     ),
                   ),
@@ -1595,7 +1596,163 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 构建底部控制栏(LunaTV 风格: 顶部进度条 + 左/右分段按钮)
+  /// 左侧/右侧 双圆 药丸悬浮 (快退10s / 快进10s, ArtPlayer mobile 风格)
+  Widget _buildSideButtons() {
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // 左: 快退10s
+              _circleSeekButton(
+                onTap: () {
+                  final newPos = _currentPosition -
+                      const Duration(seconds: 10);
+                  _player.seek(newPos < Duration.zero
+                      ? Duration.zero
+                      : newPos);
+                },
+                label: '-10',
+              ),
+              // 右: 快进10s
+              _circleSeekButton(
+                onTap: () {
+                  final newPos = _currentPosition +
+                      const Duration(seconds: 10);
+                  final max = _currentDuration;
+                  _player.seek(newPos > max ? max : newPos);
+                },
+                label: '+10',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 药丸状圆形快进/快退按钮(ArtPlayer 双侧悬浮)
+  Widget _circleSeekButton({required VoidCallback onTap, required String label}) {
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withOpacity(0.18),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.35),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.25),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 打开设置底部面板(齿轮菜单: 倍速 / 跳过片头片尾 / 比例 等)
+  Future<void> _showSettingsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1F2937),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 顶部小横条
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  '播放设置',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const Divider(color: Colors.white12, height: 1),
+              // 倍速
+              ListTile(
+                leading: const Icon(Icons.speed, color: Colors.white70),
+                title: const Text('倍速',
+                    style: TextStyle(color: Colors.white)),
+                trailing: Text(
+                  _playbackRate == 1.0 ? '1.0x' : '${_playbackRate}x',
+                  style: const TextStyle(color: Color(0xFF22C55E)),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showPlaybackRateSheet();
+                },
+              ),
+              // 跳过片头片尾
+              ListTile(
+                leading: const Icon(Icons.fast_forward, color: Colors.white70),
+                title: const Text('跳过片头片尾',
+                    style: TextStyle(color: Colors.white)),
+                trailing: Text(
+                  _skipIntroEnd > 0 || _skipOutroStart > 0
+                      ? '已配置'
+                      : '未设置',
+                  style: TextStyle(
+                    color: _skipIntroEnd > 0 || _skipOutroStart > 0
+                        ? const Color(0xFF22C55E)
+                        : Colors.white54,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showSkipSettingsDialog();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 构建底部控制栏(ArtPlayer 药丸状悬浮: 顶部进度条 + 单个药丸栏)
   Widget _buildPlayerBottomBar() {
     final dur = _currentDuration.inMilliseconds.toDouble();
     final pos = _scrubbingValue != null
@@ -1605,158 +1762,138 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: isLandscape
-                  ? [
-                      Colors.black.withOpacity(0.85),
-                      Colors.black.withOpacity(0.5),
-                    ]
-                  : [
-                      Colors.black.withOpacity(0.0),
-                      Colors.black.withOpacity(0.75),
-                    ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ===== 顶部进度条 (贴近屏幕上边缘) =====
+        SizedBox(
+          height: 26,
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              activeTrackColor: const Color(0xFF22C55E),
+              inactiveTrackColor: Colors.white30,
+              thumbColor: Colors.white,
+              overlayColor: const Color(0xFF22C55E).withOpacity(0.2),
+              thumbShape: const RoundSliderThumbShape(
+                enabledThumbRadius: 7,
+                elevation: 2,
+              ),
+              overlayShape:
+                  const RoundSliderOverlayShape(overlayRadius: 14),
             ),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ===== 进度条 (顶部独立一行, LunaTV 风格) =====
-                SizedBox(
-                  height: 28,
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 3,
-                      activeTrackColor: const Color(0xFF22C55E),
-                      inactiveTrackColor: Colors.white30,
-                      thumbColor: Colors.white,
-                      overlayColor: const Color(0xFF22C55E).withOpacity(0.2),
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 7,
-                        elevation: 2,
-                      ),
-                      overlayShape: const RoundSliderOverlayShape(
-                          overlayRadius: 14),
-                    ),
-                    child: Slider(
-                      value: progress,
-                      onChangeStart: _onScrubStart,
-                      onChanged: _onScrubChange,
-                      onChangeEnd: _onScrubEnd,
-                    ),
-                  ),
-                ),
-                // ===== 控件行: 左 [播放 + 时间]  右 [选集 + 倍速 + 全屏] =====
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // 左侧: 播放/暂停 + 当前时间/总时长
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // 播放/暂停
-                          Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: _togglePlayPause,
-                              customBorder: const CircleBorder(),
-                              child: Container(
-                                width: 40,
-                                height: 40,
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  _isPlaying ? Icons.pause : Icons.play_arrow,
-                                  color: Colors.white,
-                                  size: 30,
-                                ),
-                              ),
-                            ),
-                          ),
-                          // 时间
-                          Padding(
-                            padding: const EdgeInsets.only(left: 4),
-                            child: Text(
-                              '${_formatDuration(Duration(milliseconds: pos))} / ${_formatDuration(_currentDuration)}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      // 右侧: 选集 + 倍速 + 全屏
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // 选集 (带集数标签)
-                          _controlIconButton(
-                            icon: Icons.format_list_bulleted,
-                            label:
-                                '${_currentEpisodeIndex + 1}/${_selectedSource?.episodes.length ?? 0}',
-                            onTap: _showEpisodeSelectorSheet,
-                          ),
-                          // 倍速
-                          _controlIconButton(
-                            icon: Icons.speed,
-                            label: _playbackRate == 1.0
-                                ? '1x'
-                                : '${_playbackRate}x',
-                            onTap: _showPlaybackRateSheet,
-                          ),
-                          // 全屏
-                          _controlIconButton(
-                            icon: isLandscape
-                                ? Icons.fullscreen_exit
-                                : Icons.fullscreen,
-                            onTap: isLandscape
-                                ? _onExitFullscreen
-                                : _onEnterFullscreen,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            child: Slider(
+              value: progress,
+              onChangeStart: _onScrubStart,
+              onChanged: _onScrubChange,
+              onChangeEnd: _onScrubEnd,
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 8),
+        // ===== 药丸状悬浮控制栏 (ArtPlayer 风格) =====
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            isLandscape ? 8 : 12,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(32),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                height: 52,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.15),
+                    width: 0.6,
+                  ),
+                  borderRadius: BorderRadius.circular(32),
+                ),
+                child: Row(
+                  children: [
+                    // 左: 播放/暂停 (圆形药丸段)
+                    _pillIcon(
+                      icon: _isPlaying ? Icons.pause : Icons.play_arrow,
+                      iconSize: 28,
+                      onTap: _togglePlayPause,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                    ),
+                    // 时间
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, right: 6),
+                      child: Text(
+                        '${_formatDuration(Duration(milliseconds: pos))} / ${_formatDuration(_currentDuration)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    // 右: 倍速
+                    _pillIcon(
+                      icon: Icons.speed,
+                      label: _playbackRate == 1.0
+                          ? '1x'
+                          : '${_playbackRate}x',
+                      onTap: _showPlaybackRateSheet,
+                    ),
+                    // 选集
+                    _pillIcon(
+                      icon: Icons.format_list_bulleted,
+                      label:
+                          '${_currentEpisodeIndex + 1}/${_selectedSource?.episodes.length ?? 0}',
+                      onTap: _showEpisodeSelectorSheet,
+                    ),
+                    // 全屏
+                    _pillIcon(
+                      icon: isLandscape
+                          ? Icons.fullscreen_exit
+                          : Icons.fullscreen,
+                      iconSize: 24,
+                      onTap: isLandscape
+                          ? _onExitFullscreen
+                          : _onEnterFullscreen,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  /// 控件栏图标按钮(可选小标签)
-  Widget _controlIconButton({
+  /// 药丸栏内单个图标按钮(可选小标签)
+  Widget _pillIcon({
     required IconData icon,
+    required VoidCallback onTap,
     String? label,
-    VoidCallback? onTap,
+    double iconSize = 22,
+    EdgeInsetsGeometry padding =
+        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
   }) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(24),
         child: Container(
-          constraints: const BoxConstraints(minWidth: 44, minHeight: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: padding,
+          constraints: const BoxConstraints(minHeight: 40),
           alignment: Alignment.center,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white, size: 22),
+              Icon(icon, color: Colors.white, size: iconSize),
               if (label != null) ...[
                 const SizedBox(width: 3),
                 Text(
@@ -1764,7 +1901,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -1938,6 +2075,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       right: 0,
                       child: _buildPlayerTopBar(),
                     ),
+                    // 左右双圆 药丸悬浮 (快退/快进10s)
+                    _buildSideButtons(),
                     // 底部控制栏
                     Positioned(
                       left: 0,
