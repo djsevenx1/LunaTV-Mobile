@@ -1598,8 +1598,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 中央控制区: 左右整个区域点击快退/快进60s + 中间播放/暂停
-  /// 左右两侧不显示数字, 点击后短暂显示提示文字
+  /// 中央控制区: 左右快退/快进60s 按钮 + 中间播放/暂停
+  /// 跟控件一起显隐, 点击后短暂显示提示文字
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
     final size = _isFullscreen ? 72.0 : 64.0;
@@ -1608,55 +1608,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 左半屏: 点击快退60s (整个区域可点)
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            right: MediaQuery.of(context).size.width / 2,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
+          // 左: 快退60s 按钮
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: EdgeInsets.only(left: offset),
+              child: _buildSeekCircleButton(
+                size: size,
                 onTap: () => _seekBySeconds(-60, '快退60s'),
-                child: Container(
-                  color: Colors.transparent,
-                  alignment: Alignment.center,
-                  child: Transform.translate(
-                    offset: Offset(offset, 0),
-                    child: _buildSeekCircleButton(
-                      size: size,
-                      onTap: () => _seekBySeconds(-60, '快退60s'),
-                      child: _buildSeekIcon(forward: false),
-                    ),
-                  ),
-                ),
+                child: _buildSeekIcon(forward: false),
               ),
             ),
           ),
-          // 右半屏: 点击快进60s (整个区域可点)
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            left: MediaQuery.of(context).size.width / 2,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
+          // 右: 快进60s 按钮
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: EdgeInsets.only(right: offset),
+              child: _buildSeekCircleButton(
+                size: size,
                 onTap: () => _seekBySeconds(60, '快进60s'),
-                child: Container(
-                  color: Colors.transparent,
-                  alignment: Alignment.center,
-                  child: Transform.translate(
-                    offset: Offset(-offset, 0),
-                    child: _buildSeekCircleButton(
-                      size: size,
-                      onTap: () => _seekBySeconds(60, '快进60s'),
-                      child: _buildSeekIcon(forward: true),
-                    ),
-                  ),
-                ),
+                child: _buildSeekIcon(forward: true),
               ),
             ),
           ),
