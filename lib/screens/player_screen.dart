@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -85,6 +86,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showSkipIntro = false;
   bool _showSkipOutro = false;
 
+  // UI 控制
+  bool _isPlaying = false;
+  bool _isControlsVisible = true;
+  bool _isFavorite = false;
+  double _playbackRate = 1.0;
+  // 用户拖动进度条时的临时值(避免 stream 把进度覆盖回去)
+  double? _scrubbingValue;
+  // 控制栏自动隐藏定时器
+  Timer? _hideControlsTimer;
+
+  // 倍速档位
+  static const List<double> _playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+
   @override
   void initState() {
     super.initState();
@@ -103,14 +117,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     // 监听播放位置和总时长，用于跳过片头片尾
     _positionSub = _player.streams.position.listen((pos) {
-      _currentPosition = pos;
-      _updateSkipButtonVisibility();
+      if (_scrubbingValue == null) {
+        _currentPosition = pos;
+        _updateSkipButtonVisibility();
+      }
     });
     _durationSub = _player.streams.duration.listen((dur) {
       _currentDuration = dur;
     });
+    // 监听播放/暂停状态,用于控制栏图标
+    _player.streams.playing.listen((playing) {
+      if (!mounted) return;
+      setState(() {
+        _isPlaying = playing;
+      });
+      if (playing) {
+        _scheduleHideControls();
+      } else {
+        // 暂停时保持控制栏显示
+        _showControls();
+      }
+    });
     // 加载跳过片头片尾配置
     _loadSkipConfig();
+    // 加载倍速持久化
+    _loadPlaybackRate();
+    // 加载收藏状态
+    _loadFavorite();
     // 不再自动播下一集,由用户控制
     _loadSources();
   }
@@ -120,6 +153,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 退出时最后一次保存
     _saveCurrentProgress(force: true);
     _progressTimer?.cancel();
+    _hideControlsTimer?.cancel();
     _videoParamsSub?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
@@ -415,6 +449,129 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
+  }
+
+  // ================= UI 控制 =================
+
+  /// 切换播放/暂停
+  void _togglePlayPause() {
+    if (_isPlaying) {
+      _player.pause();
+    } else {
+      _player.play();
+    }
+  }
+
+  /// 设置倍速
+  void _setPlaybackRate(double rate) {
+    _player.setRate(rate);
+    setState(() => _playbackRate = rate);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setDouble('player_playback_rate', rate);
+    });
+  }
+
+  /// 加载倍速持久化
+  Future<void> _loadPlaybackRate() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rate = prefs.getDouble('player_playback_rate') ?? 1.0;
+      if (mounted) {
+        setState(() => _playbackRate = rate);
+        _player.setRate(rate);
+      }
+    } catch (_) {}
+  }
+
+  /// 切换收藏
+  void _toggleFavorite() {
+    setState(() => _isFavorite = !_isFavorite);
+    SharedPreferences.getInstance().then((prefs) {
+      final key = 'fav_${widget.videoInfo.source}_${widget.videoInfo.id}';
+      if (_isFavorite) {
+        prefs.setBool(key, true);
+      } else {
+        prefs.remove(key);
+      }
+    });
+  }
+
+  /// 加载收藏状态
+  Future<void> _loadFavorite() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'fav_${widget.videoInfo.source}_${widget.videoInfo.id}';
+      if (mounted) {
+        setState(() => _isFavorite = prefs.getBool(key) ?? false);
+      }
+    } catch (_) {}
+  }
+
+  /// 显示控制栏并启动自动隐藏定时器
+  void _showControls() {
+    _hideControlsTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _isControlsVisible = true);
+  }
+
+  /// 调度自动隐藏控制栏
+  void _scheduleHideControls() {
+    _hideControlsTimer?.cancel();
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      if (_isPlaying) {
+        setState(() => _isControlsVisible = false);
+      }
+    });
+  }
+
+  /// 切换控制栏显隐
+  void _toggleControls() {
+    if (_isControlsVisible) {
+      setState(() => _isControlsVisible = false);
+    } else {
+      _showControls();
+      if (_isPlaying) _scheduleHideControls();
+    }
+  }
+
+  /// 进度条拖动 - 开始
+  void _onScrubStart(double value) {
+    _hideControlsTimer?.cancel();
+    setState(() {
+      _scrubbingValue = value;
+      _isControlsVisible = true;
+    });
+  }
+
+  /// 进度条拖动 - 更新
+  void _onScrubChange(double value) {
+    setState(() => _scrubbingValue = value);
+  }
+
+  /// 进度条拖动 - 结束
+  void _onScrubEnd(double value) {
+    final dur = _currentDuration.inMilliseconds.toDouble();
+    if (dur > 0) {
+      final pos = (value.clamp(0.0, 1.0)) * dur;
+      _player.seek(Duration(milliseconds: pos.toInt()));
+    }
+    setState(() {
+      _scrubbingValue = null;
+      _currentPosition = Duration(milliseconds: ((value.clamp(0.0, 1.0)) * dur).toInt());
+    });
+    if (_isPlaying) _scheduleHideControls();
+  }
+
+  /// 格式化时间为 mm:ss 或 hh:mm:ss
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    if (h > 0) return '$h:$mm:$ss';
+    return '$mm:$ss';
   }
 
   /// 构造并保存当前播放记录
@@ -1328,11 +1485,420 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // ================= 播放视图 =================
 
+  /// 构建播放器顶部工具栏(LunaTV 风格: 毛玻璃黑底 + 圆角)
+  Widget _buildPlayerTopBar() {
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withOpacity(0.7),
+                Colors.black.withOpacity(0.0),
+              ],
+            ),
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+              child: Row(
+                children: [
+                  // 返回
+                  Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () {
+                        _onExitFullscreen();
+                        setState(() {
+                          _phase = 'detail';
+                        });
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(Icons.arrow_back, color: Colors.white, size: 24),
+                      ),
+                    ),
+                  ),
+                  // 标题
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.videoInfo.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (_selectedSource != null)
+                          Text(
+                            '第 ${_currentEpisodeIndex + 1} 集',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // 收藏
+                  Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _toggleFavorite,
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Icon(
+                          _isFavorite ? Icons.favorite : Icons.favorite_border,
+                          color: _isFavorite
+                              ? const Color(0xFFEF4444)
+                              : Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 跳过设置
+                  Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _showSkipSettingsDialog,
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(Icons.cut, color: Colors.white, size: 22),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建底部控制栏(进度条 + 播放/暂停/上下集/倍速/选集/全屏)
+  Widget _buildPlayerBottomBar() {
+    final dur = _currentDuration.inMilliseconds.toDouble();
+    final pos = _scrubbingValue != null
+        ? (_scrubbingValue! * dur).toInt()
+        : _currentPosition.inMilliseconds;
+    final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withOpacity(0.0),
+                Colors.black.withOpacity(0.75),
+              ],
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 进度条
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 48,
+                        child: Text(
+                          _formatDuration(Duration(milliseconds: pos)),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 7),
+                            overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 14),
+                            activeTrackColor: const Color(0xFF22C55E),
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: const Color(0xFF22C55E),
+                            overlayColor:
+                                const Color(0xFF22C55E).withOpacity(0.2),
+                          ),
+                          child: Slider(
+                            value: progress,
+                            onChangeStart: _onScrubStart,
+                            onChanged: _onScrubChange,
+                            onChangeEnd: _onScrubEnd,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 48,
+                        child: Text(
+                          _formatDuration(_currentDuration),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 控制按钮行
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // 选集
+                      _bottomBarButton(
+                        icon: Icons.list_alt,
+                        label:
+                            '${_currentEpisodeIndex + 1}/${_selectedSource?.episodes.length ?? 0}',
+                        onTap: _showEpisodeSelectorSheet,
+                      ),
+                      // 上一集
+                      _bottomBarButton(
+                        icon: Icons.skip_previous,
+                        onTap: _currentEpisodeIndex > 0
+                            ? () => _playEpisode(_currentEpisodeIndex - 1)
+                            : null,
+                      ),
+                      // 播放/暂停(中间大按钮)
+                      _playPauseButton(),
+                      // 下一集
+                      _bottomBarButton(
+                        icon: Icons.skip_next,
+                        onTap: () {
+                          final src = _selectedSource;
+                          if (src != null &&
+                              _currentEpisodeIndex <
+                                  src.episodes.length - 1) {
+                            _playEpisode(_currentEpisodeIndex + 1);
+                          }
+                        },
+                      ),
+                      // 倍速
+                      _bottomBarButton(
+                        icon: Icons.speed,
+                        label:
+                            _playbackRate == 1.0 ? '1x' : '${_playbackRate}x',
+                        onTap: _showPlaybackRateSheet,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 底部栏小按钮
+  Widget _bottomBarButton({
+    required IconData icon,
+    String? label,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  color: onTap == null ? Colors.white38 : Colors.white,
+                  size: 24),
+              if (label != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 10),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 播放/暂停大按钮
+  Widget _playPauseButton() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _togglePlayPause,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 56,
+          height: 56,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withOpacity(0.15),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Icon(
+            _isPlaying ? Icons.pause : Icons.play_arrow,
+            color: Colors.white,
+            size: 32,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 倍速选择底部面板
+  Future<void> _showPlaybackRateSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1F2937),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Text(
+                  '倍速',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ..._playbackRates.map((rate) {
+                  final selected = (rate - _playbackRate).abs() < 0.001;
+                  return ListTile(
+                    title: Text(
+                      rate == 1.0 ? '1.0x (正常)' : '${rate}x',
+                      style: TextStyle(
+                        color: selected
+                            ? const Color(0xFF22C55E)
+                            : Colors.white,
+                        fontSize: 15,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
+                    ),
+                    trailing: selected
+                        ? const Icon(Icons.check_circle,
+                            color: Color(0xFF22C55E), size: 20)
+                        : null,
+                    onTap: () {
+                      _setPlaybackRate(rate);
+                      Navigator.pop(ctx);
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 中间大播放/暂停按钮(点击视频空白区触发)
+  Widget _buildCenterPlayButton() {
+    if (_isPlaying) {
+      // 播放中不显示中间按钮(避免遮挡)
+      return const SizedBox.shrink();
+    }
+    return Center(
+      child: Material(
+        color: Colors.black.withOpacity(0.35),
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: _togglePlayPause,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 88,
+            height: 88,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withOpacity(0.7),
+                width: 2,
+              ),
+            ),
+            child: const Icon(
+              Icons.play_arrow,
+              color: Colors.white,
+              size: 56,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPlayingView(bool isDark) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 视频 - 铺满整个 body（不套 SafeArea，避开横屏侧边安全区造成的黑/白条）
+        // 视频 - 铺满整个 body
         Positioned.fill(
           child: Container(
             color: Colors.black,
@@ -1351,8 +1917,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                     if (_isBuffering)
                       const SizedBox(
-                        width: 36,
-                        height: 36,
+                        width: 40,
+                        height: 40,
                         child: CircularProgressIndicator(
                             color: Color(0xFF22C55E), strokeWidth: 3),
                       ),
@@ -1362,203 +1928,115 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
-        // 跳过片头按钮（右下角浮层）
-        if (_showSkipIntro)
-          Positioned(
-            right: 16,
-            bottom: 90,
-            child: Material(
-              color: Colors.transparent,
-              child: GestureDetector(
-                onTap: _skipIntro,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF22C55E).withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.fast_forward,
-                          color: Colors.white, size: 18),
-                      SizedBox(width: 6),
-                      Text(
-                        '跳过片头',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // 跳过片尾按钮（右下角浮层）
-        if (_showSkipOutro)
-          Positioned(
-            right: 16,
-            bottom: 90,
-            child: Material(
-              color: Colors.transparent,
-              child: GestureDetector(
-                onTap: _skipOutro,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF3B82F6).withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.fast_forward,
-                          color: Colors.white, size: 18),
-                      SizedBox(width: 6),
-                      Text(
-                        '跳过片尾',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // 顶部工具栏 - 套 SafeArea 避免与状态栏/时间重叠
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () {
-                      _onExitFullscreen();
-                      setState(() {
-                        _phase = 'detail';
-                      });
-                    },
-                  ),
-                  Expanded(
-                    child: Text(
-                      widget.videoInfo.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        shadows: [
-                          Shadow(blurRadius: 4, color: Colors.black54),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // 跳过片头片尾设置按钮
-                  IconButton(
-                    icon: const Icon(Icons.cut, color: Colors.white),
-                    onPressed: _showSkipSettingsDialog,
-                  ),
-                ],
-              ),
-            ),
+        // 点击空白区切换控制栏显隐
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _toggleControls,
           ),
         ),
-        // 底部控制条 - 套 SafeArea 避免与 HomeIndicator 重叠
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.55),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        // 动画层: 控制栏 / 中间按钮 / 跳过提示
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: _isControlsVisible
+              ? Stack(
+                  fit: StackFit.expand,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.skip_previous,
-                          color: Colors.white),
-                      onPressed: _currentEpisodeIndex > 0
-                          ? () => _playEpisode(_currentEpisodeIndex - 1)
-                          : null,
-                    ),
-                    // 集数显示 + 点击打开选集面板
-                    GestureDetector(
-                      onTap: _showEpisodeSelectorSheet,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '第${_currentEpisodeIndex + 1}集 / '
-                              '${_selectedSource?.episodes.length ?? 0}集',
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 13),
-                            ),
-                            const Text(
-                              '点击选集',
-                              style:
-                                  TextStyle(color: Colors.white54, fontSize: 10),
-                            ),
-                          ],
-                        ),
+                    // 半透明遮罩(让控制文字更清晰)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(color: Colors.black.withOpacity(0.15)),
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.skip_next, color: Colors.white),
-                      onPressed: () {
-                        final src = _selectedSource;
-                        if (src != null &&
-                            _currentEpisodeIndex < src.episodes.length - 1) {
-                          _playEpisode(_currentEpisodeIndex + 1);
-                        }
-                      },
+                    // 顶部工具栏
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: _buildPlayerTopBar(),
                     ),
+                    // 底部控制栏
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _buildPlayerBottomBar(),
+                    ),
+                    // 跳过片头按钮(右下角浮层)
+                    if (_showSkipIntro)
+                      Positioned(
+                        right: 16,
+                        bottom: 130,
+                        child: _skipButton(
+                          '跳过片头',
+                          const Color(0xFF22C55E),
+                          _skipIntro,
+                        ),
+                      ),
+                    // 跳过片尾按钮(右下角浮层)
+                    if (_showSkipOutro)
+                      Positioned(
+                        right: 16,
+                        bottom: 130,
+                        child: _skipButton(
+                          '跳过片尾',
+                          const Color(0xFF3B82F6),
+                          _skipOutro,
+                        ),
+                      ),
                   ],
-                ),
-              ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        // 暂停时的中央播放按钮
+        if (!_isPlaying && _isControlsVisible)
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: true,
+              child: _buildCenterPlayButton(),
             ),
           ),
-        ),
       ],
+    );
+  }
+
+  /// 跳过片头/片尾的浮层按钮
+  Widget _skipButton(String label, Color color, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.92),
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.fast_forward, color: Colors.white, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
