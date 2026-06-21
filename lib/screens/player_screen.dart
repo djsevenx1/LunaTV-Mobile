@@ -1991,7 +1991,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     color: Colors.black,
                     child: Center(
                       child: SizedBox.expand(
-                        child: Video(
+                        // 用独立 StatefulWidget 包裹 Video, 防止外部 setState 重建
+                        // 导致 media_kit 的 texture 丢失 (黑屏但有声音)
+                        child: _VideoHolder(
                           controller: _controller,
                           fit: _videoFitFor(),
                           onEnterFullscreen: _onEnterFullscreen,
