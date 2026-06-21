@@ -1718,6 +1718,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             _playbackRate == 1.0 ? '1x' : '${_playbackRate}x',
                         onTap: _showPlaybackRateSheet,
                       ),
+                      // 全屏 / 退出全屏
+                      _bottomBarButton(
+                        icon: MediaQuery.of(context).orientation ==
+                                Orientation.landscape
+                            ? Icons.fullscreen_exit
+                            : Icons.fullscreen,
+                        onTap: () {
+                          if (MediaQuery.of(context).orientation ==
+                              Orientation.landscape) {
+                            _onExitFullscreen();
+                          } else {
+                            _onEnterFullscreen();
+                          }
+                        },
+                      ),
                     ],
                   ),
                 ),
