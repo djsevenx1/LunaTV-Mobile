@@ -1613,7 +1613,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             left: 0,
             top: 0,
             bottom: 0,
-            width: double.infinity,
+            right: MediaQuery.of(context).size.width / 2,
             child: Align(
               alignment: Alignment.centerLeft,
               child: GestureDetector(
@@ -1639,7 +1639,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             right: 0,
             top: 0,
             bottom: 0,
-            width: double.infinity,
+            left: MediaQuery.of(context).size.width / 2,
             child: Align(
               alignment: Alignment.centerRight,
               child: GestureDetector(
