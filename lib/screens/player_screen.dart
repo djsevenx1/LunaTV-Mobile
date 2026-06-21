@@ -2088,4 +2088,39 @@ class _ArcArrowPainter extends CustomPainter {
       old.color != color || old.forward != forward;
 }
 
+/// 独立 StatefulWidget 包裹 Video 控件, 防止外部 setState 重建导致
+/// media_kit 的 texture 丢失 (黑屏但有声音).
+/// 同时禁用 Video 自带的 AdaptiveVideoControls, 避免和 Luna 自绘控件重复.
+class _VideoHolder extends StatefulWidget {
+  const _VideoHolder({
+    super.key,
+    required this.controller,
+    required this.fit,
+    required this.onEnterFullscreen,
+    required this.onExitFullscreen,
+  });
+
+  final VideoController controller;
+  final BoxFit fit;
+  final Future<void> Function() onEnterFullscreen;
+  final Future<void> Function() onExitFullscreen;
+
+  @override
+  State<_VideoHolder> createState() => _VideoHolderState();
+}
+
+class _VideoHolderState extends State<_VideoHolder> {
+  @override
+  Widget build(BuildContext context) {
+    return Video(
+      controller: widget.controller,
+      fit: widget.fit,
+      // 禁用 media_kit 自带控件 (返回空 builder), 避免和 Luna 自绘控件重复
+      controls: (state) => const SizedBox.shrink(),
+      onEnterFullscreen: widget.onEnterFullscreen,
+      onExitFullscreen: widget.onExitFullscreen,
+    );
+  }
+}
+
 enum PingState { idle, testing, fast, medium, slow, unavailable }
