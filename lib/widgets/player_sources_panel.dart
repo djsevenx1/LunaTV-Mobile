@@ -159,7 +159,7 @@ class _PlayerSourcesPanelState extends State<PlayerSourcesPanel>
                           child: Icon(
                             Icons.refresh,
                             color: _isRefreshing
-                                ? Colors.green
+                                ? Colors.grey[400]
                                 : (isDarkMode
                                     ? Colors.grey[400]
                                     : Colors.grey[600]),
@@ -257,14 +257,14 @@ class _SourcePanelItemWithHoverState extends State<_SourcePanelItemWithHover> {
                 ? (widget.isDarkMode ? Colors.grey[850] : Colors.grey[200])
                 : (_isHovering && DeviceUtils.isPC()
                     ? (widget.isDarkMode
-                        ? const Color(0xFF1A3D2E) // 深色模式下的浅绿色
-                        : const Color(0xFFE8F5E9)) // 浅色模式下的浅绿色
+                        ? const Color(0xFF3A3A3A)
+                        : const Color(0xFFE8E8E8))
                     : (widget.isDarkMode
                         ? Colors.grey[850]
                         : Colors.grey[200])),
             borderRadius: BorderRadius.circular(12),
             border: widget.isCurrent
-                ? Border.all(color: Colors.green, width: 2)
+                ? Border.all(color: Colors.grey, width: 2)
                 : null,
           ),
           child: Padding(
@@ -388,7 +388,7 @@ class _SourcePanelItemWithHoverState extends State<_SourcePanelItemWithHover> {
                                     Text(
                                       widget.speedInfo!.loadSpeed,
                                       style: widget.theme.textTheme.bodyMedium
-                                          ?.copyWith(color: Colors.green),
+                                          ?.copyWith(color: Colors.grey[400]),
                                     ),
                                   if (widget.speedInfo!.loadSpeed.isNotEmpty &&
                                       !widget.speedInfo!.loadSpeed

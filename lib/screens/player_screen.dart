@@ -283,7 +283,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     min: 0,
                     max: 300,
                     divisions: 300,
-                    activeColor: const Color(0xFF22C55E),
+                    activeColor: const Color(0xFF6B7280),
                     label: intro > 0 ? '$intro 秒' : '关闭',
                     onChanged: (v) =>
                         setDialogState(() => intro = v.round()),
@@ -298,7 +298,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     min: 0,
                     max: 300,
                     divisions: 300,
-                    activeColor: const Color(0xFF22C55E),
+                    activeColor: const Color(0xFF6B7280),
                     label: outro > 0 ? '$outro 秒' : '关闭',
                     onChanged: (v) =>
                         setDialogState(() => outro = v.round()),
@@ -326,7 +326,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     Navigator.pop(ctx);
                   },
                   child: const Text('保存',
-                      style: TextStyle(color: Color(0xFF22C55E))),
+                      style: TextStyle(color: Color(0xFF6B7280))),
                 ),
               ],
             );
@@ -400,7 +400,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: isCurrent
-                                ? const Color(0xFF22C55E)
+                                ? const Color(0xFF6B7280)
                                 : const Color(0xFF374151),
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1134,13 +1134,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
               const Spacer(),
               if (_sourcesLoading)
                 const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    color: Color(0xFF22C55E),
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: Colors.grey,
+                    ),
                   ),
-                ),
             ],
           ),
           const SizedBox(height: 8),
@@ -1181,14 +1181,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: selected
-              ? const Color(0xFF22C55E).withOpacity(0.15)
+              ? Colors.grey.withOpacity(0.2)
               : (isDark
                   ? Colors.white.withOpacity(0.05)
                   : Colors.white.withOpacity(0.6)),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
-                ? const Color(0xFF22C55E)
+                ? Colors.grey
                 : (isDark
                     ? Colors.white.withOpacity(0.1)
                     : Colors.black.withOpacity(0.08)),
@@ -1296,7 +1296,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Color _stateToColor(PingState state) {
     switch (state) {
       case PingState.fast:
-        return const Color(0xFF22C55E);
+        return Colors.grey[400]!;
       case PingState.medium:
         return const Color(0xFFF59E0B);
       case PingState.slow:
@@ -1359,19 +1359,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   borderRadius: BorderRadius.circular(6),
                   child: Container(
                     decoration: BoxDecoration(
-                      gradient: isCurrent
-                          ? const LinearGradient(
-                              colors: [
-                                Color(0xFF22C55E),
-                                Color(0xFF10B981)
-                              ],
-                            )
-                          : null,
-                      color: !isCurrent
-                          ? (isDark
+                      color: isCurrent
+                          ? const Color(0xFF6B7280)
+                          : (isDark
                               ? Colors.white.withOpacity(0.06)
-                              : Colors.black.withOpacity(0.04))
-                          : null,
+                              : Colors.black.withOpacity(0.04)),
                       borderRadius: BorderRadius.circular(6),
                       border: !isCurrent
                           ? Border.all(
@@ -1414,11 +1406,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           width: 4,
           height: 14,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF22C55E), Color(0xFF10B981)],
-            ),
+            color: const Color(0xFF6B7280),
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -1465,17 +1453,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         height: 48,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            gradient: canPlay
-                ? const LinearGradient(
-                    colors: [Color(0xFF22C55E), Color(0xFF10B981)],
-                  )
-                : null,
-            color: !canPlay ? Colors.grey : null,
+            color: canPlay
+                ? const Color(0xFF6B7280)
+                : Colors.grey,
             borderRadius: BorderRadius.circular(12),
             boxShadow: canPlay
                 ? [
                     BoxShadow(
-                      color: const Color(0xFF22C55E).withOpacity(0.35),
+                      color: Colors.grey.withOpacity(0.35),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -1821,7 +1806,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     style: TextStyle(color: Colors.white)),
                 trailing: Text(
                   _playbackRate == 1.0 ? '1.0x' : '${_playbackRate}x',
-                  style: const TextStyle(color: Color(0xFF22C55E)),
+                  style: const TextStyle(color: Color(0xFF6B7280)),
                 ),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1839,7 +1824,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       : '未设置',
                   style: TextStyle(
                     color: _skipIntroEnd > 0 || _skipOutroStart > 0
-                        ? const Color(0xFF22C55E)
+                        ? const Color(0xFF6B7280)
                         : Colors.white54,
                   ),
                 ),
@@ -2052,7 +2037,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       rate == 1.0 ? '1.0x (正常)' : '${rate}x',
                       style: TextStyle(
                         color: selected
-                            ? const Color(0xFF22C55E)
+                            ? const Color(0xFF6B7280)
                             : Colors.white,
                         fontSize: 15,
                         fontWeight: selected
@@ -2062,7 +2047,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                     trailing: selected
                         ? const Icon(Icons.check_circle,
-                            color: Color(0xFF22C55E), size: 20)
+                            color: Color(0xFF6B7280), size: 20)
                         : null,
                     onTap: () {
                       _setPlaybackRate(rate);
