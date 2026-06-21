@@ -13,7 +13,6 @@ import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/screens/m3u_import_screen.dart';
 import 'package:luna_tv/screens/netdisk_search_screen.dart';
 import 'package:luna_tv/screens/play_stats_screen.dart';
-import 'package:luna_tv/screens/preferred_ip_screen.dart';
 import 'package:luna_tv/screens/release_calendar_screen.dart';
 import 'package:luna_tv/screens/short_drama_screen.dart';
 import 'package:luna_tv/screens/youtube_screen.dart';
@@ -21,7 +20,6 @@ import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/local_mode_storage_service.dart';
-import 'package:luna_tv/services/preferred_ip.dart';
 import 'package:luna_tv/services/subscription_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
@@ -43,21 +41,6 @@ void main() async {
   final themeService = await ThemeService.create();
 
   runApp(LunaTVApp(themeService: themeService));
-
-  // 异步启动优选IP测速 (不阻塞UI, 后台跑)
-  // 仅当启用自动测速 + 没测过 或 距离上次测速 > 24h 才跑
-  PreferredIp.getAutoTest().then((auto) async {
-    if (!auto) return;
-    final lastTime = await PreferredIp.getLastTestTime();
-    final shouldRun = lastTime == null ||
-        DateTime.now().difference(lastTime).inHours > 24;
-    if (shouldRun) {
-      // 后台跑, 不 await
-      PreferredIp.runPreferredIpTest(maxIps: 20).catchError((_) {
-        return <MapEntry<String, int>>[];
-      });
-    }
-  });
 }
 
 class LunaTVApp extends StatelessWidget {
@@ -88,7 +71,6 @@ class LunaTVApp extends StatelessWidget {
               '/youtube': (_) => const YouTubeScreen(),
               '/bilibili': (_) => const BilibiliScreen(),
               '/netdisk': (_) => const NetdiskSearchScreen(),
-              '/preferred-ip': (_) => const PreferredIpScreen(),
             },
             home: const AppWrapper(),
           );

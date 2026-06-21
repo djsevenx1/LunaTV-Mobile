@@ -696,7 +696,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (cached != null && s.episodes.isNotEmpty) {
             // 用 source 作为 key（不同影片同一个源共用）
             _pingCache[s.episodes.first] = cached;
-            _pingState[s.source] = _stateFromMs(cached);
+            _pingState[s.source] = _stateFromSpeed(
+              _speedCache[s.episodes.first],
+              cached,
+            );
           }
         }
         // 按缓存速度从快到慢排序
@@ -755,7 +758,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await Future.wait(batch.map((item) async {
         final ms = await _pingSource(item.source.episodes.first);
         if (!mounted) return;
-        _pingState[item.source.source] = _stateFromMs(ms);
+        _pingState[item.source.source] = _stateFromSpeed(
+          _speedCache[item.source.episodes.first],
+          ms,
+        );
         // 测速成功后写入本地缓存，供下次其他影片使用
         SourcePingCache.set(item.source.source, ms);
         if (mounted) setState(() {});
@@ -790,19 +796,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _sortSourcesBySpeed();
   }
 
-  /// 按测速速度从快到慢排序源列表
-  /// 优先按延迟排序,延迟相同时按下载速度 (KB/s) 降序
+  /// 按下载速度从快到慢排序源列表
+  /// 主键: 下载速度 (KB/s, 降序)  次键: 延迟 (ms, 升序)
   void _sortSourcesBySpeed() {
     int scoreOf(SearchResult s) {
       if (s.episodes.isEmpty) return 1 << 30;
       final url = s.episodes.first;
-      final ms = _pingCache[url] ?? 1 << 30;
-      // 已测速且有速度数据时, 用 (ms, -speedKBps) 组合排序
-      final speed = _speedCache[url];
-      if (speed == null || speed <= 0) return ms;
-      // 合成排序键: 主键 ms, 次键 -speed (速度大者优先)
-      // 用 ms * 1000000 - speed 保持数值比较
-      return ms * 1000000 - speed.toInt();
+      final speed = _speedCache[url] ?? 0;
+      // 用 (1e9 - speedKBps) * 1e6 + ms 作为排序键
+      // 速度大者在前 (值小), 速度相同时延迟小者在前
+      return ((1e9 - speed).toInt()) * 1000000 +
+          (_pingCache[url] ?? 1 << 30);
     }
 
     setState(() {
@@ -811,11 +815,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  PingState _stateFromMs(int ms) {
-    if (ms >= 3000) return PingState.unavailable;
-    if (ms < 500) return PingState.fast;
-    if (ms < 1500) return PingState.medium;
-    return PingState.slow;
+  PingState _stateFromSpeed(double? speedKBps, int? ms) {
+    if (speedKBps == null || speedKBps <= 0) {
+      // 没有速度数据但有延迟, 退回用延迟判断
+      if (ms == null || ms >= 3000) return PingState.unavailable;
+      if (ms < 500) return PingState.fast;
+      if (ms < 1500) return PingState.medium;
+      return PingState.slow;
+    }
+    // 速度阈值 (KB/s): 2MB/s 快, 0.5MB/s 中, 其他慢
+    if (speedKBps >= 2048) return PingState.fast;
+    if (speedKBps >= 512) return PingState.medium;
+    if (speedKBps > 0) return PingState.slow;
+    return PingState.unavailable;
   }
 
   Future<int> _pingSource(String url) async {
@@ -1315,15 +1327,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       text = '不可用';
       color = const Color(0xFFEF4444);
     } else {
-      // 显示延迟 + 速度 (有速度数据时)
+      // 速度为主, 延迟为辅 (有速度数据时优先显示速度)
       if (speed != null && speed > 0) {
-        if (speed >= 1024) {
-          text = '${ms}ms · ${(speed / 1024).toStringAsFixed(1)}MB/s';
-        } else {
-          text = '${ms}ms · ${speed.toStringAsFixed(0)}KB/s';
-        }
+        final speedText = speed >= 1024
+            ? '${(speed / 1024).toStringAsFixed(1)}MB/s'
+            : '${speed.toStringAsFixed(0)}KB/s';
+        text = ms != null ? '$speedText · ${ms}ms' : speedText;
       } else {
-        text = '${ms}ms';
+        text = ms != null ? '${ms}ms' : '待测';
       }
       color = _stateToColor(state);
     }

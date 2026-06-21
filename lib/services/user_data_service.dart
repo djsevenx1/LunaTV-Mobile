@@ -10,7 +10,6 @@ class UserDataService {
   static const String _m3u8ProxyUrlKey = 'm3u8_proxy_url';
   static const String _cfWorkerEnabledKey = 'cf_worker_enabled';
   static const String _cfWorkerUrlKey = 'cf_worker_url';
-  static const String _preferSpeedTestKey = 'prefer_speed_test';
   static const String _localSearchKey = 'local_search';
   static const String _isLocalModeKey = 'is_local_mode';
   
@@ -244,7 +243,6 @@ class UserDataService {
   // - 普通 URL:  {CF_Worker_URL}/{URL编码后的目标URL}  (走 /?url= 通用代理)
   // - m3u8 URL: {CF_Worker_URL}/m3u8?url={URL编码后的目标URL}  (走专用 m3u8 端点,
   //             Worker 会解析 m3u8 并把所有 .ts 分片也重写为走 Worker, 实现端到端加速)
-  // 优选IP 由 Worker 端实现, 客户端无感, 详见 CORSAPI 仓库
   static Future<String> buildProxiedUrl(String targetUrl) async {
     final enabled = await getCfWorkerEnabled();
     final workerUrl = await getCfWorkerUrl();
@@ -265,18 +263,6 @@ class UserDataService {
     if (lower.contains('type=m3u8')) return true;
     if (lower.contains('format=m3u8')) return true;
     return false;
-  }
-
-  // 保存优选测速设置
-  static Future<void> savePreferSpeedTest(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_preferSpeedTestKey, enabled);
-  }
-
-  // 获取优选测速设置（默认为 true）
-  static Future<bool> getPreferSpeedTest() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_preferSpeedTestKey) ?? true;
   }
 
   // 保存本地搜索设置
@@ -342,10 +328,5 @@ class UserDataService {
   // 兼容旧接口:设置 M3U8 代理 URL
   static Future<void> setM3u8ProxyUrl(String url) async {
     await saveM3u8ProxyUrl(url);
-  }
-
-  // 兼容旧接口:设置优选测速
-  static Future<void> setPreferSpeedTest(bool enabled) async {
-    await savePreferSpeedTest(enabled);
   }
 }

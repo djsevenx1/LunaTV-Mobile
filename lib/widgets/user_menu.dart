@@ -37,7 +37,6 @@ class _UserMenuState extends State<UserMenu> {
   String _cfWorkerUrl = '';
   bool _cfWorkerEnabled = false;
   String _version = '';
-  bool _preferSpeedTest = true;
   bool _localSearch = false;
   bool _isLocalMode = false;
 
@@ -68,7 +67,6 @@ class _UserMenuState extends State<UserMenu> {
     final m3u8ProxyUrl = await UserDataService.getM3u8ProxyUrl();
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerUrl = await UserDataService.getCfWorkerUrl();
-    final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
 
     if (mounted) {
@@ -81,7 +79,6 @@ class _UserMenuState extends State<UserMenu> {
         _m3u8ProxyUrl = m3u8ProxyUrl;
         _cfWorkerEnabled = cfWorkerEnabled;
         _cfWorkerUrl = cfWorkerUrl;
-        _preferSpeedTest = preferSpeedTest;
         _localSearch = localSearch;
       });
     }
@@ -936,87 +933,6 @@ class _UserMenuState extends State<UserMenu> {
                       color: widget.isDarkMode
                           ? const Color(0xFF374151)
                           : const Color(0xFFe5e7eb),
-                    ),
-                    // 优选测速选项
-                    _buildToggleOption(
-                      title: '优选测速',
-                      value: _preferSpeedTest,
-                      onChanged: (value) async {
-                        await UserDataService.savePreferSpeedTest(value);
-                        if (!mounted) return;
-                        setState(() {
-                          _preferSpeedTest = value;
-                        });
-                      },
-                      icon: LucideIcons.zap,
-                    ),
-                    // 分割线
-                    Container(
-                      height: 1,
-                      color: widget.isDarkMode
-                          ? const Color(0xFF374151)
-                          : const Color(0xFFe5e7eb),
-                    ),
-                    // 优选IP入口
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).pushNamed('/preferred-ip');
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                LucideIcons.wifi,
-                                size: 20,
-                                color: Color(0xFF22C55E),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '优选IP',
-                                      style: FontUtils.poppins(context,
-                                                                          fontSize: 16,
-                                        color: widget.isDarkMode
-                                            ? const Color(0xFFffffff)
-                                            : const Color(0xFF1f2937),
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '自动识别运营商, 优选最低延迟节点',
-                                      style: FontUtils.poppins(context,
-                                                                          fontSize: 12,
-                                        color: widget.isDarkMode
-                                            ? const Color(0xFF9ca3af)
-                                            : const Color(0xFF6b7280),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Icon(
-                                LucideIcons.chevronRight,
-                                size: 16,
-                                color: widget.isDarkMode
-                                    ? const Color(0xFF9ca3af)
-                                    : const Color(0xFF6b7280),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                     ),
                     // 本地搜索选项（本地模式下不显示）
                     if (!_isLocalMode) ...[
