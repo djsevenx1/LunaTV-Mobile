@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ main, 'trae/**' ]
+    tags: [ 'v*.*.*' ]
   workflow_dispatch:
 
 jobs:
@@ -43,3 +44,12 @@ jobs:
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # Tag 触发: 创建/更新 GitHub Release 并上传 APK
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: build/app/outputs/flutter-apk/app-release.apk
