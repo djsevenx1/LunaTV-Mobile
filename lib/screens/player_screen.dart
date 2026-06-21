@@ -1994,6 +1994,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         // 用独立 StatefulWidget 包裹 Video, 防止外部 setState 重建
                         // 导致 media_kit 的 texture 丢失 (黑屏但有声音)
                         child: _VideoHolder(
+                          // key 锁定, 防止 setState 时被 Element 树重建
+                          key: const ValueKey('lunaVideo'),
                           controller: _controller,
                           fit: _videoFitFor(),
                           onEnterFullscreen: _onEnterFullscreen,
