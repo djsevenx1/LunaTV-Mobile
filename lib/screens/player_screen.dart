@@ -1826,9 +1826,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final pos = _scrubbingValue != null
         ? (_scrubbingValue! * dur).toInt()
         : _currentPosition.inMilliseconds;
-    // 横屏时底部栏改短: 只占屏幕宽度 60%
+    // 底部栏统一改短: 全屏和非全屏都只占屏幕宽度 60%, 居中显示
     final screenWidth = MediaQuery.of(context).size.width;
-    final maxW = _isFullscreen ? screenWidth * 0.6 : double.infinity;
+    final maxW = screenWidth * 0.6;
     return Positioned(
       left: 12,
       right: 12,
