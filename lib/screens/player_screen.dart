@@ -1882,11 +1882,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final pos = _scrubbingValue != null
         ? (_scrubbingValue! * dur).toInt()
         : _currentPosition.inMilliseconds;
-    // 底部栏宽度: 横屏全屏时缩短到 60%, 竖屏时占满宽度 (按钮才放得下)
+    // 底部栏宽度: 横屏全屏时缩短到 60%, 竖屏时 85% 宽度
     final screenWidth = MediaQuery.of(context).size.width;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final maxW = isLandscape ? screenWidth * 0.6 : double.infinity;
+    final maxW = isLandscape ? screenWidth * 0.6 : screenWidth * 0.85;
     return Positioned(
       left: 12,
       right: 12,
