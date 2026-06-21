@@ -62,11 +62,21 @@ jobs:
 
       - name: Push APK to release branch
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: crazy-max/ghaction-github-pages@v3.1.0
-        with:
-          target_branch: release
-          build_dir: release
-          commit_message: "release: ${{ github.ref_name }}"
-          force_orphan: false
+        run: |
+          # 用 GitHub API 直接创建/更新 release branch
+          apk_name="lunatv-${GITHUB_REF_NAME}.apk"
+          cd ${GITHUB_WORKSPACE}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 切换到新分支
+          git checkout -B release
+          # 移除除了 release 目录外的其他文件
+          find . -mindepth 1 -maxdepth 1 ! -name 'release' ! -name '.git' -exec rm -rf {} +
+          mkdir -p release
+          # 从上一个 step 拷贝（在同一 workspace 下）
+          cp release/lunatv-${GITHUB_REF_NAME}.apk release/ 2>/dev/null || cp /tmp/release/lunatv-${GITHUB_REF_NAME}.apk release/ 2>/dev/null || echo "APK already in place"
+          git add -A
+          git commit -m "release: ${GITHUB_REF_NAME}" --allow-empty
+          git push origin release --force
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
