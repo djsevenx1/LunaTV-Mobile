@@ -48,10 +48,18 @@ class ApiService {
   static const Duration _timeout = Duration(seconds: 30);
 
   /// 如果启用了 CF Worker 代理，则返回代理后的 URL，否则返回原 URL
+  /// 注意：仅用于第三方请求，后端 API 请求不使用此代理（需要 cookies 认证）
   static Future<String> _maybeProxy(String url) async {
     final enabled = await UserDataService.getCfWorkerEnabled();
     final workerUrl = await UserDataService.getCfWorkerUrl();
     if (!enabled || workerUrl.isEmpty) return url;
+    
+    // 获取后端服务器地址，如果请求是发往后端的，不使用代理（需要保持 cookies）
+    final baseUrl = await _getBaseUrl();
+    if (baseUrl != null && url.startsWith(baseUrl)) {
+      return url;
+    }
+    
     final clean = workerUrl.endsWith('/')
         ? workerUrl.substring(0, workerUrl.length - 1)
         : workerUrl;
