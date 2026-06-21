@@ -241,39 +241,52 @@ class UserDataService {
     return prefs.getString(_cfWorkerUrlKey) ?? '';
   }
 
-  // 通用工具：根据目标 URL 构造代理后的 URL（仅当启用且配置了 URL 时）
-  // 格式: {CF_Worker_URL}/{URL编码后的目标URL}
+  // 通用工具：根据目标 URL 构造代理后的 URL
+  // 优选IP: 可选开启, 用最优 Cloudflare IP 替换 CF Worker 域名, 提升访问速度
+  // 注意: 优选IP 需配合支持 SNI 反代的 CF Worker 使用, 启用前请先在优选IP页测试
   static Future<String> buildProxiedUrl(String targetUrl) async {
-    // 1. 优选IP 优先 (如果启用且有优选结果)
-    final usePreferred = await getCfWorkerEnabled();
-    if (usePreferred) {
-      final bestIp = await PreferredIp.getBestIp();
-      if (bestIp != null && bestIp.isNotEmpty) {
-        // 把目标URL中的域名替换为优选IP, 用 SNI 头传原始host
-        return _applyPreferredIp(targetUrl, bestIp);
-      }
-    }
-    // 2. 退到 CF Worker 代理
+    // CF Worker 加速未启用 -> 直连
     final enabled = await getCfWorkerEnabled();
     final workerUrl = await getCfWorkerUrl();
     if (!enabled || workerUrl.isEmpty) return targetUrl;
     final clean = workerUrl.endsWith('/')
         ? workerUrl.substring(0, workerUrl.length - 1)
         : workerUrl;
-    return '$clean/${Uri.encodeComponent(targetUrl)}';
+
+    final baseUrl = '$clean/${Uri.encodeComponent(targetUrl)}';
+
+    // 优选IP 仅在用户明确开启时启用 (优选IP 页面里的开关)
+    final usePreferred = await getUsePreferredIp();
+    if (usePreferred) {
+      final bestIp = await PreferredIp.getBestIp();
+      if (bestIp != null && bestIp.isNotEmpty) {
+        return _applyPreferredIp(baseUrl, bestIp);
+      }
+    }
+    return baseUrl;
   }
 
-  /// 把 URL 中的域名替换成优选IP, 通过 SNI/TLS 直连
-  /// 例子: https://cdn.example.com/video.m3u8 -> https://104.16.123.96/video.m3u8
+  // 优选IP 开关
+  static const String _usePreferredIpKey = 'use_preferred_ip';
+
+  static Future<bool> getUsePreferredIp() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_usePreferredIpKey) ?? false;
+  }
+
+  static Future<void> saveUsePreferredIp(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_usePreferredIpKey, enabled);
+  }
+
+  /// 把 URL 中的域名替换成优选IP
+  /// 例子: https://your.workers.dev/xxx -> https://104.16.123.96/xxx
+  /// 适合支持 SNI 反代的 CF Worker (需要在 Worker 端配置 IP+SSL/TLS)
   static String _applyPreferredIp(String targetUrl, String preferredIp) {
     try {
       final uri = Uri.parse(targetUrl);
       if (uri.host.isEmpty) return targetUrl;
-      // 保留 path/query/fragment, 替换 host
-      final newUri = uri.replace(
-        host: preferredIp,
-        // 不带端口, 用默认 https 443
-      );
+      final newUri = uri.replace(host: preferredIp);
       return newUri.toString();
     } catch (_) {
       return targetUrl;

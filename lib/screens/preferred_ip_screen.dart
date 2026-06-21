@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:luna_tv/services/preferred_ip.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 
 /// 优选IP设置页面
 /// 仿 cmliu/edgetunnel:
@@ -17,6 +18,7 @@ class PreferredIpScreen extends StatefulWidget {
 class _PreferredIpScreenState extends State<PreferredIpScreen> {
   final _urlController = TextEditingController();
   bool _autoTest = true;
+  bool _usePreferred = false;
   bool _loading = true;
   bool _testing = false;
   int _progress = 0;
@@ -34,6 +36,7 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
   Future<void> _load() async {
     final url = await PreferredIp.getSourceUrl();
     final auto = await PreferredIp.getAutoTest();
+    final usePreferred = await UserDataService.getUsePreferredIp();
     final best = await PreferredIp.getBestIp();
     final isp = await PreferredIp.getBestIsp();
     final lastTime = await PreferredIp.getLastTestTime();
@@ -42,6 +45,7 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
       setState(() {
         _urlController.text = url;
         _autoTest = auto;
+        _usePreferred = usePreferred;
         _bestIp = best;
         _userIsp = isp;
         _lastTestTime = lastTime;
@@ -236,6 +240,64 @@ class _PreferredIpScreenState extends State<PreferredIpScreen> {
                       Switch(
                         value: _autoTest,
                         onChanged: _toggleAutoTest,
+                        activeColor: const Color(0xFF22C55E),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // 应用到播放请求开关
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF1F2937)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _usePreferred
+                          ? const Color(0xFF22C55E).withOpacity(0.5)
+                          : Colors.transparent,
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi, color: Color(0xFF22C55E)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('应用到播放请求',
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w600)),
+                            Text(
+                              _bestIp == null
+                                  ? '请先测速获取最优IP, 默认关闭避免 SSL 错误'
+                                  : '当前最优: $_bestIp',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: _usePreferred,
+                        onChanged: (v) async {
+                          if (v && _bestIp == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('请先测速获取最优IP')),
+                            );
+                            return;
+                          }
+                          await UserDataService.saveUsePreferredIp(v);
+                          if (mounted) setState(() => _usePreferred = v);
+                        },
                         activeColor: const Color(0xFF22C55E),
                       ),
                     ],
