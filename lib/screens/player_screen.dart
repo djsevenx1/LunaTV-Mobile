@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +62,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final Map<String, int> _pingCache = {};
   final Map<String, PingState> _pingState = {};
   String? _autoSelectedSource;
+
+  // 测速结果本地缓存 (按视频维度, 24h 内复用避免每次重新测速)
+  static const String _pingCachePrefKey = 'source_ping_cache_v1';
+  static const Duration _pingCacheTtl = Duration(hours: 24);
+  String get _videoCacheKey {
+    final t = widget.videoInfo.searchTitle.isNotEmpty
+        ? widget.videoInfo.searchTitle
+        : widget.videoInfo.title;
+    return t.trim();
+  }
 
   // 当前选中的源 / 集
   SearchResult? _selectedSource;
@@ -695,6 +706,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _sourcesLoading = false;
       });
 
+      // 尝试应用上次的测速缓存: 直接显示 ms 数字和颜色, 避免每次都从 0 开始
+      final cached = await _loadPingCache();
+      if (cached != null && cached.isNotEmpty) {
+        for (final s in unique) {
+          if (s.episodes.isEmpty) continue;
+          final key = s.episodes.first;
+          final ms = cached[s.sourceName];
+          if (ms != null) {
+            _pingCache[key] = ms;
+            _pingState[s.source] = _stateFromMs(ms);
+          }
+        }
+        // 有缓存时,按缓存速度排序,让 UI 立即呈现上次排名
+        if (_pingCache.isNotEmpty) {
+          _sortSourcesBySpeed();
+        }
+      }
+
       // 默认选第一个
       SearchResult toSelect = unique.first;
       if (widget.preferredSource != null && widget.preferredSource!.isNotEmpty) {
@@ -777,6 +806,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     // 按速度从快到慢重排源列表（已测速成功的排前面；测失败的放最后）
     _sortSourcesBySpeed();
+
+    // 保存本次测速结果到本地缓存, 下次打开同一视频直接复用
+    _savePingCache();
   }
 
   /// 按测速速度从快到慢排序源列表
@@ -792,6 +824,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _sourceResults.sort((a, b) => scoreOf(a).compareTo(scoreOf(b)));
       // _selectedSource 是 SearchResult 引用，sort 后引用仍然指向同一对象，不需要调整
     });
+  }
+
+  /// 读取本视频上次的测速结果 (sourceName -> ms), 过期或无缓存返回 null
+  Future<Map<String, int>?> _loadPingCache() async {
+    if (_videoCacheKey.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_pingCachePrefKey);
+      if (raw == null || raw.isEmpty) return null;
+      final outer = jsonDecode(raw) as Map<String, dynamic>;
+      final entry = outer[_videoCacheKey];
+      if (entry is! Map) return null;
+      final ts = entry['ts'];
+      if (ts is! int) return null;
+      // 缓存过期
+      if (DateTime.now().millisecondsSinceEpoch - ts > _pingCacheTtl.inMilliseconds) {
+        return null;
+      }
+      final map = entry['map'];
+      if (map is! Map) return null;
+      return map.map((k, v) => MapEntry(k.toString(), (v as num).toInt()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 保存本次测速结果到本地缓存
+  Future<void> _savePingCache() async {
+    if (_videoCacheKey.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_pingCachePrefKey);
+      Map<String, dynamic> outer = {};
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) outer = decoded;
+      }
+      // 仅保存有 ms 的源
+      final m = <String, int>{};
+      for (final s in _sourceResults) {
+        if (s.episodes.isEmpty) continue;
+        final ms = _pingCache[s.episodes.first];
+        if (ms != null) m[s.sourceName] = ms;
+      }
+      if (m.isEmpty) return;
+      outer[_videoCacheKey] = {
+        'ts': DateTime.now().millisecondsSinceEpoch,
+        'map': m,
+      };
+      await prefs.setString(_pingCachePrefKey, jsonEncode(outer));
+    } catch (_) {}
   }
 
   PingState _stateFromMs(int ms) {
