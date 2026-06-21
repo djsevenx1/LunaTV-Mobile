@@ -29,29 +29,20 @@ android {
         versionName = "1.0.0"
     }
 
-    val keystorePropertiesFile = rootProject.file("key.properties")
-    val hasSigningConfig = keystorePropertiesFile.exists()
-
+    // 固定 release 签名 (keystore 提交在仓库 android/app/release.keystore)
+    // 每次 CI 构建签名一致, 可以正常覆盖安装
     signingConfigs {
-        if (hasSigningConfig) {
-            create("release") {
-                val properties = Properties()
-                properties.load(FileInputStream(keystorePropertiesFile))
-                storeFile = file(properties.getProperty("storeFile")!!)
-                storePassword = properties.getProperty("storePassword")
-                keyAlias = properties.getProperty("keyAlias")
-                keyPassword = properties.getProperty("keyPassword")
-            }
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "lunatv2024"
+            keyAlias = "lunatv"
+            keyPassword = "lunatv2024"
         }
     }
 
     buildTypes {
         release {
-            if (hasSigningConfig) {
-                signingConfig = signingConfigs.getByName("release")
-            } else {
-                signingConfig = signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             isShrinkResources = false
         }
