@@ -1104,8 +1104,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 圆弧箭头 + 数字 "10" 图标 (类似 YouTube 快进/快退)
   Widget _buildSeekIcon({required bool forward}) {
     return SizedBox(
-      width: 32,
-      height: 32,
+      width: 26,
+      height: 26,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -1116,7 +1116,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ? (Matrix4.identity())
                 : (Matrix4.rotationY(3.14159)),
             child: CustomPaint(
-              size: const Size(32, 32),
+              size: const Size(26, 26),
               painter: _ArcArrowPainter(
                 color: Colors.white,
                 forward: true,
@@ -1125,12 +1125,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           // 中心数字
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.only(top: 1),
             child: Text(
               '$_seekSeconds',
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 9,
+                fontSize: 8,
                 fontWeight: FontWeight.bold,
                 fontFamily: 'Arial',
               ),
@@ -1145,13 +1145,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildSideSeekButtons(BoxConstraints constraints) {
     if (_controlsLocked || !_showControls) return const SizedBox.shrink();
     final centerY = constraints.maxHeight / 2;
-    final offset = _isFullscreen ? 60.0 : 40.0;
+    final btnSize = _isFullscreen ? 58.0 : 50.0;
+    final offset = _isFullscreen ? 54.0 : 36.0;
+    final half = btnSize / 2;
     return Stack(
       children: [
         // 左: 快退
         Positioned(
-          left: (constraints.maxWidth / 2) - offset - 32,
-          top: centerY - 32,
+          left: (constraints.maxWidth / 2) - offset - half,
+          top: centerY - half,
           child: _buildSeekCircleButton(
             onTap: () {
               final newPos = _currentPosition -
@@ -1164,8 +1166,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
         // 右: 快进
         Positioned(
-          left: (constraints.maxWidth / 2) + offset - 32,
-          top: centerY - 32,
+          left: (constraints.maxWidth / 2) + offset - half,
+          top: centerY - half,
           child: _buildSeekCircleButton(
             onTap: () {
               final newPos = _currentPosition +
@@ -1181,10 +1183,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 64x64 圆形毛玻璃按钮
+  /// 圆形毛玻璃按钮 (竖屏 50, 全屏 58)
   Widget _buildSeekCircleButton(
       {required VoidCallback onTap, required Widget child}) {
-    final size = _isFullscreen ? 72.0 : 64.0;
+    final size = _isFullscreen ? 58.0 : 50.0;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1395,24 +1397,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 底部控制栏 (毛玻璃容器,左中右布局)
+  /// 底部控制栏 (毛玻璃容器,左中右布局,居中限宽)
   Widget _buildLunaBottomBar() {
     if (!_showControls) return const SizedBox.shrink();
     final totalEps = _selectedSource?.episodes.length ?? 0;
+    // 竖屏窄药丸, 全屏稍宽但仍限宽
+    final maxW = _isFullscreen ? 560.0 : 360.0;
     return Positioned(
-      left: 12,
-      right: 12,
+      left: 0,
+      right: 0,
       bottom: 12,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: BackdropFilter(
-          filter: _blurFilter(12),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(_controlBarOpacity),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 5),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxW),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: BackdropFilter(
+              filter: _blurFilter(12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(_controlBarOpacity),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.fromLTRB(6, 0, 6, 4),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1420,7 +1427,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 _buildLunaProgressBar(),
                 // 底部: 左中右分段按钮
                 SizedBox(
-                  height: 44,
+                  height: 38,
                   child: Row(
                     children: [
                       // 左: 播放/暂停 + 上一集 + 时间
@@ -1504,11 +1511,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
+          ),
+        ),
       ),
     );
   }
 
-  /// 圆形小按钮 (40x40, 仿 ArtPlayer 控制按钮)
+  /// 圆形小按钮 (34x34, 仿 ArtPlayer 控制按钮)
   Widget _iconBtn(
       {required IconData icon, required VoidCallback? onTap}) {
     return Material(
@@ -1518,14 +1527,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 40,
-          height: 40,
+          width: 34,
+          height: 34,
           child: Icon(
             icon,
             color: onTap == null
                 ? Colors.white.withOpacity(0.3)
                 : Colors.white,
-            size: 22,
+            size: 19,
           ),
         ),
       ),
