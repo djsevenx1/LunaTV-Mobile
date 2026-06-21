@@ -2075,14 +2075,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
-        // 点击空白区切换控制栏显隐 (单独 GestureDetector, 不包整个 Stack)
-        if (_isControlsVisible)
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _toggleControls,
-            ),
+        // 点击空白区切换控制栏显隐 (始终存在, 控件隐藏时也能点击调出)
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _toggleControls,
           ),
+        ),
         // 中央双圆快进/快退 (LunaTV Web 风格)
         _buildSideSeekButtons(),
         // 顶部栏 (80px 渐变 + 集数胶囊)
