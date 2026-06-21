@@ -78,6 +78,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _seekSeconds = 10; // 快进快退秒数
   String? _seekLayout; // both/left/right 留接口
   Timer? _hideControlsTimer;
+  // 用 ValueNotifier 避免 position 1秒1次 setState 重建 Video 触发白屏
+  final ValueNotifier<Duration> _positionN = ValueNotifier(Duration.zero);
+  final ValueNotifier<Duration> _durationN = ValueNotifier(Duration.zero);
+  final ValueNotifier<bool> _playingN = ValueNotifier(false);
+  final ValueNotifier<int> _videoWidthN = ValueNotifier(0);
+  final ValueNotifier<int> _videoHeightN = ValueNotifier(0);
   String _currentTimeText = '00:00';
   String _durationText = '00:00';
   Duration _currentPosition = Duration.zero;
@@ -243,25 +249,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 启动播放状态监听 + 时钟定时器
   void _startPlayerStateListener() {
-    // 1) 播放位置/时长监听
+    // 1) 播放位置/时长监听 - 用 ValueNotifier 避免触发 setState 重建整个播放视图
     _player.streams.position.listen((pos) {
-      if (!mounted) return;
-      setState(() {
-        _currentPosition = pos;
-        _currentTimeText = _formatTime(pos);
-      });
+      // 1秒1次: 毫秒 < 1000 时直接忽略
+      if (pos.inMilliseconds % 1000 > 100) return;
+      _positionN.value = pos;
+      if (mounted) {
+        setState(() {
+          _currentPosition = pos;
+          _currentTimeText = _formatTime(pos);
+        });
+      }
     });
     _player.streams.duration.listen((dur) {
-      if (!mounted) return;
-      setState(() {
-        _currentDuration = dur;
-        _durationText = _formatTime(dur);
-      });
+      _durationN.value = dur;
+      if (mounted) {
+        setState(() {
+          _currentDuration = dur;
+          _durationText = _formatTime(dur);
+        });
+      }
     });
     _player.streams.playing.listen((playing) {
-      if (!mounted) return;
-      setState(() => _isPlaying = playing);
-      if (playing) _scheduleHideControls();
+      _playingN.value = playing;
+      if (mounted) {
+        setState(() => _isPlaying = playing);
+        if (playing) _scheduleHideControls();
+      }
     });
     // 2) 时钟定时器 (每秒)
     _updateClock();
