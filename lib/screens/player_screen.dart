@@ -13,6 +13,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// LunaTV Web 风格播放详情页
 ///
@@ -73,6 +74,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _videoHeight = 0;
   StreamSubscription<VideoParams>? _videoParamsSub;
 
+  // 跳过片头片尾
+  int _skipIntroEnd = 0; // 片头结束时间（秒），0 表示不跳
+  int _skipOutroStart = 0; // 片尾开始时间（秒，从结尾倒数），0 表示不跳
+  Duration _currentPosition = Duration.zero;
+  Duration _currentDuration = Duration.zero;
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration>? _durationSub;
+  // 控制跳过按钮显示（避免反复触发）
+  bool _showSkipIntro = false;
+  bool _showSkipOutro = false;
+
   @override
   void initState() {
     super.initState();
@@ -89,6 +101,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
       }
     });
+    // 监听播放位置和总时长，用于跳过片头片尾
+    _positionSub = _player.streams.position.listen((pos) {
+      _currentPosition = pos;
+      _updateSkipButtonVisibility();
+    });
+    _durationSub = _player.streams.duration.listen((dur) {
+      _currentDuration = dur;
+    });
+    // 加载跳过片头片尾配置
+    _loadSkipConfig();
     // 不再自动播下一集,由用户控制
     _loadSources();
   }
@@ -99,6 +121,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveCurrentProgress(force: true);
     _progressTimer?.cancel();
     _videoParamsSub?.cancel();
+    _positionSub?.cancel();
+    _durationSub?.cancel();
     // 强制停止播放器,避免关页面后还在后台继续播
     try {
       _player.stop();
@@ -119,6 +143,243 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return _videoHeight > _videoWidth;
     }
     return false; // 默认横屏
+  }
+
+  // ================= 跳过片头片尾 =================
+
+  /// SharedPreferences 存储键（按视频标题区分）
+  String get _skipPrefKey => 'skip_config_${widget.videoInfo.title}';
+
+  /// 加载跳过片头片尾配置
+  Future<void> _loadSkipConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final intro = prefs.getInt('${_skipPrefKey}_intro') ?? 0;
+      final outro = prefs.getInt('${_skipPrefKey}_outro') ?? 0;
+      if (mounted) {
+        setState(() {
+          _skipIntroEnd = intro;
+          _skipOutroStart = outro;
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// 保存跳过片头片尾配置
+  Future<void> _saveSkipConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('${_skipPrefKey}_intro', _skipIntroEnd);
+      await prefs.setInt('${_skipPrefKey}_outro', _skipOutroStart);
+    } catch (_) {}
+  }
+
+  /// 根据当前位置更新跳过按钮的显示状态
+  void _updateSkipButtonVisibility() {
+    final posSec = _currentPosition.inSeconds;
+    final durSec = _currentDuration.inSeconds;
+    final shouldShowIntro = _skipIntroEnd > 0 && posSec < _skipIntroEnd && posSec > 1;
+    final shouldShowOutro = _skipOutroStart > 0 &&
+        durSec > 0 &&
+        posSec > 0 &&
+        (durSec - posSec) < _skipOutroStart &&
+        (durSec - posSec) > 1;
+    if (shouldShowIntro != _showSkipIntro ||
+        shouldShowOutro != _showSkipOutro) {
+      setState(() {
+        _showSkipIntro = shouldShowIntro;
+        _showSkipOutro = shouldShowOutro;
+      });
+    }
+  }
+
+  /// 跳过片头
+  void _skipIntro() {
+    if (_skipIntroEnd > 0) {
+      _player.seek(Duration(seconds: _skipIntroEnd));
+    }
+  }
+
+  /// 跳过片尾
+  void _skipOutro() {
+    final durSec = _currentDuration.inSeconds;
+    if (durSec > 0 && _skipOutroStart > 0) {
+      _player.seek(Duration(seconds: durSec - _skipOutroStart));
+    }
+  }
+
+  /// 打开跳过片头片尾设置弹窗
+  Future<void> _showSkipSettingsDialog() async {
+    int intro = _skipIntroEnd;
+    int outro = _skipOutroStart;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1F2937),
+              title: const Text(
+                '跳过片头片尾',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '片头结束时间: ${intro > 0 ? "$intro 秒" : "未设置"}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  Slider(
+                    value: intro.toDouble(),
+                    min: 0,
+                    max: 300,
+                    divisions: 300,
+                    activeColor: const Color(0xFF22C55E),
+                    label: intro > 0 ? '$intro 秒' : '关闭',
+                    onChanged: (v) =>
+                        setDialogState(() => intro = v.round()),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '片尾提前时间: ${outro > 0 ? "$outro 秒" : "未设置"}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  Slider(
+                    value: outro.toDouble(),
+                    min: 0,
+                    max: 300,
+                    divisions: 300,
+                    activeColor: const Color(0xFF22C55E),
+                    label: outro > 0 ? '$outro 秒' : '关闭',
+                    onChanged: (v) =>
+                        setDialogState(() => outro = v.round()),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '片头: 播放到该时间点前显示"跳过片头"按钮\n片尾: 距离结尾该时间时显示"跳过片尾"按钮',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消',
+                      style: TextStyle(color: Colors.white54)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _skipIntroEnd = intro;
+                      _skipOutroStart = outro;
+                    });
+                    _saveSkipConfig();
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('保存',
+                      style: TextStyle(color: Color(0xFF22C55E))),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 打开集数选择底部面板
+  Future<void> _showEpisodeSelectorSheet() async {
+    final source = _selectedSource;
+    if (source == null || source.episodes.isEmpty) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1F2937),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '选集 (${source.episodes.length}集)',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const Divider(color: Colors.white24, height: 1),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    itemCount: source.episodes.length,
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 5,
+                      childAspectRatio: 1.4,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                    ),
+                    itemBuilder: (ctx, index) {
+                      final isCurrent = index == _currentEpisodeIndex;
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _playEpisode(index);
+                        },
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isCurrent
+                                ? const Color(0xFF22C55E)
+                                : const Color(0xFF374151),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${index + 1}',
+                            style: TextStyle(
+                              color: isCurrent
+                                  ? Colors.white
+                                  : Colors.white70,
+                              fontSize: 14,
+                              fontWeight: isCurrent
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   /// 进入全屏：隐藏系统UI + 根据视频宽高比设置屏幕方向
@@ -1099,6 +1360,92 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
+        // 跳过片头按钮（右下角浮层）
+        if (_showSkipIntro)
+          Positioned(
+            right: 16,
+            bottom: 90,
+            child: Material(
+              color: Colors.transparent,
+              child: GestureDetector(
+                onTap: _skipIntro,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF22C55E).withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.fast_forward,
+                          color: Colors.white, size: 18),
+                      SizedBox(width: 6),
+                      Text(
+                        '跳过片头',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // 跳过片尾按钮（右下角浮层）
+        if (_showSkipOutro)
+          Positioned(
+            right: 16,
+            bottom: 90,
+            child: Material(
+              color: Colors.transparent,
+              child: GestureDetector(
+                onTap: _skipOutro,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3B82F6).withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.fast_forward,
+                          color: Colors.white, size: 18),
+                      SizedBox(width: 6),
+                      Text(
+                        '跳过片尾',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         // 顶部工具栏 - 套 SafeArea 避免与状态栏/时间重叠
         Positioned(
           top: 0,
@@ -1134,6 +1481,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
                   ),
+                  // 跳过片头片尾设置按钮
+                  IconButton(
+                    icon: const Icon(Icons.cut, color: Colors.white),
+                    onPressed: _showSkipSettingsDialog,
+                  ),
                 ],
               ),
             ),
@@ -1149,13 +1501,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Padding(
               padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.55),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     IconButton(
                       icon: const Icon(Icons.skip_previous,
@@ -1164,10 +1516,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ? () => _playEpisode(_currentEpisodeIndex - 1)
                           : null,
                     ),
-                    Text(
-                      '第${_currentEpisodeIndex + 1}集 / '
-                      '${_selectedSource?.episodes.length ?? 0}集',
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    // 集数显示 + 点击打开选集面板
+                    GestureDetector(
+                      onTap: _showEpisodeSelectorSheet,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '第${_currentEpisodeIndex + 1}集 / '
+                              '${_selectedSource?.episodes.length ?? 0}集',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 13),
+                            ),
+                            const Text(
+                              '点击选集',
+                              style:
+                                  TextStyle(color: Colors.white54, fontSize: 10),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.skip_next, color: Colors.white),
