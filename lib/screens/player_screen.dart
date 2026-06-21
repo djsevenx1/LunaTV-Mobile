@@ -1893,41 +1893,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
           child: Stack(
             children: [
-              // 视频
+              // 视频 (铺满, 黑底兜底, Video 自带 fit 控制缩放)
               Positioned.fill(
-                child: Container(
+                child: ColoredBox(
                   color: Colors.black,
                   child: Center(
-                    child: AspectRatio(
-                      aspectRatio:
-                          (_videoWidth > 0 && _videoHeight > 0)
-                              ? _videoWidth / _videoHeight
-                              : 16 / 9,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Video(
-                            controller: _controller,
-                            fit: _videoFitFor(),
-                            onEnterFullscreen: _onEnterFullscreen,
-                            onExitFullscreen: _onExitFullscreen,
-                          ),
-                          if (_isBuffering)
-                            const SizedBox(
-                              width: 36,
-                              height: 36,
-                              child: CircularProgressIndicator(
-                                  color: kLunaLoadingColor,
-                                  strokeWidth: 3),
-                            ),
-                        ],
+                    child: SizedBox.expand(
+                      child: Video(
+                        controller: _controller,
+                        fit: _videoFitFor(),
+                        onEnterFullscreen: _onEnterFullscreen,
+                        onExitFullscreen: _onExitFullscreen,
                       ),
                     ),
                   ),
                 ),
               ),
-              // 中央双圆快进/快退按钮 (中线 ±40px/60px)
-              _buildSideSeekButtons(constraints),
+              // 缓冲指示器 (叠在视频上)
+              if (_isBuffering)
+                Positioned.fill(
+                  child: Center(
+                    child: SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: CircularProgressIndicator(
+                          color: kLunaLoadingColor,
+                          strokeWidth: 3),
+                    ),
+                  ),
+                ),
+              // 中央双圆快进/快退按钮 (中线 ±36px/54px)
+              Positioned.fill(
+                child: _buildSideSeekButtons(constraints),
+              ),
               // 顶部栏
               _buildLunaTopBar(),
               // 底部毛玻璃控制栏
