@@ -1985,39 +1985,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                 ),
-                // 视频 (铺满, 黑底兜底, Video 自带 fit 控制缩放)
+                // 视频 (12ce29d 的结构: AspectRatio + Center + Stack, 已知能正常显示)
                 Positioned.fill(
-                  child: ColoredBox(
+                  child: Container(
                     color: Colors.black,
                     child: Center(
-                      child: SizedBox.expand(
-                        // 用独立 StatefulWidget 包裹 Video, 防止外部 setState 重建
-                        // 导致 media_kit 的 texture 丢失 (黑屏但有声音)
-                        child: _VideoHolder(
-                          // key 锁定, 防止 setState 时被 Element 树重建
-                          key: const ValueKey('lunaVideo'),
-                          controller: _controller,
-                          fit: _videoFitFor(),
-                          onEnterFullscreen: _onEnterFullscreen,
-                          onExitFullscreen: _onExitFullscreen,
+                      child: AspectRatio(
+                        aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
+                            ? _videoWidth / _videoHeight
+                            : 16 / 9,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            _VideoHolder(
+                              key: const ValueKey('lunaVideo'),
+                              controller: _controller,
+                              fit: _videoFitFor(),
+                              onEnterFullscreen: _onEnterFullscreen,
+                              onExitFullscreen: _onExitFullscreen,
+                            ),
+                            if (_isBuffering)
+                              const SizedBox(
+                                width: 36,
+                                height: 36,
+                                child: CircularProgressIndicator(
+                                    color: kLunaLoadingColor,
+                                    strokeWidth: 3),
+                              ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ),
-                // 缓冲指示器 (叠在视频上)
-                if (_isBuffering)
-                  Positioned.fill(
-                    child: Center(
-                      child: SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(
-                            color: kLunaLoadingColor,
-                            strokeWidth: 3),
-                      ),
-                    ),
-                  ),
                 // 中央双圆快进/快退按钮 (中线 ±36px/54px)
                 Positioned.fill(
                   child: _buildSideSeekButtons(constraints),
@@ -2117,8 +2117,9 @@ class _VideoHolderState extends State<_VideoHolder> {
     return Video(
       controller: widget.controller,
       fit: widget.fit,
-      // 禁用 media_kit 自带控件 (返回空 builder), 避免和 Luna 自绘控件重复
-      controls: (state) => const SizedBox.shrink(),
+      // 用 NoVideoControls (media_kit_video 内置) 禁用自带控件,
+      // 避免和 Luna 自绘控件重复
+      controls: NoVideoControls,
       onEnterFullscreen: widget.onEnterFullscreen,
       onExitFullscreen: widget.onExitFullscreen,
     );
