@@ -1912,6 +1912,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   children: [
                     Video(
                       controller: _controller,
+                      controls: NoVideoControls,
                       onEnterFullscreen: _onEnterFullscreen,
                       onExitFullscreen: _onExitFullscreen,
                     ),
