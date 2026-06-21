@@ -695,10 +695,22 @@ class ApiService {
         final data = response.data!;
         final results = data['results'] as List<dynamic>? ?? [];
 
-        // 直接返回所有搜索结果，不进行过滤
-        return results
+        // 转换为 SearchResult 对象
+        final searchResults = results
             .map((item) => SearchResult.fromJson(item as Map<String, dynamic>))
             .toList();
+
+        // 按 source 去重，保留第一个出现的
+        final seenSources = <String>{};
+        final uniqueResults = <SearchResult>[];
+        for (final result in searchResults) {
+          if (!seenSources.contains(result.source)) {
+            seenSources.add(result.source);
+            uniqueResults.add(result);
+          }
+        }
+
+        return uniqueResults;
       } else {
         print('搜索失败: ${response.message}');
         return [];
