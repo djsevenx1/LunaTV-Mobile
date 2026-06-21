@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:luna_tv/services/preferred_ip.dart';
 
 class UserDataService {
   static const String _serverUrlKey = 'server_url';
@@ -243,6 +244,16 @@ class UserDataService {
   // 通用工具：根据目标 URL 构造代理后的 URL（仅当启用且配置了 URL 时）
   // 格式: {CF_Worker_URL}/{URL编码后的目标URL}
   static Future<String> buildProxiedUrl(String targetUrl) async {
+    // 1. 优选IP 优先 (如果启用且有优选结果)
+    final usePreferred = await getCfWorkerEnabled();
+    if (usePreferred) {
+      final bestIp = await PreferredIp.getBestIp();
+      if (bestIp != null && bestIp.isNotEmpty) {
+        // 把目标URL中的域名替换为优选IP, 用 SNI 头传原始host
+        return _applyPreferredIp(targetUrl, bestIp);
+      }
+    }
+    // 2. 退到 CF Worker 代理
     final enabled = await getCfWorkerEnabled();
     final workerUrl = await getCfWorkerUrl();
     if (!enabled || workerUrl.isEmpty) return targetUrl;
@@ -250,6 +261,23 @@ class UserDataService {
         ? workerUrl.substring(0, workerUrl.length - 1)
         : workerUrl;
     return '$clean/${Uri.encodeComponent(targetUrl)}';
+  }
+
+  /// 把 URL 中的域名替换成优选IP, 通过 SNI/TLS 直连
+  /// 例子: https://cdn.example.com/video.m3u8 -> https://104.16.123.96/video.m3u8
+  static String _applyPreferredIp(String targetUrl, String preferredIp) {
+    try {
+      final uri = Uri.parse(targetUrl);
+      if (uri.host.isEmpty) return targetUrl;
+      // 保留 path/query/fragment, 替换 host
+      final newUri = uri.replace(
+        host: preferredIp,
+        // 不带端口, 用默认 https 443
+      );
+      return newUri.toString();
+    } catch (_) {
+      return targetUrl;
+    }
   }
 
   // 保存优选测速设置
