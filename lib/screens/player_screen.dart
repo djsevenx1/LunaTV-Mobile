@@ -99,6 +99,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // 倍速档位
   static const List<double> _playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 
+  // 全屏状态
+  bool _isFullscreen = false;
+
+  // LunaTV Web 主题色
+  static const Color kLunaTheme = Color(0xFF22C55E);
+  static const Color kLunaEpisodeBadgeStart = Color(0xFF10B981);
+  static const Color kLunaEpisodeBadgeEnd = Color(0xFF059669);
+  static const Color kLunaLoadingColor = Color(0xFF009688);
+  static const Color kLunaFloatBtnBg = Color(0x26FFFFFF);
+
   @override
   void initState() {
     super.initState();
@@ -417,6 +427,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 进入全屏：隐藏系统UI + 根据视频宽高比设置屏幕方向
   Future<void> _onEnterFullscreen() async {
+    setState(() => _isFullscreen = true);
     // 隐藏系统UI（状态栏、导航栏）
     await SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.immersiveSticky,
@@ -437,6 +448,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 退出全屏：恢复系统UI + 解除方向锁定
   Future<void> _onExitFullscreen() async {
+    setState(() => _isFullscreen = false);
     // 恢复系统UI
     await SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
@@ -1485,148 +1497,95 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // ================= 播放视图 =================
 
-  /// 构建播放器顶部工具栏(LunaTV 风格: 毛玻璃黑底 + 圆角)
-  Widget _buildPlayerTopBar() {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withOpacity(0.7),
-                Colors.black.withOpacity(0.0),
-              ],
-            ),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-              child: Row(
-                children: [
-                  // 返回
-                  Material(
-                    color: Colors.transparent,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () {
-                        _onExitFullscreen();
-                        setState(() {
-                          _phase = 'detail';
-                        });
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.all(10),
-                        child: Icon(Icons.arrow_back, color: Colors.white, size: 24),
-                      ),
-                    ),
-                  ),
-                  // 标题
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.videoInfo.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (_selectedSource != null)
-                          Text(
-                            '第 ${_currentEpisodeIndex + 1} 集',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  // 收藏
-                  Material(
-                    color: Colors.transparent,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: _toggleFavorite,
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Icon(
-                          _isFavorite ? Icons.favorite : Icons.favorite_border,
-                          color: _isFavorite
-                              ? const Color(0xFFEF4444)
-                              : Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 齿轮 (设置菜单: 跳过片头片尾 / 倍速 / 比例 等)
-                  Material(
-                    color: Colors.transparent,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: _showSettingsSheet,
-                      child: const Padding(
-                        padding: EdgeInsets.all(10),
-                        child: Icon(Icons.settings_outlined,
-                            color: Colors.white, size: 22),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+  /// 顶部栏: 80px 黑色渐变 + 片名 + 集数胶囊 (LunaTV Web 风格)
+  Widget _buildLunaTopBar() {
+    if (!_isControlsVisible) return const SizedBox.shrink();
+    final totalEps = _selectedSource?.episodes.length ?? 0;
+    final currentEp = _currentEpisodeIndex + 1;
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 80,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withOpacity(0.7),
+              Colors.black.withOpacity(0.3),
+              Colors.transparent,
+            ],
+            stops: const [0, 0.6, 1],
           ),
         ),
-      ),
-    );
-  }
-
-  /// 左侧/右侧 双圆 药丸悬浮 (快退10s / 快进10s, ArtPlayer mobile 风格)
-  Widget _buildSideButtons() {
-    return Positioned.fill(
-      child: IgnorePointer(
-        ignoring: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+        child: SafeArea(
+          bottom: false,
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // 左: 快退10s
-              _circleSeekButton(
+              // 返回箭头
+              _iconBtn(
+                icon: Icons.arrow_back,
                 onTap: () {
-                  final newPos = _currentPosition -
-                      const Duration(seconds: 10);
-                  _player.seek(newPos < Duration.zero
-                      ? Duration.zero
-                      : newPos);
+                  _onExitFullscreen();
+                  setState(() => _phase = 'detail');
                 },
-                label: '-10',
               ),
-              // 右: 快进10s
-              _circleSeekButton(
-                onTap: () {
-                  final newPos = _currentPosition +
-                      const Duration(seconds: 10);
-                  final max = _currentDuration;
-                  _player.seek(newPos > max ? max : newPos);
-                },
-                label: '+10',
+              const SizedBox(width: 4),
+              // 片名
+              Expanded(
+                child: Text(
+                  widget.videoInfo.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    shadows: [
+                      Shadow(blurRadius: 4, color: Colors.black54),
+                    ],
+                  ),
+                ),
               ),
+              // 收藏
+              _iconBtn(
+                icon: _isFavorite ? Icons.favorite : Icons.favorite_border,
+                onTap: _toggleFavorite,
+              ),
+              // 设置
+              _iconBtn(
+                icon: Icons.settings_outlined,
+                onTap: _showSettingsSheet,
+              ),
+              // 集数胶囊徽章
+              if (totalEps > 0)
+                Container(
+                  margin: const EdgeInsets.only(left: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [
+                        kLunaEpisodeBadgeStart,
+                        kLunaEpisodeBadgeEnd,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    totalEps > 1 ? '$currentEp/$totalEps' : '第$currentEp集',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -1634,41 +1593,144 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 药丸状圆形快进/快退按钮(ArtPlayer 双侧悬浮)
-  Widget _circleSeekButton({required VoidCallback onTap, required String label}) {
-    return Center(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.18),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.35),
-                width: 1.2,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.25),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+  /// 中央双圆快进/快退按钮 (中线 ±40px/±60px, LunaTV Web 风格)
+  Widget _buildSideSeekButtons(BoxConstraints constraints) {
+    if (!_isControlsVisible) return const SizedBox.shrink();
+    final centerY = constraints.maxHeight / 2;
+    final offset = _isFullscreen ? 60.0 : 40.0;
+    final size = _isFullscreen ? 72.0 : 64.0;
+    return Stack(
+      children: [
+        // 左: 快退
+        Positioned(
+          left: (constraints.maxWidth / 2) - offset - size / 2,
+          top: centerY - size / 2,
+          child: _buildSeekCircleButton(
+            size: size,
+            onTap: () {
+              final newPos =
+                  _currentPosition - const Duration(seconds: 10);
+              _player.seek(
+                  newPos < Duration.zero ? Duration.zero : newPos);
+              _scheduleHideControls();
+            },
+            child: _buildSeekIcon(forward: false),
+          ),
+        ),
+        // 右: 快进
+        Positioned(
+          left: (constraints.maxWidth / 2) + offset - size / 2,
+          top: centerY - size / 2,
+          child: _buildSeekCircleButton(
+            size: size,
+            onTap: () {
+              final newPos =
+                  _currentPosition + const Duration(seconds: 10);
+              final max = _currentDuration;
+              _player.seek(newPos > max ? max : newPos);
+              _scheduleHideControls();
+            },
+            child: _buildSeekIcon(forward: true),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 圆形毛玻璃快进/快退按钮
+  Widget _buildSeekCircleButton({
+    required VoidCallback onTap,
+    required Widget child,
+    required double size,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: kLunaFloatBtnBg,
+            border: Border.all(
+              color: Colors.white.withOpacity(0.2),
+              width: 1,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ClipOval(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Center(child: child),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 圆弧箭头 + 数字 "10" 图标 (YouTube 风格快进/快退)
+  Widget _buildSeekIcon({required bool forward}) {
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Transform(
             alignment: Alignment.center,
-            child: Text(
-              label,
-              style: const TextStyle(
+            transform: forward
+                ? (Matrix4.identity())
+                : (Matrix4.rotationY(3.14159)),
+            child: CustomPaint(
+              size: const Size(32, 32),
+              painter: _ArcArrowPainter(
                 color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+                forward: true,
               ),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: const Text(
+              '10',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Arial',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 圆形小按钮 (40x40, LunaTV Web 控制按钮)
+  Widget _iconBtn({required IconData icon, required VoidCallback? onTap}) {
+    return Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(
+            icon,
+            color:
+                onTap == null ? Colors.white.withOpacity(0.3) : Colors.white,
+            size: 22,
           ),
         ),
       ),
@@ -1752,115 +1814,88 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 构建底部控制栏(ArtPlayer 药丸状悬浮: 顶部进度条 + 单个药丸栏)
-  Widget _buildPlayerBottomBar() {
+  /// 底部控制栏 (毛玻璃容器 + 5px进度条 + 按钮行, LunaTV Web 风格)
+  /// 横屏时底部栏改短 (maxWidth 限制)
+  Widget _buildLunaBottomBar() {
+    if (!_isControlsVisible) return const SizedBox.shrink();
     final dur = _currentDuration.inMilliseconds.toDouble();
     final pos = _scrubbingValue != null
         ? (_scrubbingValue! * dur).toInt()
         : _currentPosition.inMilliseconds;
-    final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
-    final isLandscape =
-        MediaQuery.of(context).orientation == Orientation.landscape;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // ===== 顶部进度条 (贴近屏幕上边缘) =====
-        SizedBox(
-          height: 26,
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              activeTrackColor: const Color(0xFF22C55E),
-              inactiveTrackColor: Colors.white30,
-              thumbColor: Colors.white,
-              overlayColor: const Color(0xFF22C55E).withOpacity(0.2),
-              thumbShape: const RoundSliderThumbShape(
-                enabledThumbRadius: 7,
-                elevation: 2,
-              ),
-              overlayShape:
-                  const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              value: progress,
-              onChangeStart: _onScrubStart,
-              onChanged: _onScrubChange,
-              onChangeEnd: _onScrubEnd,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        // ===== 药丸状悬浮控制栏 (ArtPlayer 风格) =====
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            isLandscape ? 8 : 12,
-          ),
+    // 横屏时底部栏改短: 只占屏幕宽度 60%
+    final screenWidth = MediaQuery.of(context).size.width;
+    final maxW = _isFullscreen ? screenWidth * 0.6 : double.infinity;
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 12,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxW),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(32),
+            borderRadius: BorderRadius.circular(8),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
               child: Container(
-                height: 52,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.55),
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.15),
-                    width: 0.6,
-                  ),
-                  borderRadius: BorderRadius.circular(32),
+                  color: Colors.black.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 5),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 左: 播放/暂停 (圆形药丸段)
-                    _pillIcon(
-                      icon: _isPlaying ? Icons.pause : Icons.play_arrow,
-                      iconSize: 28,
-                      onTap: _togglePlayPause,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                    ),
-                    // 时间
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4, right: 6),
-                      child: Text(
-                        '${_formatDuration(Duration(milliseconds: pos))} / ${_formatDuration(_currentDuration)}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
+                    // 顶部: 进度条 (5px 矩形, LunaTV Web 风格)
+                    _buildLunaProgressBar(),
+                    // 底部: 左中右按钮行
+                    SizedBox(
+                      height: 44,
+                      child: Row(
+                        children: [
+                          // 左: 播放/暂停
+                          _iconBtn(
+                            icon: _isPlaying
+                                ? Icons.pause
+                                : Icons.play_arrow,
+                            onTap: _togglePlayPause,
+                          ),
+                          // 时间
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 6),
+                            child: Text(
+                              '${_formatDuration(Duration(milliseconds: pos))} / ${_formatDuration(_currentDuration)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontFeatures: [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          // 右: 倍速
+                          _iconBtn(
+                            icon: Icons.speed,
+                            onTap: _showPlaybackRateSheet,
+                          ),
+                          // 选集
+                          _iconBtn(
+                            icon: Icons.format_list_bulleted,
+                            onTap: _showEpisodeSelectorSheet,
+                          ),
+                          // 全屏
+                          _iconBtn(
+                            icon: _isFullscreen
+                                ? Icons.fullscreen_exit
+                                : Icons.fullscreen,
+                            onTap: _isFullscreen
+                                ? _onExitFullscreen
+                                : _onEnterFullscreen,
+                          ),
+                        ],
                       ),
-                    ),
-                    const Spacer(),
-                    // 右: 倍速
-                    _pillIcon(
-                      icon: Icons.speed,
-                      label: _playbackRate == 1.0
-                          ? '1x'
-                          : '${_playbackRate}x',
-                      onTap: _showPlaybackRateSheet,
-                    ),
-                    // 选集
-                    _pillIcon(
-                      icon: Icons.format_list_bulleted,
-                      label:
-                          '${_currentEpisodeIndex + 1}/${_selectedSource?.episodes.length ?? 0}',
-                      onTap: _showEpisodeSelectorSheet,
-                    ),
-                    // 全屏
-                    _pillIcon(
-                      icon: isLandscape
-                          ? Icons.fullscreen_exit
-                          : Icons.fullscreen,
-                      iconSize: 24,
-                      onTap: isLandscape
-                          ? _onExitFullscreen
-                          : _onEnterFullscreen,
                     ),
                   ],
                 ),
@@ -1868,46 +1903,67 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 
-  /// 药丸栏内单个图标按钮(可选小标签)
-  Widget _pillIcon({
-    required IconData icon,
-    required VoidCallback onTap,
-    String? label,
-    double iconSize = 22,
-    EdgeInsetsGeometry padding =
-        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          padding: padding,
-          constraints: const BoxConstraints(minHeight: 40),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: Colors.white, size: iconSize),
-              if (label != null) ...[
-                const SizedBox(width: 3),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ],
+  /// 进度条 (5px 矩形, 绿进度, LunaTV Web 风格)
+  Widget _buildLunaProgressBar() {
+    final dur = _currentDuration.inMilliseconds.toDouble();
+    final pos = _scrubbingValue != null
+        ? (_scrubbingValue! * dur).toInt()
+        : _currentPosition.inMilliseconds;
+    final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+    return Container(
+      height: 5,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: Stack(
+        children: [
+          // 底色轨道
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(2.5),
+            ),
           ),
-        ),
+          // 进度条
+          FractionallySizedBox(
+            widthFactor: progress,
+            child: Container(
+              decoration: BoxDecoration(
+                color: kLunaTheme,
+                borderRadius: BorderRadius.circular(2.5),
+              ),
+            ),
+          ),
+          // 拖动手柄
+          if (dur > 0)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: -2,
+              bottom: -2,
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 5,
+                  activeTrackColor: Colors.transparent,
+                  inactiveTrackColor: Colors.transparent,
+                  thumbColor: Colors.white,
+                  overlayColor: kLunaTheme.withOpacity(0.2),
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 6),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 12),
+                ),
+                child: Slider(
+                  value: progress,
+                  onChangeStart: _onScrubStart,
+                  onChanged: _onScrubChange,
+                  onChangeEnd: _onScrubEnd,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1978,147 +2034,72 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 中间大播放/暂停按钮(点击视频空白区触发)
-  Widget _buildCenterPlayButton() {
-    if (_isPlaying) {
-      // 播放中不显示中间按钮(避免遮挡)
-      return const SizedBox.shrink();
-    }
-    return Center(
-      child: Material(
-        color: Colors.black.withOpacity(0.35),
-        shape: const CircleBorder(),
-        child: InkWell(
-          onTap: _togglePlayPause,
-          customBorder: const CircleBorder(),
-          child: Container(
-            width: 88,
-            height: 88,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withOpacity(0.7),
-                width: 2,
-              ),
-            ),
-            child: const Icon(
-              Icons.play_arrow,
-              color: Colors.white,
-              size: 56,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
+  /// 主播放视图 (LunaTV Web 风格控件 + 12ce29d 视频渲染结构)
   Widget _buildPlayingView(bool isDark) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // 视频 - 铺满整个 body
-        Positioned.fill(
-          child: Container(
-            color: Colors.black,
-            child: Center(
-              child: AspectRatio(
-                aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
-                    ? _videoWidth / _videoHeight
-                    : 16 / 9,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Video(
-                      controller: _controller,
-                      controls: NoVideoControls,
-                      onEnterFullscreen: _onEnterFullscreen,
-                      onExitFullscreen: _onExitFullscreen,
-                    ),
-                    if (_isBuffering)
-                      const SizedBox(
-                        width: 40,
-                        height: 40,
-                        child: CircularProgressIndicator(
-                            color: Color(0xFF22C55E), strokeWidth: 3),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          onTap: _toggleControls,
+          onDoubleTap: _togglePlayPause,
+          child: Stack(
+            children: [
+              // 视频 (12ce29d 结构: Container+AspectRatio+Stack+Video(NoVideoControls), 已知能正常播放)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black,
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
+                          ? _videoWidth / _videoHeight
+                          : 16 / 9,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Video(
+                            controller: _controller,
+                            controls: NoVideoControls,
+                            onEnterFullscreen: _onEnterFullscreen,
+                            onExitFullscreen: _onExitFullscreen,
+                          ),
+                          if (_isBuffering)
+                            const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: CircularProgressIndicator(
+                                  color: kLunaLoadingColor,
+                                  strokeWidth: 3),
+                            ),
+                        ],
                       ),
-                  ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+              // 中央双圆快进/快退 (LunaTV Web 风格)
+              _buildSideSeekButtons(constraints),
+              // 顶部栏 (80px 渐变 + 集数胶囊)
+              _buildLunaTopBar(),
+              // 底部毛玻璃控制栏 (横屏改短)
+              _buildLunaBottomBar(),
+              // 跳过片头按钮(右下角浮层)
+              if (_showSkipIntro && _isControlsVisible)
+                Positioned(
+                  right: 16,
+                  bottom: 100,
+                  child: _skipButton('跳过片头', kLunaTheme, _skipIntro),
+                ),
+              // 跳过片尾按钮(右下角浮层)
+              if (_showSkipOutro && _isControlsVisible)
+                Positioned(
+                  right: 16,
+                  bottom: 100,
+                  child: _skipButton(
+                      '跳过片尾', const Color(0xFF3B82F6), _skipOutro),
+                ),
+            ],
           ),
-        ),
-        // 点击空白区切换控制栏显隐
-        Positioned.fill(
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: _toggleControls,
-          ),
-        ),
-        // 动画层: 控制栏 / 中间按钮 / 跳过提示
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: _isControlsVisible
-              ? Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // 半透明遮罩(让控制文字更清晰)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: Container(color: Colors.black.withOpacity(0.15)),
-                      ),
-                    ),
-                    // 顶部工具栏
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: _buildPlayerTopBar(),
-                    ),
-                    // 左右双圆 药丸悬浮 (快退/快进10s)
-                    _buildSideButtons(),
-                    // 底部控制栏
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: _buildPlayerBottomBar(),
-                    ),
-                    // 跳过片头按钮(右下角浮层)
-                    if (_showSkipIntro)
-                      Positioned(
-                        right: 16,
-                        bottom: 130,
-                        child: _skipButton(
-                          '跳过片头',
-                          const Color(0xFF22C55E),
-                          _skipIntro,
-                        ),
-                      ),
-                    // 跳过片尾按钮(右下角浮层)
-                    if (_showSkipOutro)
-                      Positioned(
-                        right: 16,
-                        bottom: 130,
-                        child: _skipButton(
-                          '跳过片尾',
-                          const Color(0xFF3B82F6),
-                          _skipOutro,
-                        ),
-                      ),
-                  ],
-                )
-              : const SizedBox.shrink(),
-        ),
-        // 暂停时的中央播放按钮
-        if (!_isPlaying && _isControlsVisible)
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: true,
-              child: _buildCenterPlayButton(),
-            ),
-          ),
-      ],
+        );
+      },
     );
   }
 
@@ -2161,6 +2142,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
   }
+}
+
+/// 圆弧箭头绘制器 (YouTube 风格快进图标)
+class _ArcArrowPainter extends CustomPainter {
+  _ArcArrowPainter({required this.color, required this.forward});
+  final Color color;
+  final bool forward;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final r = size.width * 0.42;
+
+    // 圆弧 (3/4 圆)
+    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
+    canvas.drawArc(rect, -0.4, 5.0, false, paint..style = PaintingStyle.stroke);
+
+    // 三角形箭头 (尾部)
+    final tailPath = Path();
+    if (forward) {
+      tailPath.moveTo(cx - r * 0.95, cy - r * 0.05);
+      tailPath.lineTo(cx - r * 0.65, cy - r * 0.4);
+      tailPath.lineTo(cx - r * 0.5, cy + r * 0.05);
+      tailPath.close();
+    } else {
+      tailPath.moveTo(cx + r * 0.95, cy - r * 0.05);
+      tailPath.lineTo(cx + r * 0.65, cy - r * 0.4);
+      tailPath.lineTo(cx + r * 0.5, cy + r * 0.05);
+      tailPath.close();
+    }
+    canvas.drawPath(tailPath, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArcArrowPainter old) =>
+      old.color != color || old.forward != forward;
 }
 
 enum PingState { idle, testing, fast, medium, slow, unavailable }
