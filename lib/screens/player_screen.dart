@@ -836,7 +836,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       // 测速也走代理（若启用），保证测速路径与实际播放路径一致
       final proxiedUrl = await UserDataService.buildProxiedUrl(url);
-      // GET Range 下载前 100KB 测速, 比 HEAD 更接近真实播放体验
+      // GET Range 下载前 100KB 测速, 用整段请求耗时算下载速度
       final req = http.Request('GET', Uri.parse(proxiedUrl))
         ..followRedirects = true
         ..maxRedirects = 2
@@ -844,21 +844,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final response =
           await httpClient.send(req).timeout(const Duration(milliseconds: 3000));
       // 读前 100KB 后立即停止 (拿到首字节时间, 不等响应体流)
-      final start2 = DateTime.now();
       int bytesRead = 0;
       await for (final chunk in response.stream) {
         bytesRead += chunk.length;
         if (bytesRead >= 102400) break;
       }
-      final ms = DateTime.now().difference(start).inMilliseconds;
-      _pingCache[url] = ms;
-      // 计算下载速度 (KB/s)
-      final speedKBps = (bytesRead / 1024.0) / ((DateTime.now().difference(start2).inMilliseconds) / 1000.0);
+      // 用整段请求 (建连+拉数据) 的总耗时算速度, 防止 await for 内耗时为 0 导致除零
+      final totalMs = DateTime.now().difference(start).inMilliseconds;
+      _pingCache[url] = totalMs;
+      final speedKBps = totalMs > 0
+          ? (bytesRead / 1024.0) / (totalMs / 1000.0)
+          : 0.0;
       _speedCache[url] = speedKBps;
       httpClient.close();
-      return ms;
+      return totalMs;
     } catch (_) {
-      // 超时或失败统一记为 3000ms
+      // 超时或失败统一记为 3000ms / 0 KB/s
       _pingCache[url] = 3000;
       _speedCache[url] = 0;
       httpClient.close();
