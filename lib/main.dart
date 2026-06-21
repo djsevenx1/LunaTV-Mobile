@@ -20,6 +20,7 @@ import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/local_mode_storage_service.dart';
+import 'package:luna_tv/services/preferred_ip.dart';
 import 'package:luna_tv/services/subscription_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
@@ -41,6 +42,26 @@ void main() async {
   final themeService = await ThemeService.create();
 
   runApp(LunaTVApp(themeService: themeService));
+
+  // 异步启动 CF 优选 IP 测速 (不阻塞UI, 后台跑)
+  // 仅当 CF Worker 代理加速开关开 + 配置了 URL + 没测过或>24h 才跑
+  _tryBackgroundPreferredIpTest();
+}
+
+void _tryBackgroundPreferredIpTest() {
+  UserDataService.getCfWorkerEnabled().then((enabled) async {
+    if (!enabled) return;
+    final workerUrl = await UserDataService.getCfWorkerUrl();
+    if (workerUrl.isEmpty) return;
+    final domain = Uri.tryParse(workerUrl)?.host;
+    if (domain == null || domain.isEmpty) return;
+    if (!await PreferredIp.shouldRetest()) return;
+    // 后台跑, 不 await
+    PreferredIp.testAndCache(
+      workerDomain: domain,
+      topN: 5,
+    ).catchError((_) => <MapEntry<String, int>>[]);
+  });
 }
 
 class LunaTVApp extends StatelessWidget {

@@ -37,6 +37,19 @@ jobs:
         with:
           flutter-version: '3.22.2'
 
+      # 从 git tag 自动同步版本号到 pubspec.yaml
+      # tag 格式: v1.0.7 -> 1.0.7+1 (默认 build 号为 1, 用 GITHUB_RUN_NUMBER 更稳)
+      - name: Sync version from git tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            BUILD="${GITHUB_RUN_NUMBER:-1}"
+            sed -i "s/^version: .*/version: ${VERSION}+${BUILD}/" pubspec.yaml
+            echo "pubspec.yaml version: $(grep '^version:' pubspec.yaml)"
+          else
+            echo "Not a tag push, keeping current pubspec version: $(grep '^version:' pubspec.yaml)"
+          fi
+
       - run: flutter pub get
 
       # release 签名: keystore 已提交在 android/app/release.keystore

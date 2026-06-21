@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:luna_tv/services/preferred_ip.dart';
+
 class UserDataService {
   static const String _serverUrlKey = 'server_url';
   static const String _usernameKey = 'username';
@@ -243,16 +245,48 @@ class UserDataService {
   // - 普通 URL:  {CF_Worker_URL}/{URL编码后的目标URL}  (走 /?url= 通用代理)
   // - m3u8 URL: {CF_Worker_URL}/m3u8?url={URL编码后的目标URL}  (走专用 m3u8 端点,
   //             Worker 会解析 m3u8 并把所有 .ts 分片也重写为走 Worker, 实现端到端加速)
+  // 优选 IP 加速: 如果有缓存的最优 IP, 域名替换为 IP 直连, 强制 SNI = 原域名
+  //              (SNI 由调用方在底层 socket / media_kit 上强制)
   static Future<String> buildProxiedUrl(String targetUrl) async {
     final enabled = await getCfWorkerEnabled();
     final workerUrl = await getCfWorkerUrl();
     if (!enabled || workerUrl.isEmpty) return targetUrl;
+
+    final isM3u8 = _isM3u8Url(targetUrl);
+    final endpoint = isM3u8 ? '/m3u8?url=' : '/?url=';
+
+    // 如果有优选 IP 缓存, 用 IP 替换域名
+    // 配套强制 SNI 由调用方处理 (Dart http 包用 badCertificate 放行, libmpv 用 demuxer-lavf-o)
+    if (await _isPreferredIpAvailable(workerUrl)) {
+      final bestIp = await PreferredIp.getBestIp();
+      if (bestIp != null) {
+        return 'https://$bestIp$endpoint${Uri.encodeComponent(targetUrl)}';
+      }
+    }
+
     final clean = workerUrl.endsWith('/')
         ? workerUrl.substring(0, workerUrl.length - 1)
         : workerUrl;
-    final isM3u8 = _isM3u8Url(targetUrl);
-    final endpoint = isM3u8 ? '/m3u8?url=' : '/?url=';
     return '$clean$endpoint${Uri.encodeComponent(targetUrl)}';
+  }
+
+  // 判断优选 IP 缓存是否可用 (开关开 + 域名匹配)
+  static Future<bool> _isPreferredIpAvailable(String workerUrl) async {
+    final bestIp = await PreferredIp.getBestIp();
+    if (bestIp == null) return false;
+    final cachedDomain = await PreferredIp.getTestDomain();
+    if (cachedDomain == null) return false;
+    final currentDomain = Uri.tryParse(workerUrl)?.host;
+    return currentDomain == cachedDomain;
+  }
+
+  // 给 libmpv / Dart http 用的: 获取当前应使用的 worker 域名 (用于强制 SNI)
+  static Future<String?> getEffectiveWorkerDomain() async {
+    final enabled = await getCfWorkerEnabled();
+    if (!enabled) return null;
+    final workerUrl = await getCfWorkerUrl();
+    if (workerUrl.isEmpty) return null;
+    return Uri.tryParse(workerUrl)?.host;
   }
 
   // 判断 URL 是否为 m3u8 播放列表 (兼容 ?type=m3u8 或 .m3u8 后缀)

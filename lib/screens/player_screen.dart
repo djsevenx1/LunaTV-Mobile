@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -832,7 +834,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<int> _pingSource(String url) async {
     final start = DateTime.now();
-    final httpClient = http.Client();
+    // 用自定义 HttpClient, 允许 SNI 失败 (优选 IP 加速模式下 host 是 IP, SNI 自动派生为 IP)
+    final sniDomain = await UserDataService.getEffectiveWorkerDomain();
+    final httpClient = HttpClient();
+    if (sniDomain != null) {
+      httpClient.badCertificateCallback = (cert, host, port) => true;
+    }
+    final client = http.IOClient(httpClient);
     try {
       // 测速也走代理（若启用），保证测速路径与实际播放路径一致
       final proxiedUrl = await UserDataService.buildProxiedUrl(url);
@@ -841,8 +849,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ..followRedirects = true
         ..maxRedirects = 2
         ..headers['Range'] = 'bytes=0-102399';
+      if (sniDomain != null) {
+        // 显式设置 Host header, 帮 CF 路由
+        req.headers['Host'] = sniDomain;
+      }
       final response =
-          await httpClient.send(req).timeout(const Duration(milliseconds: 3000));
+          await client.send(req).timeout(const Duration(milliseconds: 3000));
       // 读前 100KB 后立即停止 (拿到首字节时间, 不等响应体流)
       int bytesRead = 0;
       await for (final chunk in response.stream) {
@@ -893,6 +905,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       String playUrl;
       if (cfProxied != url) {
         playUrl = cfProxied;
+        // 如果用了 IP 直连 (优选 IP 加速), 强制 libmpv 的 SNI = worker 域名
+        // 这样 CF Anycast IP 能正确识别该请求属于哪个 worker
+        final sniDomain = await UserDataService.getEffectiveWorkerDomain();
+        if (sniDomain != null && Uri.parse(playUrl).host != sniDomain) {
+          try {
+            // 通过 demuxer-lavf-o 把 tls_sni_hostname 传给 FFmpeg
+            await _player.setProperty(
+              'demuxer-lavf-o',
+              'tls_sni_hostname=$sniDomain',
+            );
+            // 同时设 Host header (mpv option)
+            await _player.setProperty('http-header-fields', 'Host: $sniDomain');
+          } catch (_) {
+            // 旧版 mpv 可能不支持, 忽略
+          }
+        }
       } else {
         final m3u8Proxy = await UserDataService.getM3u8ProxyUrl();
         if (m3u8Proxy.isNotEmpty) {
