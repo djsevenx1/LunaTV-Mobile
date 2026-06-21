@@ -108,8 +108,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // LunaTV Web 主题色
   static const Color kLunaTheme = Color(0xFF22C55E);
-  static const Color kLunaEpisodeBadgeStart = Color(0xFF10B981);
-  static const Color kLunaEpisodeBadgeEnd = Color(0xFF059669);
   static const Color kLunaLoadingColor = Color(0xFF009688);
   static const Color kLunaFloatBtnBg = Color(0x26FFFFFF);
 
