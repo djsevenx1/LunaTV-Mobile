@@ -442,11 +442,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Scaffold(
             backgroundColor:
                 isDark ? const Color(0xFF0F1117) : const Color(0xFFF5F7F5),
-            body: SafeArea(
-              child: _phase == 'playing'
-                  ? _buildPlayingView(isDark)
-                  : _buildDetailView(isDark),
-            ),
+            body: _phase == 'playing'
+                // 播放视图不套 SafeArea，让视频铺满整屏
+                // 避免横屏时被 iOS 状态栏/HomeIndicator 推挤产生侧边黑/白条
+                ? _buildPlayingView(isDark)
+                : SafeArea(child: _buildDetailView(isDark)),
           ),
         );
       },
@@ -1067,8 +1067,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _buildPlayingView(bool isDark) {
     return Stack(
+      fit: StackFit.expand,
       children: [
-        // 视频
+        // 视频 - 铺满整个 body（不套 SafeArea，避开横屏侧边安全区造成的黑/白条）
         Positioned.fill(
           child: Container(
             color: Colors.black,
@@ -1098,77 +1099,89 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
-        // 顶部工具栏
+        // 顶部工具栏 - 套 SafeArea 避免与状态栏/时间重叠
         Positioned(
-          top: 8,
-          left: 8,
-          right: 8,
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () {
-                  _onExitFullscreen();
-                  setState(() {
-                    _phase = 'detail';
-                  });
-                },
-              ),
-              Expanded(
-                child: Text(
-                  widget.videoInfo.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    shadows: [
-                      Shadow(blurRadius: 4, color: Colors.black54),
-                    ],
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () {
+                      _onExitFullscreen();
+                      setState(() {
+                        _phase = 'detail';
+                      });
+                    },
                   ),
-                ),
+                  Expanded(
+                    child: Text(
+                      widget.videoInfo.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        shadows: [
+                          Shadow(blurRadius: 4, color: Colors.black54),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
-        // 底部控制条
+        // 底部控制条 - 套 SafeArea 避免与 HomeIndicator 重叠
         Positioned(
-          left: 12,
-          right: 12,
-          bottom: 16,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.55),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.skip_previous,
-                      color: Colors.white),
-                  onPressed: _currentEpisodeIndex > 0
-                      ? () => _playEpisode(_currentEpisodeIndex - 1)
-                      : null,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(20),
                 ),
-                Text(
-                  '第${_currentEpisodeIndex + 1}集 / '
-                  '${_selectedSource?.episodes.length ?? 0}集',
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.skip_previous,
+                          color: Colors.white),
+                      onPressed: _currentEpisodeIndex > 0
+                          ? () => _playEpisode(_currentEpisodeIndex - 1)
+                          : null,
+                    ),
+                    Text(
+                      '第${_currentEpisodeIndex + 1}集 / '
+                      '${_selectedSource?.episodes.length ?? 0}集',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.skip_next, color: Colors.white),
+                      onPressed: () {
+                        final src = _selectedSource;
+                        if (src != null &&
+                            _currentEpisodeIndex < src.episodes.length - 1) {
+                          _playEpisode(_currentEpisodeIndex + 1);
+                        }
+                      },
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.skip_next, color: Colors.white),
-                  onPressed: () {
-                    final src = _selectedSource;
-                    if (src != null &&
-                        _currentEpisodeIndex < src.episodes.length - 1) {
-                      _playEpisode(_currentEpisodeIndex + 1);
-                    }
-                  },
-                ),
-              ],
+              ),
             ),
           ),
         ),
