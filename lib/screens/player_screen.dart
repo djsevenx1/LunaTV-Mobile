@@ -12,6 +12,7 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -796,7 +797,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final start = DateTime.now();
     final httpClient = http.Client();
     try {
-      final req = http.Request('HEAD', Uri.parse(url))
+      // 测速也走代理（若启用），保证测速路径与实际播放路径一致
+      final proxiedUrl = await UserDataService.buildProxiedUrl(url);
+      final req = http.Request('HEAD', Uri.parse(proxiedUrl))
         ..followRedirects = true
         ..maxRedirects = 2;
       final response =
@@ -836,7 +839,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       await _player.stop();
-      await _player.open(Media(url));
+      // 优先使用 CF Worker 代理；如未启用但配置了 M3U8 代理 URL，则走 m3u8 代理
+      final cfProxied = await UserDataService.buildProxiedUrl(url);
+      String playUrl;
+      if (cfProxied != url) {
+        playUrl = cfProxied;
+      } else {
+        final m3u8Proxy = await UserDataService.getM3u8ProxyUrl();
+        if (m3u8Proxy.isNotEmpty) {
+          final clean = m3u8Proxy.endsWith('/')
+              ? m3u8Proxy.substring(0, m3u8Proxy.length - 1)
+              : m3u8Proxy;
+          playUrl = '$clean/${Uri.encodeComponent(url)}';
+        } else {
+          playUrl = url;
+        }
+      }
+      await _player.open(Media(playUrl));
       if (!mounted) return;
       setState(() => _isBuffering = false);
       // 启动定时器,并立即保存一条(标记已开始)

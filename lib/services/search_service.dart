@@ -159,7 +159,8 @@ class SearchService {
       }
 
       // 构建详情请求 URL
-      final detailUrl = '${apiSite.api}?ac=videolist&ids=$id';
+      final rawDetailUrl = '${apiSite.api}?ac=videolist&ids=$id';
+      final detailUrl = await UserDataService.buildProxiedUrl(rawDetailUrl);
 
       // 发起请求，设置 10 秒超时
       final response = await http.get(
@@ -259,7 +260,8 @@ class SearchService {
   /// 处理特殊源的详情（通过 HTML 页面解析）
   static Future<SearchResult> _handleSpecialSourceDetail(
       String id, dynamic apiSite) async {
-    final detailUrl = '${apiSite.detail}/index.php/vod/detail/id/$id.html';
+    final rawUrl = '${apiSite.detail}/index.php/vod/detail/id/$id.html';
+    final detailUrl = await UserDataService.buildProxiedUrl(rawUrl);
 
     // 发起请求，设置 10 秒超时
     final response = await http.get(

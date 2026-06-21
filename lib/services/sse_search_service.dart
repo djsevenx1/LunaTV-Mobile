@@ -218,9 +218,12 @@ class SSESearchService {
         },
       );
 
+      // 支持 CF Worker 代理加速
+      final proxiedUrl = await UserDataService.buildProxiedUrl(sseUri.toString());
+
       // 创建 HTTP 客户端并开始 SSE 连接
       _client = http.Client();
-      final request = http.Request('GET', sseUri);
+      final request = http.Request('GET', Uri.parse(proxiedUrl));
       request.headers.addAll({
         'Accept': 'text/event-stream',
         'Cache-Control': 'no-cache',

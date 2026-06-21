@@ -47,6 +47,17 @@ class ApiResponse<T> {
 class ApiService {
   static const Duration _timeout = Duration(seconds: 30);
 
+  /// 如果启用了 CF Worker 代理，则返回代理后的 URL，否则返回原 URL
+  static Future<String> _maybeProxy(String url) async {
+    final enabled = await UserDataService.getCfWorkerEnabled();
+    final workerUrl = await UserDataService.getCfWorkerUrl();
+    if (!enabled || workerUrl.isEmpty) return url;
+    final clean = workerUrl.endsWith('/')
+        ? workerUrl.substring(0, workerUrl.length - 1)
+        : workerUrl;
+    return '$clean/${Uri.encodeComponent(url)}';
+  }
+
   /// 获取基础URL
   static Future<String?> _getBaseUrl() async {
     return await UserDataService.getServerUrl();
@@ -198,6 +209,9 @@ class ApiService {
         url = newUri.toString();
       }
 
+      // CF Worker 代理转发
+      url = await _maybeProxy(url);
+
       final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
       final response = await http
@@ -222,7 +236,8 @@ class ApiService {
     BuildContext? context,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
+      final rawUrl = await _buildUrl(endpoint);
+      final url = await _maybeProxy(rawUrl);
       final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
       final response = await http
@@ -248,7 +263,8 @@ class ApiService {
     BuildContext? context,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
+      final rawUrl = await _buildUrl(endpoint);
+      final url = await _maybeProxy(rawUrl);
       final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
       final response = await http
@@ -273,7 +289,8 @@ class ApiService {
     BuildContext? context,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
+      final rawUrl = await _buildUrl(endpoint);
+      final url = await _maybeProxy(rawUrl);
       final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
       final response = await http
@@ -299,7 +316,8 @@ class ApiService {
     BuildContext? context,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
+      final rawUrl = await _buildUrl(endpoint);
+      final url = await _maybeProxy(rawUrl);
       final requestHeaders = await _buildHeaders(
         additionalHeaders: headers,
         includeAuth: true,
@@ -342,8 +360,11 @@ class ApiService {
         return ApiResponse.error('用户未登录');
       }
 
+      final rawFavUrl = '$baseUrl/api/favorites';
+      final favUrl = await _maybeProxy(rawFavUrl);
+
       final response = await http.get(
-        Uri.parse('$baseUrl/api/favorites'),
+        Uri.parse(favUrl),
         headers: {
           'Accept': 'application/json',
           'Cookie': cookies,
@@ -554,8 +575,11 @@ class ApiService {
       final baseUrl = await _getBaseUrl();
       if (baseUrl == null) return false;
 
+      final rawHealthUrl = '$baseUrl/api/health';
+      final healthUrl = await _maybeProxy(rawHealthUrl);
+
       final response = await http.get(
-        Uri.parse('$baseUrl/api/health'),
+        Uri.parse(healthUrl),
         headers: {'Accept': 'application/json'},
       ).timeout(const Duration(seconds: 5));
 
@@ -582,7 +606,8 @@ class ApiService {
       if (baseUrl.endsWith('/')) {
         baseUrl = baseUrl.substring(0, baseUrl.length - 1);
       }
-      String loginUrl = '$baseUrl/api/login';
+      final rawLoginUrl = '$baseUrl/api/login';
+      final loginUrl = await _maybeProxy(rawLoginUrl);
 
       // 发送登录请求
       final response = await http

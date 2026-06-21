@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:luna_tv/models/bangumi.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 
 /// Bangumi 数据服务（函数级缓存，一天过期）
 class BangumiService {
@@ -147,14 +148,15 @@ class BangumiService {
     }
 
     try {
-      final apiUrl = 'https://api.bgm.tv/v0/subjects/$bangumiId';
+      final rawUrl = 'https://api.bgm.tv/v0/subjects/$bangumiId';
+      final proxiedUrl = await UserDataService.buildProxiedUrl(rawUrl);
       final headers = {
         'User-Agent': 'senshinya/LunaTV/1.0.0 (Android) (http://github.com/senshinya/LunaTV)',
         'Accept': 'application/json',
       };
 
       final response = await http.get(
-        Uri.parse(apiUrl),
+        Uri.parse(proxiedUrl),
         headers: headers,
       ).timeout(const Duration(seconds: 30));
 

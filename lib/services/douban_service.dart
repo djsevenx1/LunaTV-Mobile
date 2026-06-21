@@ -175,21 +175,24 @@ class DoubanService {
     if (dataSourceKey == 'cors_proxy') {
       apiUrl = 'https://ciao-cors.is-an.org/${Uri.encodeComponent(apiUrl)}';
     }
-    
+
+    // CF Worker 代理加速（若启用），叠加在原数据源的 URL 之上
+    final cfProxied = await UserDataService.buildProxiedUrl(apiUrl);
+
     try {
       final headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         'Referer': 'https://movie.douban.com/',
         'Accept': 'application/json, text/plain, */*',
       };
-      
+
       // 如果使用 cors_proxy，添加 Origin 头
       if (dataSourceKey == 'cors_proxy') {
         headers['Origin'] = _getUniqueOrigin();
       }
-      
+
       final response = await http.get(
-        Uri.parse(apiUrl),
+        Uri.parse(cfProxied),
         headers: headers,
       ).timeout(const Duration(seconds: 30));
 
@@ -400,20 +403,23 @@ class DoubanService {
       target = 'https://ciao-cors.is-an.org/${Uri.encodeComponent(target)}';
     }
 
+    // CF Worker 代理加速（若启用），叠加在原数据源的 URL 之上
+    final cfProxied = await UserDataService.buildProxiedUrl(target);
+
     try {
       final headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         'Referer': 'https://movie.douban.com/',
         'Accept': 'application/json, text/plain, */*',
       };
-      
+
       // 如果使用 cors_proxy，添加 Origin 头
       if (dataSourceKey == 'cors_proxy') {
         headers['Origin'] = _getUniqueOrigin();
       }
-      
+
       final response = await http.get(
-        Uri.parse(target),
+        Uri.parse(cfProxied),
         headers: headers,
       ).timeout(const Duration(seconds: 30));
 
@@ -549,25 +555,28 @@ class DoubanService {
         apiUrl = 'https://m.douban.com/rexxar/api/v2/subject/$doubanId';
         break;
     }
-    
+
     if (dataSourceKey == 'cors_proxy') {
       apiUrl = 'https://ciao-cors.is-an.org/${Uri.encodeComponent(apiUrl)}';
     }
-    
+
+    // CF Worker 代理加速（若启用），叠加在原数据源的 URL 之上
+    final cfProxied = await UserDataService.buildProxiedUrl(apiUrl);
+
     try {
       final headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         'Referer': 'https://movie.douban.com/',
         'Accept': 'application/json, text/plain, */*',
       };
-      
+
       // 如果使用 cors_proxy，添加 Origin 头
       if (dataSourceKey == 'cors_proxy') {
         headers['Origin'] = _getUniqueOrigin();
       }
-      
+
       final response = await http.get(
-        Uri.parse(apiUrl),
+        Uri.parse(cfProxied),
         headers: headers,
       ).timeout(const Duration(seconds: 30));
 

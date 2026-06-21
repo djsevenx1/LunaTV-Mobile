@@ -6,6 +6,7 @@ import 'package:luna_tv/models/search_resource.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
 import 'package:luna_tv/services/local_search_cache_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 
 /// 分页搜索结果
 class SearchPageResult {
@@ -133,8 +134,10 @@ class DownstreamService {
     }
 
     try {
+      final proxiedUrl = await UserDataService.buildProxiedUrl(url);
+
       final response = await http.get(
-        Uri.parse(url),
+        Uri.parse(proxiedUrl),
         headers: {
           'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',

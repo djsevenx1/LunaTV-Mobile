@@ -34,6 +34,8 @@ class _UserMenuState extends State<UserMenu> {
   String _doubanDataSource = '直连';
   String _doubanImageSource = '直连';
   String _m3u8ProxyUrl = '';
+  String _cfWorkerUrl = '';
+  bool _cfWorkerEnabled = false;
   String _version = '';
   bool _preferSpeedTest = true;
   bool _localSearch = false;
@@ -64,6 +66,8 @@ class _UserMenuState extends State<UserMenu> {
     final doubanImageSource =
         await UserDataService.getDoubanImageSourceDisplayName();
     final m3u8ProxyUrl = await UserDataService.getM3u8ProxyUrl();
+    final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
+    final cfWorkerUrl = await UserDataService.getCfWorkerUrl();
     final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
 
@@ -75,6 +79,8 @@ class _UserMenuState extends State<UserMenu> {
         _doubanDataSource = doubanDataSource;
         _doubanImageSource = doubanImageSource;
         _m3u8ProxyUrl = m3u8ProxyUrl;
+        _cfWorkerEnabled = cfWorkerEnabled;
+        _cfWorkerUrl = cfWorkerUrl;
         _preferSpeedTest = preferSpeedTest;
         _localSearch = localSearch;
       });
@@ -503,6 +509,108 @@ class _UserMenuState extends State<UserMenu> {
     ).whenComplete(controller.dispose);
   }
 
+  void _showCfWorkerUrlDialog() {
+    final controller = TextEditingController(text: _cfWorkerUrl);
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor:
+              widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
+          title: Text(
+            'CF Worker 代理 URL',
+            style: FontUtils.poppins(context,
+                            fontSize: 18,
+              color: widget.isDarkMode
+                  ? const Color(0xFFffffff)
+                  : const Color(0xFF1f2937),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: TextField(
+            controller: controller,
+            style: FontUtils.poppins(context,
+                            fontSize: 14,
+              color: widget.isDarkMode
+                  ? const Color(0xFFffffff)
+                  : const Color(0xFF1f2937),
+            ),
+            decoration: InputDecoration(
+              hintText: '例如 https://your-worker.your-subdomain.workers.dev',
+              hintStyle: FontUtils.poppins(context,
+                                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: widget.isDarkMode
+                      ? const Color(0xFF374151)
+                      : const Color(0xFFe5e7eb),
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: widget.isDarkMode
+                      ? const Color(0xFF374151)
+                      : const Color(0xFFe5e7eb),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(
+                  color: Color(0xFF10b981),
+                  width: 2,
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                '取消',
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF9ca3af)
+                      : const Color(0xFF6b7280),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                final url = controller.text.trim();
+                await UserDataService.saveCfWorkerUrl(url);
+                if (!mounted) return;
+                setState(() {
+                  _cfWorkerUrl = url;
+                });
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: Text(
+                '保存',
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
+                  color: const Color(0xFF10b981),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    ).whenComplete(controller.dispose);
+  }
+
   Widget _buildInputOption({
     required String title,
     required String currentValue,
@@ -793,6 +901,33 @@ class _UserMenuState extends State<UserMenu> {
                       title: 'M3U8 代理 URL',
                       currentValue: _m3u8ProxyUrl,
                       onTap: _showM3u8ProxyUrlDialog,
+                      icon: LucideIcons.link,
+                    ),
+                    // 分割线
+                    Container(
+                      height: 1,
+                      color: widget.isDarkMode
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                    // CF Worker 代理加速开关
+                    _buildToggleOption(
+                      title: 'CF Worker 代理加速',
+                      value: _cfWorkerEnabled,
+                      onChanged: (value) async {
+                        await UserDataService.saveCfWorkerEnabled(value);
+                        if (!mounted) return;
+                        setState(() {
+                          _cfWorkerEnabled = value;
+                        });
+                      },
+                      icon: LucideIcons.zap,
+                    ),
+                    // CF Worker 代理 URL 输入
+                    _buildInputOption(
+                      title: 'CF Worker 代理 URL',
+                      currentValue: _cfWorkerUrl,
+                      onTap: _showCfWorkerUrlDialog,
                       icon: LucideIcons.link,
                     ),
                     // 分割线

@@ -15,12 +15,12 @@ class NetdiskService {
         return [];
       }
 
-      final uri = Uri.parse('$baseUrl/api/netdisk/search').replace(
-        queryParameters: {'q': query},
-      );
+      final rawUrl = Uri.parse('$baseUrl/api/netdisk/search')
+          .replace(queryParameters: {'q': query}).toString();
+      final proxiedUrl = await UserDataService.buildProxiedUrl(rawUrl);
 
       final response = await http.get(
-        uri,
+        Uri.parse(proxiedUrl),
         headers: {
           if (cookies != null && cookies.isNotEmpty) 'Cookie': cookies,
           'Accept': 'application/json',

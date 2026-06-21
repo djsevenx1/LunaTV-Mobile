@@ -119,9 +119,10 @@ class LiveService {
       final userAgent =
           liveSource.ua.isEmpty ? 'AptvPlayer/1.4.10' : liveSource.ua;
 
-      // 请求 M3U 内容
+      // 请求 M3U 内容，支持 CF Worker 代理加速
+      final proxiedUrl = await UserDataService.buildProxiedUrl(liveSource.url);
       final response = await http.get(
-        Uri.parse(liveSource.url),
+        Uri.parse(proxiedUrl),
         headers: {'User-Agent': userAgent},
       );
 

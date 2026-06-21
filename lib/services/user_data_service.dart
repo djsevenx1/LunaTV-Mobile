@@ -8,6 +8,8 @@ class UserDataService {
   static const String _doubanDataSourceKey = 'douban_data_source';
   static const String _doubanImageSourceKey = 'douban_image_source';
   static const String _m3u8ProxyUrlKey = 'm3u8_proxy_url';
+  static const String _cfWorkerEnabledKey = 'cf_worker_enabled';
+  static const String _cfWorkerUrlKey = 'cf_worker_url';
   static const String _preferSpeedTestKey = 'prefer_speed_test';
   static const String _localSearchKey = 'local_search';
   static const String _isLocalModeKey = 'is_local_mode';
@@ -212,6 +214,42 @@ class UserDataService {
   static Future<String> getM3u8ProxyUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_m3u8ProxyUrlKey) ?? '';
+  }
+
+  // 保存 CF Worker 代理开关
+  static Future<void> saveCfWorkerEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_cfWorkerEnabledKey, enabled);
+  }
+
+  // 获取 CF Worker 代理开关（默认为 false）
+  static Future<bool> getCfWorkerEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_cfWorkerEnabledKey) ?? false;
+  }
+
+  // 保存 CF Worker 代理 URL
+  static Future<void> saveCfWorkerUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cfWorkerUrlKey, url);
+  }
+
+  // 获取 CF Worker 代理 URL
+  static Future<String> getCfWorkerUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_cfWorkerUrlKey) ?? '';
+  }
+
+  // 通用工具：根据目标 URL 构造代理后的 URL（仅当启用且配置了 URL 时）
+  // 格式: {CF_Worker_URL}/{URL编码后的目标URL}
+  static Future<String> buildProxiedUrl(String targetUrl) async {
+    final enabled = await getCfWorkerEnabled();
+    final workerUrl = await getCfWorkerUrl();
+    if (!enabled || workerUrl.isEmpty) return targetUrl;
+    final clean = workerUrl.endsWith('/')
+        ? workerUrl.substring(0, workerUrl.length - 1)
+        : workerUrl;
+    return '$clean/${Uri.encodeComponent(targetUrl)}';
   }
 
   // 保存优选测速设置
