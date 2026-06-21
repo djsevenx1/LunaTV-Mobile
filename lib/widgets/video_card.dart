@@ -542,10 +542,7 @@ class _VideoCardState extends State<VideoCard> {
                         // 豆瓣模式和Bangumi模式不显示来源信息
                         if (widget.from != 'douban' &&
                             widget.from != 'bangumi' &&
-                            widget.from != 'agg' &&
-                            widget.videoInfo.sourceName
-                                .trim()
-                                .isNotEmpty) ...[
+                            widget.from != 'agg') ...[
                           const SizedBox(height: 3), // 增加title和sourceName之间的间距
                           // 视频源名称
                           Container(

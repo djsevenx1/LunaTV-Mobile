@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class AppColors {
   // 主强调色(绿色)
@@ -56,68 +55,11 @@ class AppColors {
 }
 
 class ThemeService extends ChangeNotifier {
-  static const String _themeModeKey = 'app_theme_mode';
-
   ThemeMode _themeMode = ThemeMode.system;
   ThemeMode get themeMode => _themeMode;
 
-  /// 异步初始化：从本地存储恢复上次的主题选择
-  static Future<ThemeService> create() async {
-    final service = ThemeService();
-    await service._loadFromPrefs();
-    return service;
-  }
-
-  Future<void> _loadFromPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getString(_themeModeKey);
-      if (saved != null) {
-        _themeMode = _parseMode(saved);
-        // ignore: avoid_print
-        print('[ThemeService] 恢复主题模式: $saved');
-      }
-    } catch (e) {
-      // ignore: avoid_print
-      print('[ThemeService] 读取主题失败: $e');
-    }
-  }
-
-  Future<void> _saveToPrefs(ThemeMode mode) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_themeModeKey, _stringifyMode(mode));
-    } catch (e) {
-      // ignore: avoid_print
-      print('[ThemeService] 保存主题失败: $e');
-    }
-  }
-
-  ThemeMode _parseMode(String s) {
-    switch (s) {
-      case 'light':
-        return ThemeMode.light;
-      case 'dark':
-        return ThemeMode.dark;
-      default:
-        return ThemeMode.system;
-    }
-  }
-
-  String _stringifyMode(ThemeMode mode) {
-    switch (mode) {
-      case ThemeMode.light:
-        return 'light';
-      case ThemeMode.dark:
-        return 'dark';
-      case ThemeMode.system:
-        return 'system';
-    }
-  }
-
   set themeMode(ThemeMode value) {
     _themeMode = value;
-    _saveToPrefs(value);
     notifyListeners();
   }
 

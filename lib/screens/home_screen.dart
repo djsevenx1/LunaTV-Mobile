@@ -359,6 +359,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 }
               },
             ),
+            // 热门短剧组件（放在热门电影之后，更显眼）
+            HotShortDramaSection(
+              onDramaTap: (playRecord) {
+                _navigateToPlayer(
+                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+                );
+              },
+              onMoreTap: () => _onBottomNavChanged(4),
+              onGlobalMenuAction: (videoInfo, action) {
+                if (action == VideoMenuAction.play) {
+                  _navigateToPlayer(
+                    PlayerScreen(videoInfo: videoInfo),
+                  );
+                } else {
+                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                }
+              },
+            ),
             // 热门剧集组件
             HotTvSection(
               onTvTap: (playRecord) {
@@ -403,24 +421,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
               onMoreTap: () => _onBottomNavChanged(5),
-              onGlobalMenuAction: (videoInfo, action) {
-                if (action == VideoMenuAction.play) {
-                  _navigateToPlayer(
-                    PlayerScreen(videoInfo: videoInfo),
-                  );
-                } else {
-                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                }
-              },
-            ),
-            // 热门短剧组件 - 放在最底部
-            HotShortDramaSection(
-              onDramaTap: (playRecord) {
-                _navigateToPlayer(
-                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
-                );
-              },
-              onMoreTap: () => _onBottomNavChanged(4),
               onGlobalMenuAction: (videoInfo, action) {
                 if (action == VideoMenuAction.play) {
                   _navigateToPlayer(
@@ -556,21 +556,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 处理顶部标签切换
-  void _onTopTabChanged(String tab) async {
+  void _onTopTabChanged(String tab) {
     if (!mounted) return;
 
     // 防止重复点击同一个标签
     if (_selectedTopTab == tab) {
-      // 如果当前已在该标签，但页面不在对应位置（仅首页），则切回
-      if (tab == '首页' &&
-          _pageController.hasClients &&
-          _pageController.page?.round() != 0) {
-        _pageController.animateToPage(
-          0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-      }
       return;
     }
 
@@ -587,41 +577,13 @@ class _HomeScreenState extends State<HomeScreen> {
       case '播放历史':
         // 独立页面
         if (mounted) {
-          await Navigator.of(context, rootNavigator: true).pushNamed('/history');
-          // 从独立页面返回时，重置顶部 Tab 到首页
-          if (!mounted) return;
-          if (_selectedTopTab == '播放历史') {
-            setState(() {
-              _selectedTopTab = '首页';
-            });
-            if (_pageController.hasClients) {
-              _pageController.animateToPage(
-                0,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
-          }
+          Navigator.of(context, rootNavigator: true).pushNamed('/history');
         }
         break;
       case '收藏夹':
         // 独立页面
         if (mounted) {
-          await Navigator.of(context, rootNavigator: true).pushNamed('/favorites');
-          // 从独立页面返回时，重置顶部 Tab 到首页
-          if (!mounted) return;
-          if (_selectedTopTab == '收藏夹') {
-            setState(() {
-              _selectedTopTab = '首页';
-            });
-            if (_pageController.hasClients) {
-              _pageController.animateToPage(
-                0,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
-          }
+          Navigator.of(context, rootNavigator: true).pushNamed('/favorites');
         }
         break;
       default:

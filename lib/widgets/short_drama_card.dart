@@ -5,7 +5,6 @@ import 'package:luna_tv/models/short_drama.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
-import 'package:luna_tv/utils/image_url.dart';
 
 /// 短剧卡片组件
 class ShortDramaCard extends StatefulWidget {
@@ -75,80 +74,46 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: widget.drama.cover.isNotEmpty
-                          ? FutureBuilder<String>(
-                              future: getImageUrl(
-                                  widget.drama.cover, 'shortdrama'),
-                              builder: (context, snapshot) {
-                                final String imageUrl =
-                                    snapshot.data ?? widget.drama.cover;
-                                final headers = getImageRequestHeaders(
-                                    imageUrl, 'shortdrama');
-                                return CachedNetworkImage(
-                                  imageUrl: imageUrl,
-                                  fit: BoxFit.cover,
-                                  cacheKey: imageUrl,
-                                  httpHeaders: headers,
-                                  memCacheWidth: (width *
-                                          MediaQuery.of(context)
-                                              .devicePixelRatio)
-                                      .round(),
-                                  memCacheHeight: (height *
-                                          MediaQuery.of(context)
-                                              .devicePixelRatio)
-                                      .round(),
-                                  placeholder: (context, url) => Container(
-                                    width: width,
-                                    height: height,
-                                    decoration: BoxDecoration(
-                                      color: themeService.isDarkMode
-                                          ? const Color(0xFF333333)
-                                          : Colors.grey[300],
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  errorWidget: (context, url, error) =>
-                                      Container(
-                                    width: width,
-                                    height: height,
-                                    decoration: BoxDecoration(
-                                      color: themeService.isDarkMode
-                                          ? const Color(0xFF333333)
-                                          : Colors.grey[300],
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Icon(
-                                      Icons.movie,
-                                      color: themeService.isDarkMode
-                                          ? const Color(0xFF666666)
-                                          : Colors.grey,
-                                      size: 40,
-                                    ),
-                                  ),
-                                  fadeInDuration:
-                                      const Duration(milliseconds: 200),
-                                  fadeOutDuration:
-                                      const Duration(milliseconds: 100),
-                                );
-                              },
-                            )
-                          : Container(
-                              width: width,
-                              height: height,
-                              decoration: BoxDecoration(
-                                color: themeService.isDarkMode
-                                    ? const Color(0xFF333333)
-                                    : Colors.grey[300],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(
-                                Icons.movie,
-                                color: themeService.isDarkMode
-                                    ? const Color(0xFF666666)
-                                    : Colors.grey,
-                                size: 40,
-                              ),
-                            ),
+                      child: CachedNetworkImage(
+                        imageUrl: widget.drama.cover,
+                        fit: BoxFit.cover,
+                        cacheKey: widget.drama.cover,
+                        memCacheWidth: (width *
+                                MediaQuery.of(context).devicePixelRatio)
+                            .round(),
+                        memCacheHeight: (height *
+                                MediaQuery.of(context).devicePixelRatio)
+                            .round(),
+                        placeholder: (context, url) => Container(
+                          width: width,
+                          height: height,
+                          decoration: BoxDecoration(
+                            color: themeService.isDarkMode
+                                ? const Color(0xFF333333)
+                                : Colors.grey[300],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          width: width,
+                          height: height,
+                          decoration: BoxDecoration(
+                            color: themeService.isDarkMode
+                                ? const Color(0xFF333333)
+                                : Colors.grey[300],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.movie,
+                            color: themeService.isDarkMode
+                                ? const Color(0xFF666666)
+                                : Colors.grey,
+                            size: 40,
+                          ),
+                        ),
+                        fadeInDuration: const Duration(milliseconds: 200),
+                        fadeOutDuration: const Duration(milliseconds: 100),
+                      ),
                     ),
                   ),
                   // 底部渐变遮罩
