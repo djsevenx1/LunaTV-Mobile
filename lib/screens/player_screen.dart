@@ -812,7 +812,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<int> _pingSource(String url) async {
-    if (_pingCache.containsKey(url)) return _pingCache[url]!;
     final start = DateTime.now();
     final httpClient = http.Client();
     try {
@@ -899,7 +898,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // 从播放页返回详情页: 先保存一次, 恢复竖屏
+              // 从播放页返回详情页: 先暂停播放, 保存进度, 恢复竖屏
+              try {
+                _player.pause();
+              } catch (_) {}
               await _saveCurrentProgress(force: true);
               await _onExitFullscreen();
               if (mounted) {
@@ -1570,6 +1572,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               _iconBtn(
                 icon: Icons.arrow_back,
                 onTap: () {
+                  try {
+                    _player.pause();
+                  } catch (_) {}
                   _onExitFullscreen();
                   setState(() => _phase = 'detail');
                 },
