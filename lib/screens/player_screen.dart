@@ -1602,17 +1602,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 跟控件一起显隐, 点击后短暂显示提示文字
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
-    final size = _isFullscreen ? 72.0 : 64.0;
-    final offset = _isFullscreen ? 60.0 : 40.0;
+    final size = _isFullscreen ? 64.0 : 56.0;
+    final sideOffset = _isFullscreen ? 80.0 : 60.0;
     return Positioned.fill(
       child: Stack(
         alignment: Alignment.center,
         children: [
           // 左: 快退60s 按钮
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: EdgeInsets.only(left: offset),
+          Positioned(
+            left: sideOffset,
+            top: 0,
+            bottom: 0,
+            child: Center(
               child: _buildSeekCircleButton(
                 size: size,
                 onTap: () => _seekBySeconds(-60, '快退60s'),
@@ -1621,10 +1622,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
           // 右: 快进60s 按钮
-          Align(
-            alignment: Alignment.centerRight,
-            child: Padding(
-              padding: EdgeInsets.only(right: offset),
+          Positioned(
+            right: sideOffset,
+            top: 0,
+            bottom: 0,
+            child: Center(
               child: _buildSeekCircleButton(
                 size: size,
                 onTap: () => _seekBySeconds(60, '快进60s'),
@@ -1639,7 +1641,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Icon(
               _isPlaying ? Icons.pause : Icons.play_arrow,
               color: Colors.white,
-              size: 36,
+              size: 32,
             ),
           ),
           // 快进/快退提示文字 (点击后短暂显示)
@@ -2112,8 +2114,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             onTap: _toggleControls,
           ),
         ),
-        // 中央双圆快进/快退 (LunaTV Web 风格)
-        _buildSideSeekButtons(),
         // 顶部栏 (80px 渐变 + 集数胶囊)
         _buildLunaTopBar(),
         // 底部毛玻璃控制栏 (横屏改短)
@@ -2133,6 +2133,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: _skipButton(
                 '跳过片尾', const Color(0xFF3B82F6), _skipOutro),
           ),
+        // 中央双圆快进/快退 (放在最上层, 避免被顶部栏/底部栏/跳过按钮遮挡)
+        _buildSideSeekButtons(),
       ],
     );
   }
