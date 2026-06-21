@@ -8,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/source_ping_cache.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -686,6 +687,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _sourcesLoading = false;
       });
 
+      // 优先用上次测速缓存排序 + 显示测速徽标，让用户立即看到上次的排名
+      final cachedPings = await SourcePingCache.getAll();
+      if (cachedPings.isNotEmpty) {
+        for (final s in results) {
+          final cached = cachedPings[s.source];
+          if (cached != null && s.episodes.isNotEmpty) {
+            // 用 source 作为 key（不同影片同一个源共用）
+            _pingCache[s.episodes.first] = cached;
+            _pingState[s.source] = _stateFromMs(cached);
+          }
+        }
+        // 按缓存速度从快到慢排序
+        _sortSourcesBySpeed();
+        if (mounted) setState(() {});
+      }
+
       // 默认选第一个
       SearchResult toSelect = results.first;
       if (widget.preferredSource != null && widget.preferredSource!.isNotEmpty) {
@@ -701,7 +718,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 进入详情页不自动播放,等用户点"播放"按钮
       // (电视剧在第1集播完后会自动播第2集,可点暂停控制)
 
-      // 启动后台测速,测完后自动切到最快源
+      // 启动后台测速,测完后自动切到最快源 + 更新缓存
       _testAllSourcesInBackground();
     } catch (e) {
       if (!mounted) return;
@@ -738,6 +755,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final ms = await _pingSource(item.source.episodes.first);
         if (!mounted) return;
         _pingState[item.source.source] = _stateFromMs(ms);
+        // 测速成功后写入本地缓存，供下次其他影片使用
+        SourcePingCache.set(item.source.source, ms);
         if (mounted) setState(() {});
       }));
     }
