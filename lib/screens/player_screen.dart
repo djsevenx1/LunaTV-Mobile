@@ -1849,29 +1849,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 应用显示模式
+  /// 应用显示模式 (触发重建，Video 的 fit 走 _videoFitFor())
   void _applyAspectRatio() {
-    final w = _videoWidth.toDouble();
-    final h = _videoHeight.toDouble();
-    if (w <= 0 || h <= 0) return;
-    final srcAspect = w / h;
+    setState(() {});
+  }
+
+  /// 把设置项的 _aspectRatio 映射为 BoxFit
+  BoxFit _videoFitFor() {
     switch (_aspectRatio) {
       case 'cover':
-        _controller.setSize(
-            Size(MediaQuery.of(context).size.width * srcAspect,
-                MediaQuery.of(context).size.width));
-        break;
+        return BoxFit.cover;
       case 'fill':
-        _controller.setSize(
-            Size(MediaQuery.of(context).size.width,
-                MediaQuery.of(context).size.width / srcAspect));
-        break;
+        return BoxFit.fill;
       case 'contain':
       default:
-        _controller.setSize(
-            Size(MediaQuery.of(context).size.width,
-                MediaQuery.of(context).size.width / srcAspect));
-        break;
+        return BoxFit.contain;
     }
   }
 
@@ -1907,6 +1899,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         children: [
                           Video(
                             controller: _controller,
+                            fit: _videoFitFor(),
                             onEnterFullscreen: _onEnterFullscreen,
                             onExitFullscreen: _onExitFullscreen,
                           ),
