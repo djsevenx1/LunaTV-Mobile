@@ -128,12 +128,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _player.stop();
     } catch (_) {}
     _player.dispose();
-    // 恢复系统UI和竖屏方向
+    // 恢复系统UI,方向交由系统控制
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
   }
 
