@@ -8,12 +8,14 @@
 
 | 平台 | 状态 | 说明 |
 |---|---|---|
-| Android | ✅ | 主目标,arm64-v8a / armeabi-v7a 拆分包 |
-| iOS | ✅ | 未签名 IPA,需自行签名安装 |
-| macOS | ✅ | ARM64 / x86_64 双架构 DMG |
-| Windows | ✅ | 通过 Flutter Desktop |
-| Linux | ✅ | 通过 Flutter Desktop |
-| Web | ✅ | 通过 Flutter Web |
+| Android | ✅ | 主目标,arm64-v8a / armeabi-v7a 拆分包, GitHub Actions 自动出 APK 发 Release |
+| iOS | ⚠️ | 代码层面支持,但本仓库 CI 只跑 ubuntu-latest,不出 IPA。要 iOS 包请自行在 macOS 主机 `./build.sh --ios-only` |
+| macOS | ⚠️ | 同上,代码支持,需自行在 macOS 主机 `./build.sh --macos-arm64-only` / `--macos-x86-64-only` |
+| Windows | ⚠️ | 代码支持,但 Linux 主机跑不了(需 Windows 主机 + Visual Studio),未验证 |
+| Linux | ⚠️ | 代码支持,需 Linux 主机 + GTK 头文件,未验证 |
+| Web | ⚠️ | 代码支持,理论上 `flutter build web` 可出,但 media_kit / dlna_dart 在 Web 平台有限制,未验证 |
+
+> **现实情况**:目前只 Android 是开箱即用、出包的。其他平台「代码层面」能编,但**没在 CI 里跑过**,也没出 release。要 macOS DMG / Windows installer / Web 包需要你自己拉代码到对应平台编译。
 
 ## 主要功能
 
