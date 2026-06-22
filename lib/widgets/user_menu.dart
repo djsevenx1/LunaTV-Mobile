@@ -584,7 +584,7 @@ class _UserMenuState extends State<UserMenu> {
               ),
               const SizedBox(height: 10),
               Text(
-                '填 Cloudflare Worker 自定义域名或 *.workers.dev 子域；\n仅域名，不要带 https://。',
+                '填 Cloudflare Worker 自定义域名或 *.workers.dev 子域；\n仅域名，不要带 https://。\n\n此域名同时用于「源加速」和「Bangumi 代理」,\n配了即生效(后者不依赖开关)。',
                 style: FontUtils.poppins(context,
                                     fontSize: 11,
                   color: widget.isDarkMode
@@ -1002,7 +1002,7 @@ class _UserMenuState extends State<UserMenu> {
                           ? const Color(0xFF374151)
                           : const Color(0xFFe5e7eb),
                     ),
-                    // CF Worker 加速开关
+                    // CF Worker 加速开关(只控制播放器源测速/m3u8 等)
                     _buildToggleOption(
                       title: 'CF Worker 加速',
                       value: _cfWorkerEnabled,
@@ -1015,8 +1015,9 @@ class _UserMenuState extends State<UserMenu> {
                       },
                       icon: LucideIcons.rocket,
                     ),
-                    // CF Worker 域名(开启时显示)
-                    if (_cfWorkerEnabled) ...[
+                    // CF Worker 加速源域名(同时供源加速和 Bangumi 代理用,
+                    // Bangumi 不受开关控制,只认域名)
+                    if (_cfWorkerEnabled || _cfWorkerDomain.isNotEmpty) ...[
                       Container(
                         height: 1,
                         color: widget.isDarkMode
@@ -1024,7 +1025,7 @@ class _UserMenuState extends State<UserMenu> {
                             : const Color(0xFFe5e7eb),
                       ),
                       _buildInputOption(
-                        title: 'CF Worker 加速域名',
+                        title: 'CF Worker 加速源域名',
                         currentValue: _cfWorkerDomain.isEmpty
                             ? '（点击配置）'
                             : _cfWorkerDomain,

@@ -524,11 +524,17 @@ class UserDataService {
 
   /// 构造 Bangumi 数据请求 URL
   ///
-  /// 优先级：CF Worker 开关+域名 > 用户选的 cors_proxy > 直连
+  /// 优先级：CF Worker 域名（只要配了就用，不受 CF Worker 加速开关控制）
+  /// > 用户选的 cors_proxy > 直连
+  ///
+  /// 设计：B 站番剧代理是"只要配置了加速源地址就一直生效"，
+  /// 不和源加速（player 测速）的开关绑死。
   static String buildBangumiDataUrl(String originalUrl) {
-    // 1) CF Worker 加速（一旦用户配了 worker，强制走它，最稳）
-    final cf = buildProxiedUrl(originalUrl);
-    if (cf != originalUrl) return cf;
+    // 1) CF Worker 域名:只看域名是否配了,不看开关
+    final worker = _cfWorkerDomainCache;
+    if (worker != null && worker.isNotEmpty) {
+      return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
+    }
 
     // 2) 公共 CORS 代理
     final key = getBangumiDataSourceKeySync();
@@ -541,10 +547,12 @@ class UserDataService {
   /// 构造 Bangumi 图片请求 URL
   ///
   /// 公共 CORS 代理对 lain.bgm.tv 不友好（403），所以只支持：
-  /// CF Worker > 直连
+  /// CF Worker 域名（只要配了就用，不受 CF Worker 加速开关控制）> 直连
   static String buildBangumiImageUrl(String originalUrl) {
-    final cf = buildProxiedUrl(originalUrl);
-    if (cf != originalUrl) return cf;
+    final worker = _cfWorkerDomainCache;
+    if (worker != null && worker.isNotEmpty) {
+      return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
+    }
     return originalUrl;
   }
 
