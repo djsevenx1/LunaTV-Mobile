@@ -25,8 +25,15 @@ android {
         applicationId = "org.moontechlab.lunatv"
         minSdk = flutter.minSdkVersion
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        // 从 pubspec.yaml 读 version (经 workflow sed 同步)
+        // Kotlin DSL 里 flutter.versionCode/versionName 是方法, 调用方式不稳定
+        // 直接解析 pubspec.yaml 最稳
+        val pubspecFile = rootProject.file("../pubspec.yaml")
+        val versionLine = pubspecFile.readLines().first { it.startsWith("version:") }
+        val versionStr = versionLine.substringAfter("version:").trim()
+        val (vName, vCode) = versionStr.split("+")
+        versionCode = vCode.toInt()
+        versionName = vName
     }
 
     // 固定 release 签名 (keystore 提交在仓库 android/app/release.keystore)

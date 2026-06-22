@@ -3,8 +3,11 @@ name: Build APK
 on:
   push:
     branches: [ main, 'trae/**' ]
-    tags: [ 'v*' ]
+    tags: [ 'v*.*.*' ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -36,6 +39,21 @@ jobs:
 
       - run: flutter pub get
 
+      # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
+      - name: Sync version from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          VERSION=${TAG%+*}
+          BUILD=${TAG#*+}
+          if [ -z "$BUILD" ]; then
+            BUILD=1
+            sed -i "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
+          else
+            sed -i "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
+          fi
+          cat pubspec.yaml | head -5
+
       # release 签名: keystore 已提交在 android/app/release.keystore
       # build.gradle.kts 直接读取, 每次 CI 构建签名一致
       - run: flutter build apk --release
@@ -44,3 +62,18 @@ jobs:
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # Tag 触发: 创建/更新 GitHub Release 并上传 APK
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: |
+            ## 更新日志
+            ${{ github.event.head_commit.message }}
+
+            ### 本版本变更
+            详见下方自动生成的 commits 列表。
+          generate_release_notes: true
+          files: build/app/outputs/flutter-apk/app-release.apk
