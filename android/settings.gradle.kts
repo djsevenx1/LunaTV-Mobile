@@ -8,6 +8,10 @@ pluginManagement {
     }
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
     repositories {
+        // 阿里云镜像放第一个,绕开 repo.maven.apache.org 在 CI runner 地区被墙返 403
+        maven { setUrl("https://maven.aliyun.com/repository/public") }
+        maven { setUrl("https://maven.aliyun.com/repository/google") }
+        maven { setUrl("https://maven.aliyun.com/repository/gradle-plugin") }
         google()
         mavenCentral()
         gradlePluginPortal()
