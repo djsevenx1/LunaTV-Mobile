@@ -25,17 +25,37 @@ class VersionService {
       ).timeout(const Duration(seconds: 10));
       
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final data = json.decode(response.body) as Map<String, dynamic>;
         final tagName = data['tag_name'] as String;
         final latestVersion = tagName.startsWith('v') ? tagName.substring(1) : tagName;
         final releaseNotes = data['body'] as String? ?? '';
-        
+
+        // 从 assets 数组里找第一个 .apk 资源,拿 browser_download_url
+        String? apkDownloadUrl;
+        final assets = data['assets'] as List<dynamic>?;
+        if (assets != null) {
+          for (final asset in assets) {
+            if (asset is Map<String, dynamic>) {
+              final name = (asset['name'] as String?) ?? '';
+              final url = (asset['browser_download_url'] as String?) ?? '';
+              if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
+                apkDownloadUrl = url;
+                break;
+              }
+            }
+          }
+        }
+        // release 详情页 URL(html_url),作为兜底
+        final releasePageUrl = data['html_url'] as String?;
+
         // 比较版本号
         if (_isNewerVersion(currentVersion, latestVersion)) {
           return VersionInfo(
             currentVersion: currentVersion,
             latestVersion: latestVersion,
             releaseNotes: releaseNotes,
+            apkDownloadUrl: apkDownloadUrl,
+            releasePageUrl: releasePageUrl,
           );
         }
       }
