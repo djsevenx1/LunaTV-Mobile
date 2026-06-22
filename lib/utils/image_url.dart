@@ -98,7 +98,10 @@ Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
       imageUrl.toLowerCase().contains('bgm.tv');
   if (isBangumiSource) {
     return <String, String>{
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+      // lain.bgm.tv 和 api.bgm.tv 都吃 bgm.tv v0 API 同款
+      // "App/Version (URL)" UA 格式,Chrome UA 反而会 403
+      'User-Agent':
+          'LunaTV-Mobile/1.0 (https://github.com/djsevenx1/LunaTV-Mobile)',
       'Referer': 'https://bgm.tv/',
       'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     };
