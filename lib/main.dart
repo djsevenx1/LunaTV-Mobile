@@ -40,6 +40,9 @@ void main() async {
   // 异步初始化 ThemeService,恢复上次保存的主题模式
   final themeService = await ThemeService.create();
 
+  // 预热 CF Worker 加速配置(开关+域名),后续 buildProxiedUrl 同步可用
+  await UserDataService.warmupCfWorkerConfig();
+
   runApp(LunaTVApp(themeService: themeService));
 }
 

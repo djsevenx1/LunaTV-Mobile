@@ -796,7 +796,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final start = DateTime.now();
     final httpClient = http.Client();
     try {
-      final req = http.Request('HEAD', Uri.parse(url))
+      // 测速时也走 CF Worker 加速（开关+域名就生效）
+      // 这样测出来的延迟更接近用户实际播放时的延迟
+      final pingUrl = UserDataService.buildProxiedUrl(url, forceM3u8: true);
+      final req = http.Request('HEAD', Uri.parse(pingUrl))
         ..followRedirects = true
         ..maxRedirects = 2;
       final response =

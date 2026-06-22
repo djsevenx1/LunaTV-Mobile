@@ -33,11 +33,15 @@ class _UserMenuState extends State<UserMenu> {
   String _role = 'user';
   String _doubanDataSource = '直连';
   String _doubanImageSource = '直连';
+  String _bangumiDataSource = '直连';
+  String _bangumiImageSource = '直连';
   String _m3u8ProxyUrl = '';
   String _version = '';
   bool _preferSpeedTest = true;
   bool _localSearch = false;
   bool _isLocalMode = false;
+  bool _cfWorkerEnabled = false;
+  String _cfWorkerDomain = '';
 
   @override
   void initState() {
@@ -63,9 +67,15 @@ class _UserMenuState extends State<UserMenu> {
         await UserDataService.getDoubanDataSourceDisplayName();
     final doubanImageSource =
         await UserDataService.getDoubanImageSourceDisplayName();
+    final bangumiDataSource =
+        await UserDataService.getBangumiDataSourceDisplayNameAsync();
+    final bangumiImageSource =
+        await UserDataService.getBangumiImageSourceDisplayNameAsync();
     final m3u8ProxyUrl = await UserDataService.getM3u8ProxyUrl();
     final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
+    final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
+    final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
 
     if (mounted) {
       setState(() {
@@ -74,9 +84,13 @@ class _UserMenuState extends State<UserMenu> {
         _role = _parseRoleFromCookies(cookies);
         _doubanDataSource = doubanDataSource;
         _doubanImageSource = doubanImageSource;
+        _bangumiDataSource = bangumiDataSource;
+        _bangumiImageSource = bangumiImageSource;
         _m3u8ProxyUrl = m3u8ProxyUrl;
         _preferSpeedTest = preferSpeedTest;
         _localSearch = localSearch;
+        _cfWorkerEnabled = cfWorkerEnabled;
+        _cfWorkerDomain = cfWorkerDomain;
       });
     }
   }
@@ -503,6 +517,139 @@ class _UserMenuState extends State<UserMenu> {
     ).whenComplete(controller.dispose);
   }
 
+  void _showCfWorkerDomainDialog() {
+    final controller = TextEditingController(text: _cfWorkerDomain);
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor:
+              widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
+          title: Text(
+            'CF Worker 加速域名',
+            style: FontUtils.poppins(context,
+                            fontSize: 18,
+              color: widget.isDarkMode
+                  ? const Color(0xFFffffff)
+                  : const Color(0xFF1f2937),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: FontUtils.poppins(context,
+                                fontSize: 14,
+                  color: widget.isDarkMode
+                      ? const Color(0xFFffffff)
+                      : const Color(0xFF1f2937),
+                ),
+                decoration: InputDecoration(
+                  hintText: 'example.workers.dev',
+                  hintStyle: FontUtils.poppins(context,
+                                    fontSize: 14,
+                    color: widget.isDarkMode
+                        ? const Color(0xFF9ca3af)
+                        : const Color(0xFF6b7280),
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: widget.isDarkMode
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: widget.isDarkMode
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF10b981),
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '填 Cloudflare Worker 自定义域名或 *.workers.dev 子域；\n仅域名，不要带 https://。',
+                style: FontUtils.poppins(context,
+                                    fontSize: 11,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF9ca3af)
+                      : const Color(0xFF6b7280),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                '取消',
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF9ca3af)
+                      : const Color(0xFF6b7280),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                final domain = controller.text.trim();
+                await UserDataService.saveCfWorkerDomain(domain);
+                if (!mounted) return;
+                setState(() {
+                  _cfWorkerDomain = domain;
+                });
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        domain.isEmpty
+                            ? '已清空 CF Worker 域名(仅保留开关无效)'
+                            : '已保存 CF Worker 域名',
+                        style: FontUtils.poppins(context,
+                            color: Colors.white),
+                      ),
+                      backgroundColor: const Color(0xFF10b981),
+                    ),
+                  );
+                }
+              },
+              child: Text(
+                '保存',
+                style: FontUtils.poppins(context,
+                                    fontSize: 14,
+                  color: const Color(0xFF10b981),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    ).whenComplete(controller.dispose);
+  }
+
   Widget _buildInputOption({
     required String title,
     required String currentValue,
@@ -788,6 +935,59 @@ class _UserMenuState extends State<UserMenu> {
                           ? const Color(0xFF374151)
                           : const Color(0xFFe5e7eb),
                     ),
+                    // Bangumi 数据源选项
+                    _buildOptionSelector(
+                      title: 'Bangumi 数据源',
+                      currentValue: _bangumiDataSource,
+                      options: const [
+                        '直连',
+                        'Cors Proxy By Zwei',
+                        'CF Worker 加速',
+                      ],
+                      onChanged: (value) async {
+                        final key = UserDataService
+                            .getBangumiDataSourceKeyFromDisplayName(value);
+                        await UserDataService.saveBangumiDataSource(key);
+                        if (!mounted) return;
+                        setState(() {
+                          _bangumiDataSource = value;
+                        });
+                      },
+                      icon: LucideIcons.database,
+                    ),
+                    // 分割线
+                    Container(
+                      height: 1,
+                      color: widget.isDarkMode
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                    // Bangumi 图片源选项
+                    _buildOptionSelector(
+                      title: 'Bangumi 图片源',
+                      currentValue: _bangumiImageSource,
+                      options: const [
+                        '直连',
+                        'CF Worker 加速',
+                      ],
+                      onChanged: (value) async {
+                        final key = UserDataService
+                            .getBangumiImageSourceKeyFromDisplayName(value);
+                        await UserDataService.saveBangumiImageSource(key);
+                        if (!mounted) return;
+                        setState(() {
+                          _bangumiImageSource = value;
+                        });
+                      },
+                      icon: LucideIcons.image,
+                    ),
+                    // 分割线
+                    Container(
+                      height: 1,
+                      color: widget.isDarkMode
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
                     // M3U8 代理 URL 选项
                     _buildInputOption(
                       title: 'M3U8 代理 URL',
@@ -795,6 +995,43 @@ class _UserMenuState extends State<UserMenu> {
                       onTap: _showM3u8ProxyUrlDialog,
                       icon: LucideIcons.link,
                     ),
+                    // 分割线
+                    Container(
+                      height: 1,
+                      color: widget.isDarkMode
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                    // CF Worker 加速开关
+                    _buildToggleOption(
+                      title: 'CF Worker 加速',
+                      value: _cfWorkerEnabled,
+                      onChanged: (value) async {
+                        await UserDataService.saveCfWorkerEnabled(value);
+                        if (!mounted) return;
+                        setState(() {
+                          _cfWorkerEnabled = value;
+                        });
+                      },
+                      icon: LucideIcons.rocket,
+                    ),
+                    // CF Worker 域名(开启时显示)
+                    if (_cfWorkerEnabled) ...[
+                      Container(
+                        height: 1,
+                        color: widget.isDarkMode
+                            ? const Color(0xFF374151)
+                            : const Color(0xFFe5e7eb),
+                      ),
+                      _buildInputOption(
+                        title: 'CF Worker 加速域名',
+                        currentValue: _cfWorkerDomain.isEmpty
+                            ? '（点击配置）'
+                            : _cfWorkerDomain,
+                        onTap: _showCfWorkerDomainDialog,
+                        icon: LucideIcons.server,
+                      ),
+                    ],
                     // 分割线
                     Container(
                       height: 1,

@@ -57,12 +57,16 @@ Future<String> getImageUrl(
         return processed;
     }
   }
-  // Bangumi 图片 URL 统一使用 HTTPS
+  // Bangumi 图片 URL 统一使用 HTTPS,优先走 CF Worker 加速
   if (source == 'bangumi' && originalUrl.isNotEmpty) {
-    if (originalUrl.startsWith('//')) {
-      return 'https:$originalUrl';
+    String processed = originalUrl;
+    if (processed.startsWith('//')) {
+      processed = 'https:$processed';
+    } else {
+      processed = processed.replaceFirst('http://', 'https://');
     }
-    return originalUrl.replaceFirst('http://', 'https://');
+    // CF Worker 加速:开关+域名就生效,否则按用户选择走直连
+    return UserDataService.buildBangumiImageUrl(processed);
   }
   return originalUrl;
 }

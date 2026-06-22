@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:luna_tv/models/bangumi.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 
 /// Bangumi 数据服务（函数级缓存，一天过期）
 class BangumiService {
@@ -60,13 +61,19 @@ class BangumiService {
     // 未命中缓存，请求接口
     try {
       const apiUrl = 'https://api.bgm.tv/calendar';
+      // CF Worker 优先，否则按用户选择走公共 CORS 代理/直连
+      final requestUrl = UserDataService.buildBangumiDataUrl(apiUrl);
       final headers = {
         'User-Agent': 'senshinya/LunaTV/1.0.0 (Android) (http://github.com/senshinya/LunaTV)',
         'Accept': 'application/json',
       };
+      // 走 ciao-cors 时加 X-Requested-With 头
+      if (requestUrl.startsWith(UserDataService.publicCorsProxyBase)) {
+        headers['X-Requested-With'] = 'XMLHttpRequest';
+      }
 
       final response = await http
-          .get(Uri.parse(apiUrl), headers: headers)
+          .get(Uri.parse(requestUrl), headers: headers)
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
@@ -148,13 +155,19 @@ class BangumiService {
 
     try {
       final apiUrl = 'https://api.bgm.tv/v0/subjects/$bangumiId';
+      // CF Worker 优先，否则按用户选择走公共 CORS 代理/直连
+      final requestUrl = UserDataService.buildBangumiDataUrl(apiUrl);
       final headers = {
         'User-Agent': 'senshinya/LunaTV/1.0.0 (Android) (http://github.com/senshinya/LunaTV)',
         'Accept': 'application/json',
       };
+      // 走 ciao-cors 时加 X-Requested-With 头
+      if (requestUrl.startsWith(UserDataService.publicCorsProxyBase)) {
+        headers['X-Requested-With'] = 'XMLHttpRequest';
+      }
 
       final response = await http.get(
-        Uri.parse(apiUrl),
+        Uri.parse(requestUrl),
         headers: headers,
       ).timeout(const Duration(seconds: 30));
 

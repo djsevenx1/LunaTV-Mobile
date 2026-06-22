@@ -7,13 +7,21 @@ class UserDataService {
   static const String _cookiesKey = 'cookies';
   static const String _doubanDataSourceKey = 'douban_data_source';
   static const String _doubanImageSourceKey = 'douban_image_source';
+  static const String _bangumiDataSourceKey = 'bangumi_data_source';
+  static const String _bangumiImageSourceKey = 'bangumi_image_source';
   static const String _m3u8ProxyUrlKey = 'm3u8_proxy_url';
   static const String _preferSpeedTestKey = 'prefer_speed_test';
   static const String _localSearchKey = 'local_search';
   static const String _isLocalModeKey = 'is_local_mode';
-  
+  static const String _cfWorkerEnabledKey = 'cf_worker_enabled';
+  static const String _cfWorkerDomainKey = 'cf_worker_domain';
+
   // 内存缓存
   static bool? _isLocalModeCache;
+  static bool? _cfWorkerEnabledCache;
+  static String? _cfWorkerDomainCache;
+  static String? _bangumiDataSourceCache;
+  static String? _bangumiImageSourceCache;
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -294,5 +302,267 @@ class UserDataService {
   // 兼容旧接口:设置优选测速
   static Future<void> setPreferSpeedTest(bool enabled) async {
     await savePreferSpeedTest(enabled);
+  }
+
+  // ===== CF Worker 加速配置 =====
+
+  // 保存 CF Worker 加速开关
+  static Future<void> saveCfWorkerEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_cfWorkerEnabledKey, enabled);
+    _cfWorkerEnabledCache = enabled;
+  }
+
+  // 获取 CF Worker 加速开关（默认 false）
+  static Future<bool> getCfWorkerEnabled() async {
+    if (_cfWorkerEnabledCache != null) return _cfWorkerEnabledCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getBool(_cfWorkerEnabledKey) ?? false;
+    _cfWorkerEnabledCache = v;
+    return v;
+  }
+
+  // 同步获取 CF Worker 开关
+  static bool getCfWorkerEnabledSync() {
+    return _cfWorkerEnabledCache ?? false;
+  }
+
+  // 保存 CF Worker 域名（不含 https:// 前缀）
+  static Future<void> saveCfWorkerDomain(String domain) async {
+    final cleaned = _cleanDomain(domain);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cfWorkerDomainKey, cleaned);
+    _cfWorkerDomainCache = cleaned;
+  }
+
+  // 获取 CF Worker 域名（同步版，优先内存缓存）
+  static String getCfWorkerDomainSync() {
+    return _cfWorkerDomainCache ?? '';
+  }
+
+  // 获取 CF Worker 域名（异步版）
+  static Future<String> getCfWorkerDomain() async {
+    if (_cfWorkerDomainCache != null) return _cfWorkerDomainCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_cfWorkerDomainKey) ?? '';
+    _cfWorkerDomainCache = v;
+    return v;
+  }
+
+  // 清理域名：去掉尾部斜杠、协议前缀、空白
+  static String _cleanDomain(String input) {
+    var s = input.trim();
+    s = s.replaceAll(RegExp(r'\s+'), '');
+    if (s.endsWith('/')) s = s.substring(0, s.length - 1);
+    s = s.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
+    return s;
+  }
+
+  /// 通用代理 URL 构造器
+  ///
+  /// 在以下任一情况下返回原 URL：
+  /// 1) [targetUrl] 为空
+  /// 2) 开关未开
+  /// 3) Worker 域名未配置
+  ///
+  /// 否则根据链接类型返回 worker 代理后的 URL：
+  /// - m3u8 链接 →  `https://<worker>/m3u8?url=<encoded>`
+  /// - 普通链接 →  `https://<worker>/?url=<encoded>`
+  ///
+  /// [forceM3u8] 强制按 m3u8 端点处理（即使链接不一定是 .m3u8 后缀，比如 master playlist 无后缀）。
+  static String buildProxiedUrl(String targetUrl, {bool forceM3u8 = false}) {
+    if (targetUrl.isEmpty) return targetUrl;
+    if (!_isCfWorkerUsableSync()) return targetUrl;
+    final worker = _cfWorkerDomainCache!.trim();
+    if (worker.isEmpty) return targetUrl;
+    final isM3u8 = forceM3u8 || _looksLikeM3u8(targetUrl);
+    final endpoint = isM3u8 ? '/m3u8' : '/';
+    return 'https://$worker$endpoint?url=${Uri.encodeComponent(targetUrl)}';
+  }
+
+  /// 异步版本：内部用内存缓存避免每次 await prefs
+  static Future<String> buildProxiedUrlAsync(String targetUrl,
+      {bool forceM3u8 = false}) async {
+    if (targetUrl.isEmpty) return targetUrl;
+    await _ensureCfWorkerCache();
+    return buildProxiedUrl(targetUrl, forceM3u8: forceM3u8);
+  }
+
+  static Future<void> _ensureCfWorkerCache() async {
+    if (_cfWorkerEnabledCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _cfWorkerEnabledCache = prefs.getBool(_cfWorkerEnabledKey) ?? false;
+    }
+    if (_cfWorkerDomainCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _cfWorkerDomainCache = prefs.getString(_cfWorkerDomainKey) ?? '';
+    }
+  }
+
+  // 同步判断：开关 + 域名都齐了
+  static bool _isCfWorkerUsableSync() {
+    if (_cfWorkerEnabledCache != true) return false;
+    final d = _cfWorkerDomainCache;
+    if (d == null || d.isEmpty) return false;
+    return true;
+  }
+
+  // 简单判断是否 m3u8 链接
+  static bool _looksLikeM3u8(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8')) return true;
+    if (lower.contains('.m3u')) return true;
+    return false;
+  }
+
+  // ===== Bangumi 数据/图片源（沿用豆瓣的"直连 / Cors Proxy / CF Worker"模式） =====
+
+  // 公共 CORS 代理（与豆瓣数据源共用同一个）
+  // ciao-cors.is-an.org 验证可代理 api.bgm.tv/calendar 和 /v0/subjects/*
+  // 但对 lain.bgm.tv 图片仍返回 403（上游拦了 CF 节点），所以图片必须走 CF Worker
+  static const String publicCorsProxyBase = 'https://ciao-cors.is-an.org/';
+
+  // 保存 Bangumi 数据源设置（key 值：direct / cors_proxy / cf_worker）
+  static Future<void> saveBangumiDataSource(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_bangumiDataSourceKey, key);
+    _bangumiDataSourceCache = key;
+  }
+
+  // 获取 Bangumi 数据源 key
+  static Future<String> getBangumiDataSourceKey() async {
+    if (_bangumiDataSourceCache != null) return _bangumiDataSourceCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_bangumiDataSourceKey) ?? 'direct';
+    _bangumiDataSourceCache = v;
+    return v;
+  }
+
+  // 获取 Bangumi 数据源显示名（异步）
+  static Future<String> getBangumiDataSourceDisplayNameAsync() async {
+    final key = await getBangumiDataSourceKey();
+    return getBangumiDataSourceDisplayName(key);
+  }
+
+  // 获取 Bangumi 图片源显示名（异步）
+  static Future<String> getBangumiImageSourceDisplayNameAsync() async {
+    final key = await getBangumiImageSourceKey();
+    return getBangumiImageSourceDisplayName(key);
+  }
+
+  // Bangumi 数据源显示名映射
+  static String getBangumiDataSourceDisplayName(String key) {
+    switch (key) {
+      case 'cors_proxy':
+        return 'Cors Proxy By Zwei';
+      case 'cf_worker':
+        return 'CF Worker 加速';
+      case 'direct':
+      default:
+        return '直连';
+    }
+  }
+
+  static String getBangumiDataSourceKeyFromDisplayName(String name) {
+    switch (name) {
+      case 'Cors Proxy By Zwei':
+        return 'cors_proxy';
+      case 'CF Worker 加速':
+        return 'cf_worker';
+      case '直连':
+      default:
+        return 'direct';
+    }
+  }
+
+  // Bangumi 图片源显示名映射
+  static String getBangumiImageSourceDisplayName(String key) {
+    switch (key) {
+      case 'cf_worker':
+        return 'CF Worker 加速';
+      case 'direct':
+      default:
+        return '直连';
+    }
+  }
+
+  static String getBangumiImageSourceKeyFromDisplayName(String name) {
+    switch (name) {
+      case 'CF Worker 加速':
+        return 'cf_worker';
+      case '直连':
+      default:
+        return 'direct';
+    }
+  }
+
+  // 获取 Bangumi 数据源显示名称（异步）
+  static String getBangumiDataSourceKeySync() {
+    return _bangumiDataSourceCache ?? 'direct';
+  }
+
+  // 保存 Bangumi 图片源设置（key 值：direct / cf_worker）
+  static Future<void> saveBangumiImageSource(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_bangumiImageSourceKey, key);
+    _bangumiImageSourceCache = key;
+  }
+
+  // 获取 Bangumi 图片源 key
+  static Future<String> getBangumiImageSourceKey() async {
+    if (_bangumiImageSourceCache != null) return _bangumiImageSourceCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_bangumiImageSourceKey) ?? 'direct';
+    _bangumiImageSourceCache = v;
+    return v;
+  }
+
+  // 同步获取 Bangumi 图片源 key
+  static String getBangumiImageSourceKeySync() {
+    return _bangumiImageSourceCache ?? 'direct';
+  }
+
+  /// 构造 Bangumi 数据请求 URL
+  ///
+  /// 优先级：CF Worker 开关+域名 > 用户选的 cors_proxy > 直连
+  static String buildBangumiDataUrl(String originalUrl) {
+    // 1) CF Worker 加速（一旦用户配了 worker，强制走它，最稳）
+    final cf = buildProxiedUrl(originalUrl);
+    if (cf != originalUrl) return cf;
+
+    // 2) 公共 CORS 代理
+    final key = getBangumiDataSourceKeySync();
+    if (key == 'cors_proxy') {
+      return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
+    }
+    return originalUrl;
+  }
+
+  /// 构造 Bangumi 图片请求 URL
+  ///
+  /// 公共 CORS 代理对 lain.bgm.tv 不友好（403），所以只支持：
+  /// CF Worker > 直连
+  static String buildBangumiImageUrl(String originalUrl) {
+    final cf = buildProxiedUrl(originalUrl);
+    if (cf != originalUrl) return cf;
+    return originalUrl;
+  }
+
+  // Bangumi 数据源 key 同步初始化（main.dart 启动时调用）
+  static Future<void> warmupBangumiConfig() async {
+    if (_bangumiDataSourceCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _bangumiDataSourceCache = prefs.getString(_bangumiDataSourceKey) ?? 'direct';
+    }
+    if (_bangumiImageSourceCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _bangumiImageSourceCache = prefs.getString(_bangumiImageSourceKey) ?? 'direct';
+    }
+  }
+
+  // 应用启动时调用一次，缓存到内存，后续 buildProxiedUrl 不再 await
+  static Future<void> warmupCfWorkerConfig() async {
+    await _ensureCfWorkerCache();
+    await warmupBangumiConfig();
   }
 }
