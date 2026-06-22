@@ -652,7 +652,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  /// 加载多源并自动测速
+  /// 启动后云记忆里查到的 episode, 准备在 _playEpisode 时 seek 过去
+  Duration? _pendingResumeAt;
+
+  // 加载多源并自动测速
   Future<void> _loadSources() async {
     final title = widget.videoInfo.searchTitle.isNotEmpty
         ? widget.videoInfo.searchTitle
@@ -669,6 +672,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _sourcesLoading = true;
       _error = null;
     });
+
+    // 先尝试从云端拉一次播放记录, 防止 videoInfo 没带 source/index
+    // (比如从搜索结果直接点进来, 但云端其实有别的源在播)
+    final resume = widget.videoInfo.source.isEmpty || widget.videoInfo.index <= 0
+        ? await _tryLoadResumeFromCloud(title)
+        : null;
+    final resumeSourceKey = resume?.source ?? widget.videoInfo.source;
+    final resumeIndex = resume != null
+        ? (resume.index - 1).clamp(0, 1 << 30)
+        : (widget.videoInfo.index - 1).clamp(0, 1 << 30);
+    if (resume != null && resume.playTime > 0) {
+      _pendingResumeAt = Duration(milliseconds: resume.playTime);
+    } else if (widget.videoInfo.playTime > 0) {
+      _pendingResumeAt = Duration(milliseconds: widget.videoInfo.playTime);
+    }
 
     try {
       final results = await ApiService.fetchSourcesData(title);
@@ -689,8 +707,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _sourcesLoading = false;
       });
 
-      // 默认选第一个
-      SearchResult toSelect = results.first;
+      // 选源优先级:
+      // 1. 云记忆里有这个 video 的源 (resume.source)
+      // 2. 入口传过来的 preferredSource
+      // 3. 第一个
+      SearchResult? toSelect;
+      if (resumeSourceKey.isNotEmpty) {
+        for (final r in results) {
+          if (r.source == resumeSourceKey) {
+            toSelect = r;
+            break;
+          }
+        }
+      }
+      toSelect ??= results.first;
       if (widget.preferredSource != null && widget.preferredSource!.isNotEmpty) {
         for (final r in results) {
           if (r.source == widget.preferredSource) {
@@ -699,7 +729,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           }
         }
       }
-      _selectSource(toSelect);
+      _selectSource(toSelect, episodeIndex: resumeIndex);
 
       // 进入详情页不自动播放,等用户点"播放"按钮
       // (电视剧在第1集播完后会自动播第2集,可点暂停控制)
@@ -715,10 +745,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _selectSource(SearchResult result) {
+  /// 从云端拉播放记录, 按 searchTitle 找最近一条
+  /// 用于 videoInfo 没带 source 信息时兜底
+  Future<PlayRecord?> _tryLoadResumeFromCloud(String searchTitle) async {
+    try {
+      final result =
+          await PageCacheService().getPlayRecords(context);
+      if (!result.success || result.data == null) return null;
+      // 优先 searchTitle 完全匹配, 没有再退化到 title
+      final matches = result.data!
+          .where((r) => r.searchTitle == searchTitle || r.title == searchTitle)
+          .toList();
+      if (matches.isEmpty) return null;
+      matches.sort((a, b) => b.saveTime.compareTo(a.saveTime));
+      return matches.first;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _selectSource(SearchResult result, {int episodeIndex = 0}) {
+    final clampedIndex =
+        episodeIndex.clamp(0, result.episodes.isEmpty ? 0 : result.episodes.length - 1);
     setState(() {
       _selectedSource = result;
-      _currentEpisodeIndex = 0;
+      _currentEpisodeIndex = clampedIndex;
     });
   }
 
@@ -830,6 +881,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final url = source.episodes[index];
     if (url.isEmpty) return;
 
+    // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
+    // 仅在用户主动开新集时且和云记忆吻合的那次才用
+    Duration? resumeAt;
+    if (_pendingResumeAt != null && index == _currentEpisodeIndex) {
+      resumeAt = _pendingResumeAt;
+    }
+    // 用完清掉, 避免切下一集时还 seek 回去
+    _pendingResumeAt = null;
+
     setState(() {
       _currentEpisodeIndex = index;
       _isBuffering = true;
@@ -844,6 +904,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       await _player.stop();
       await _player.open(Media(url));
+      // 云记忆恢复: 缓冲到能播后 seek 到上次的位置
+      if (resumeAt != null) {
+        try {
+          await _player.seek(resumeAt);
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() => _isBuffering = false);
       // 启动定时器,并立即保存一条(标记已开始)
