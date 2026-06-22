@@ -31,9 +31,10 @@ android {
         val pubspecFile = rootProject.file("../pubspec.yaml")
         val versionLine = pubspecFile.readLines().first { it.startsWith("version:") }
         val versionStr = versionLine.substringAfter("version:").trim()
-        val (vName, vCode) = versionStr.split("+")
-        versionCode = vCode.toInt()
-        versionName = vName
+        // 格式: <name>+<code> 或只有 <name> (无 + 后缀, 默认 code=1)
+        val parts = versionStr.split("+")
+        versionName = parts[0]
+        versionCode = if (parts.size > 1) parts[1].toInt() else 1
     }
 
     // 固定 release 签名 (keystore 提交在仓库 android/app/release.keystore)
