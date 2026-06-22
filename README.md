@@ -271,6 +271,7 @@ getImageUrl(originalUrl, source, { upgradeDouban: false })
 ## 致谢
 
 - [LunaTV](https://github.com/MoonTechLab/LunaTV) — 原始 Web 项目
+- [Selene](https://github.com/MoonTechLab/Selene) — Flutter 移动端/桌面端源起项目
 - [CORSAPI](https://github.com/djsevenx1/CORSAPI) — 配套 CF Worker 后端,处理 Bangumi 代理 / m3u8 重写
 - [media_kit](https://github.com/media-kit/media-kit) — Flutter 媒体播放
 - [dlna_dart](https://github.com/dlna-dart/dlna_dart) — DLNA 投屏
