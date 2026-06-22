@@ -968,6 +968,7 @@ class _UserMenuState extends State<UserMenu> {
                       currentValue: _bangumiImageSource,
                       options: const [
                         '直连',
+                        'Cors Proxy By Zwei',
                         'CF Worker 加速',
                       ],
                       onChanged: (value) async {

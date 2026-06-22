@@ -648,6 +648,8 @@ class ApiService {
   }
 
   /// 搜索视频源数据
+  /// 同一 source key 出现多次时,只保留集数最多的那一条
+  /// (修复后端注册多个同 key 资源导致前端显示重复源的问题)
   static Future<List<SearchResult>> fetchSourcesData(String query) async {
     try {
       final response = await get<Map<String, dynamic>>(
@@ -662,10 +664,11 @@ class ApiService {
         final data = response.data!;
         final results = data['results'] as List<dynamic>? ?? [];
 
-        // 直接返回所有搜索结果，不进行过滤
-        return results
+        // 解析 + 按 source key 去重
+        final parsed = results
             .map((item) => SearchResult.fromJson(item as Map<String, dynamic>))
             .toList();
+        return _dedupeBySourceKey(parsed);
       } else {
         print('搜索失败: ${response.message}');
         return [];
@@ -674,6 +677,24 @@ class ApiService {
       print('搜索失败: $e');
       return [];
     }
+  }
+
+  /// 按 source key 去重,同一 key 保留集数最多的;空 key 不参与去重
+  static List<SearchResult> _dedupeBySourceKey(List<SearchResult> results) {
+    final deduped = <String, SearchResult>{};
+    for (final r in results) {
+      if (r.source.isEmpty) {
+        deduped['__nokey_${deduped.length}'] = r;
+        continue;
+      }
+      final existing = deduped[r.source];
+      if (existing == null) {
+        deduped[r.source] = r;
+      } else if (r.episodes.length > existing.episodes.length) {
+        deduped[r.source] = r;
+      }
+    }
+    return deduped.values.toList();
   }
 
   /// 获取搜索资源列表

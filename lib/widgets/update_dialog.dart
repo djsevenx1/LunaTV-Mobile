@@ -189,14 +189,19 @@ class UpdateDialog extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                   child: Column(
                     children: [
-                      // 主要操作按钮
+                      // 主要操作按钮 - 直接下载 APK
+                      // 优先用 GitHub API 拿到的 .apk 直链,失败 fallback 到 release 详情页
                       SizedBox(
                         width: double.infinity,
                         height: 44,
                         child: ElevatedButton.icon(
                           onPressed: () async {
-                            final url = VersionService.getReleaseUrl(
-                                versionInfo.latestVersion);
+                            // 1) 优先直接下 APK(浏览器/system 下载管理器会接)
+                            final apkUrl = versionInfo.apkDownloadUrl;
+                            final fallbackUrl = versionInfo.releasePageUrl ??
+                                VersionService.getReleaseUrl(
+                                    versionInfo.latestVersion);
+                            final url = apkUrl ?? fallbackUrl;
                             final uri = Uri.parse(url);
                             if (await canLaunchUrl(uri)) {
                               await launchUrl(uri,
@@ -206,9 +211,16 @@ class UpdateDialog extends StatelessWidget {
                               Navigator.of(context).pop();
                             }
                           },
-                          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                          icon: Icon(
+                            versionInfo.apkDownloadUrl != null
+                                ? Icons.download_rounded
+                                : Icons.open_in_new_rounded,
+                            size: 18,
+                          ),
                           label: Text(
-                            '查看新版本',
+                            versionInfo.apkDownloadUrl != null
+                                ? '下载并安装 v${versionInfo.latestVersion}'
+                                : '查看新版本',
                             style: FontUtils.poppins(context,
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
@@ -224,7 +236,21 @@ class UpdateDialog extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      // APK 链接的提示(让用户知道复制到浏览器也行)
+                      if (versionInfo.apkDownloadUrl != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          '点击下载 APK,浏览器/系统下载管理器会接',
+                          style: FontUtils.poppins(context,
+                            fontSize: 11,
+                            color: themeService.isDarkMode
+                                ? const Color(0xFF888888)
+                                : const Color(0xFF999999),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                      const SizedBox(height: 4),
                       // 次要操作按钮
                       Row(
                         children: [

@@ -478,6 +478,8 @@ class UserDataService {
   // Bangumi 图片源显示名映射
   static String getBangumiImageSourceDisplayName(String key) {
     switch (key) {
+      case 'cors_proxy':
+        return 'Cors Proxy By Zwei';
       case 'cf_worker':
         return 'CF Worker 加速';
       case 'direct':
@@ -488,6 +490,8 @@ class UserDataService {
 
   static String getBangumiImageSourceKeyFromDisplayName(String name) {
     switch (name) {
+      case 'Cors Proxy By Zwei':
+        return 'cors_proxy';
       case 'CF Worker 加速':
         return 'cf_worker';
       case '直连':
@@ -512,14 +516,30 @@ class UserDataService {
   static Future<String> getBangumiImageSourceKey() async {
     if (_bangumiImageSourceCache != null) return _bangumiImageSourceCache!;
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_bangumiImageSourceKey) ?? 'direct';
-    _bangumiImageSourceCache = v;
-    return v;
+    // 旧版本没存过这个 key,默认跟 Bangumi 数据源对齐:
+    // 0) 没配过 → 默认 'cors_proxy' (和 Bangumi 数据源默认一致,
+    //    给老用户一个可用的选择,直连在国内往往访问不到)
+    // 1) 配了 → 用用户选的
+    final stored = prefs.getString(_bangumiImageSourceKey);
+    if (stored != null && stored.isNotEmpty) {
+      _bangumiImageSourceCache = stored;
+      return stored;
+    }
+    // 第一次启动,没有这个 key,默认 cors_proxy
+    _bangumiImageSourceCache = 'cors_proxy';
+    await prefs.setString(_bangumiImageSourceKey, 'cors_proxy');
+    return 'cors_proxy';
   }
 
   // 同步获取 Bangumi 图片源 key
   static String getBangumiImageSourceKeySync() {
-    return _bangumiImageSourceCache ?? 'direct';
+    return _bangumiImageSourceCache ?? 'cors_proxy';
+  }
+
+  /// 是否配了 CF Worker 域名(给 Bangumi 数据请求做兜底判断用)
+  static bool hasCfWorkerDomain() {
+    final d = _cfWorkerDomainCache;
+    return d != null && d.isNotEmpty;
   }
 
   /// 构造 Bangumi 数据请求 URL
@@ -546,12 +566,25 @@ class UserDataService {
 
   /// 构造 Bangumi 图片请求 URL
   ///
-  /// 公共 CORS 代理对 lain.bgm.tv 不友好（403），所以只支持：
-  /// CF Worker 域名（只要配了就用，不受 CF Worker 加速开关控制）> 直连
+  /// 优先级（和 Bangumi 数据源对齐）：
+  /// 1. CF Worker 域名（只要配了就用，不受 CF Worker 加速开关控制）
+  /// 2. 用户选的 cors_proxy（公共 CORS 代理）
+  /// 3. 直连
+  ///
+  /// 注意：publicCorsProxyBase 对 lain.bgm.tv 返 403，
+  /// 所以 cors_proxy 模式下图片依然可能加载失败，但用户自己选了
+  /// 就是"已知风险"，给个选择总比没有好。
   static String buildBangumiImageUrl(String originalUrl) {
+    // 1) CF Worker 域名:只看域名是否配了,不看开关
     final worker = _cfWorkerDomainCache;
     if (worker != null && worker.isNotEmpty) {
       return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
+    }
+
+    // 2) 公共 CORS 代理
+    final key = getBangumiImageSourceKeySync();
+    if (key == 'cors_proxy') {
+      return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
     }
     return originalUrl;
   }

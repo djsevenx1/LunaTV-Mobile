@@ -681,6 +681,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
         return;
       }
+
+      // (按 source key 去重已经在 ApiService.fetchSourcesData 里做了,
+      // 这里不用再 dedupe)
       setState(() {
         _sourceResults = results;
         _sourcesLoading = false;

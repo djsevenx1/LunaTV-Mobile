@@ -109,10 +109,17 @@ class VersionInfo {
   final String currentVersion;
   final String latestVersion;
   final String releaseNotes;
-  
+  /// .apk 资源直链(从 release assets 里挑的)
+  /// 没拿到时为 null,UI 应 fallback 到 releasePageUrl
+  final String? apkDownloadUrl;
+  /// Release 详情页 URL(GitHub html_url)
+  final String? releasePageUrl;
+
   VersionInfo({
     required this.currentVersion,
     required this.latestVersion,
     required this.releaseNotes,
+    this.apkDownloadUrl,
+    this.releasePageUrl,
   });
 }
