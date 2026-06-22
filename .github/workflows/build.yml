@@ -70,46 +70,39 @@ jobs:
           files: build/app/outputs/flutter-apk/app-release.apk
 
       # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
-      # 把 body 清空; 必须在它之后再用 github-script 把 v1.0.28 changelog 写回去
-      - name: Set v1.0.28 release body
+      # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
+      - name: Set release body
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/github-script@v6
         with:
           script: |
             const tagName = context.ref.replace('refs/tags/', '');
-            const body = `## 更新日志
+            // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
+            const changelogs = {
+              'v1.0.29': `## 更新日志
 
-            ### 🐛 Bug 修复
+            ### ✨ 新增功能
 
-            - **更新下载走直链，不用再跳 GitHub 详情页**
-              - \`version_service.dart\` 的 \`checkForUpdate()\` 之前只取 \`tag_name\` / \`body\`，没把 release 的 \`.apk\` 资源直链和详情页 URL 填到 \`VersionInfo\`
-              - 结果 \`update_dialog.dart\` 一直走兜底分支，按钮文案固定是"查看新版本"，跳到 \`https://github.com/.../releases/tag/vX.Y.Z\` 详情页才能下 APK
-              - 现在从 \`assets[]\` 里挑第一个 \`name\` 以 \`.apk\` 结尾的资源，把 \`browser_download_url\` 塞给 \`apkDownloadUrl\`；把 \`html_url\` 塞给 \`releasePageUrl\` 作为兜底
-              - 拿到 \`apkDownloadUrl\` 时按钮文案变成"下载并安装 vX.Y.Z"，图标换成 \`Icons.download_rounded\`
-              - \`launchUrl(uri, mode: LaunchMode.externalApplication)\` 打开 APK 直链，浏览器/系统下载管理器接管，安装体验顺滑
+            - **云记忆恢复播放源 + 进度**
+              - 之前 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 打开视频时只用 \`videoInfo.preferredSource\` 选源、\`_currentEpisodeIndex\` 永远从 0 开始，压根没读云端 \`/api/playrecords\`
+              - 结果从"继续观看"卡片点进来，源被重置到默认第一个、进度归零
+              - 现在 \`_loadSources()\` 启动时主动调 \`PageCacheService().getPlayRecords()\`，按 \`searchTitle\` 匹配最近一条云记录
+                - 拿到 \`source\` → 选源时优先用云记忆的源
+                - 拿到 \`index\` → \`_selectSource(episodeIndex:)\` 直接定位到第 N 集
+                - 拿到 \`playTime\` → \`_playEpisode()\` 开 media 后 \`await _player.seek(Duration(milliseconds: playTime))\` 跳到上次位置
+              - 行为跟上游 [MoonTV web play/page.tsx](https://github.com/senshinya/MoonTV) 对齐（那边也是 \`getAllPlayRecords() + searchTitle\` 匹配）
 
             ### 🛠 实现细节
 
-            - GitHub API 响应结构示例（v1.0.27 release）：
-              \`\`\`json
-              {
-                "tag_name": "v1.0.27",
-                "html_url": "https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.27",
-                "assets": [
-                  {
-                    "name": "app-release.apk",
-                    "browser_download_url": "https://github.com/.../releases/download/v1.0.27/app-release.apk"
-                  }
-                ]
-              }
-              \`\`\`
-            - 兜底链：拿不到 \`apkDownloadUrl\` 时（理论上不会发生，但防御一下）点按钮跳到 \`html_url\` 详情页
-            - 兼容之前 \`VersionInfo\` 的旧用法（\`apkDownloadUrl\` / \`releasePageUrl\` 是 nullable，不破坏现存调用）
+            - 新字段 \`_pendingResumeAt: Duration?\` 暂存待 seek 的位置，\`_playEpisode()\` 用完即清，避免切下一集时误触发
+            - 入口 \`videoInfo.source\` 非空时优先用其值（点击"继续观看"走的链路），为空时再走云端兜底
+            - 云端查询失败 / 没记录时静默回退到默认行为，不打断播放
 
             ---
 
-            配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 \`bgm.tv\` 自动补 UA + Referer 兜头（commit \`87435d7\`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 \`_worker.js\` 即可。`;
-
+            配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 \`bgm.tv\` 自动补 UA + Referer 兜头（commit \`87435d7\`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 \`_worker.js\` 即可。`,
+            };
+            const body = changelogs[tagName] || `Release ${tagName}`;
             const release = await github.rest.repos.getReleaseByTag({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -121,4 +114,4 @@ jobs:
               release_id: release.data.id,
               body: body,
             });
-            core.info(`set body for ${tagName} (id=${release.data.id})`);
+            core.info(`set body for ${tagName} (id=${release.data.id}, ${body.length} chars)`);
