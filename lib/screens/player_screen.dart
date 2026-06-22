@@ -711,7 +711,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 1. 云记忆里有这个 video 的源 (resume.source)
       // 2. 入口传过来的 preferredSource
       // 3. 第一个
-      SearchResult? toSelect;
+      SearchResult toSelect = results.first;
       if (resumeSourceKey.isNotEmpty) {
         for (final r in results) {
           if (r.source == resumeSourceKey) {
@@ -720,7 +720,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           }
         }
       }
-      toSelect ??= results.first;
       if (widget.preferredSource != null && widget.preferredSource!.isNotEmpty) {
         for (final r in results) {
           if (r.source == widget.preferredSource) {
