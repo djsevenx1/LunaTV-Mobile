@@ -18,7 +18,9 @@ class ContentFilterService {
 
   static const String _enabledKey = 'filter_enabled';
 
-  static bool _enabled = false;
+  // 默认开启: 18+ 源通常广告满天 + 链接不稳, 默认拦掉能省一堆事
+  // 用户可以自己在 内容过滤 设置里关掉
+  static bool _enabled = true;
 
   /// 从 SharedPreferences 加载用户自定义列表 & enabled 状态
   static Future<void> loadUserRules() async {
