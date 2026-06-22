@@ -62,28 +62,36 @@ jobs:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      # Tag 触发: 创建/更新 GitHub Release 并上传 APK
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          body: |
-            ## 更新日志
+          files: build/app/outputs/flutter-apk/app-release.apk
+
+      # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
+      # 把 body 清空; 必须在它之后再用 github-script 把 v1.0.28 changelog 写回去
+      - name: Set v1.0.28 release body
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const tagName = context.ref.replace('refs/tags/', '');
+            const body = `## 更新日志
 
             ### 🐛 Bug 修复
 
             - **更新下载走直链，不用再跳 GitHub 详情页**
-              - `version_service.dart` 的 `checkForUpdate()` 之前只取 `tag_name` / `body`，没把 release 的 `.apk` 资源直链和详情页 URL 填到 `VersionInfo`
-              - 结果 `update_dialog.dart` 一直走兜底分支，按钮文案固定是"查看新版本"，跳到 `https://github.com/.../releases/tag/vX.Y.Z` 详情页才能下 APK
-              - 现在从 `assets[]` 里挑第一个 `name` 以 `.apk` 结尾的资源，把 `browser_download_url` 塞给 `apkDownloadUrl`；把 `html_url` 塞给 `releasePageUrl` 作为兜底
-              - 拿到 `apkDownloadUrl` 时按钮文案变成"下载并安装 vX.Y.Z"，图标换成 `Icons.download_rounded`
-              - `launchUrl(uri, mode: LaunchMode.externalApplication)` 打开 APK 直链，浏览器/系统下载管理器接管，安装体验顺滑
+              - \`version_service.dart\` 的 \`checkForUpdate()\` 之前只取 \`tag_name\` / \`body\`，没把 release 的 \`.apk\` 资源直链和详情页 URL 填到 \`VersionInfo\`
+              - 结果 \`update_dialog.dart\` 一直走兜底分支，按钮文案固定是"查看新版本"，跳到 \`https://github.com/.../releases/tag/vX.Y.Z\` 详情页才能下 APK
+              - 现在从 \`assets[]\` 里挑第一个 \`name\` 以 \`.apk\` 结尾的资源，把 \`browser_download_url\` 塞给 \`apkDownloadUrl\`；把 \`html_url\` 塞给 \`releasePageUrl\` 作为兜底
+              - 拿到 \`apkDownloadUrl\` 时按钮文案变成"下载并安装 vX.Y.Z"，图标换成 \`Icons.download_rounded\`
+              - \`launchUrl(uri, mode: LaunchMode.externalApplication)\` 打开 APK 直链，浏览器/系统下载管理器接管，安装体验顺滑
 
             ### 🛠 实现细节
 
             - GitHub API 响应结构示例（v1.0.27 release）：
-              ```json
+              \`\`\`json
               {
                 "tag_name": "v1.0.27",
                 "html_url": "https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.27",
@@ -94,12 +102,23 @@ jobs:
                   }
                 ]
               }
-              ```
-            - 兜底链：拿不到 `apkDownloadUrl` 时（理论上不会发生，但防御一下）点按钮跳到 `html_url` 详情页
-            - 兼容之前 `VersionInfo` 的旧用法（`apkDownloadUrl` / `releasePageUrl` 是 nullable，不破坏现存调用）
+              \`\`\`
+            - 兜底链：拿不到 \`apkDownloadUrl\` 时（理论上不会发生，但防御一下）点按钮跳到 \`html_url\` 详情页
+            - 兼容之前 \`VersionInfo\` 的旧用法（\`apkDownloadUrl\` / \`releasePageUrl\` 是 nullable，不破坏现存调用）
 
             ---
 
-            配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 `bgm.tv` 自动补 UA + Referer 兜头（commit `87435d7`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 `_worker.js` 即可。
-          generate_release_notes: true
-          files: build/app/outputs/flutter-apk/app-release.apk
+            配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 \`bgm.tv\` 自动补 UA + Referer 兜头（commit \`87435d7\`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 \`_worker.js\` 即可。`;
+
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tagName,
+            });
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              body: body,
+            });
+            core.info(`set body for ${tagName} (id=${release.data.id})`);
