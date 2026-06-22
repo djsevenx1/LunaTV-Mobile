@@ -71,62 +71,35 @@ jobs:
           body: |
             ## 更新日志
 
-            ### ✨ 新增功能
-
-            - **加回最简 CF Worker 加速**（开关 + 域名配置）
-              - 通用代理 `buildProxiedUrl()`：根据链接类型自动选 `/?url=` 或 `/m3u8?url=` 端点
-              - CORSAPI 加 `/m3u8?url=` 端点：拉 m3u8 后把 `.ts` 段链接重写到 worker 自身，支持 master playlist 递归
-              - 播放器源测速走 worker，测得延迟更接近用户实际播放延迟
-
-            - **Bangumi 数据/图片代理**
-              - 数据源 3 选 1：直连 / Cors Proxy By Zwei (`ciao-cors.is-an.org`) / CF Worker 加速
-              - 图片源 2 选 1：直连 / CF Worker 加速
-                - ciao-cors 对 `lain.bgm.tv` 返 403，所以图片必须走自己的 CF Worker
-              - **Bangumi 代理不受 CF Worker 加速开关控制**，只要域名配置了就生效
-
-            - **检查更新修复**
-              - `version_service.dart` 之前查的是 `MoonTechLab/LunaTV`（错的）
-              - 改为 `djsevenx1/LunaTV-Mobile`，检查更新恢复正常
-
             ### 🐛 Bug 修复
 
-            - `player_screen.dart` 补 `user_data_service.dart` import
-              - v1.0.22 第一次构建失败原因：`_pingSource` 调 `UserDataService.buildProxiedUrl` 但 import 漏了
-            - Bangumi 代理逻辑：之前受 `cf_worker_enabled` 开关控制，开关关就连域名都不读
-              - 现在只判域名是否非空，配置即生效
+            - **更新下载走直链，不用再跳 GitHub 详情页**
+              - `version_service.dart` 的 `checkForUpdate()` 之前只取 `tag_name` / `body`，没把 release 的 `.apk` 资源直链和详情页 URL 填到 `VersionInfo`
+              - 结果 `update_dialog.dart` 一直走兜底分支，按钮文案固定是"查看新版本"，跳到 `https://github.com/.../releases/tag/vX.Y.Z` 详情页才能下 APK
+              - 现在从 `assets[]` 里挑第一个 `name` 以 `.apk` 结尾的资源，把 `browser_download_url` 塞给 `apkDownloadUrl`；把 `html_url` 塞给 `releasePageUrl` 作为兜底
+              - 拿到 `apkDownloadUrl` 时按钮文案变成"下载并安装 vX.Y.Z"，图标换成 `Icons.download_rounded`
+              - `launchUrl(uri, mode: LaunchMode.externalApplication)` 打开 APK 直链，浏览器/系统下载管理器接管，安装体验顺滑
 
-            ### 🛠 技术细节
+            ### 🛠 实现细节
 
-            - **CORSAPI**（CF Worker 代理后端）
-              - 新增 `/?url=` 通用代理端点
-              - 新增 `/m3u8?url=` 端点，自动重写 `.ts` 子链接为 `worker/?url=...`
-              - 自带 self-fetch 循环检测
-
-            - **数据流**（以 Bangumi 日历为例）
+            - GitHub API 响应结构示例（v1.0.27 release）：
+              ```json
+              {
+                "tag_name": "v1.0.27",
+                "html_url": "https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.27",
+                "assets": [
+                  {
+                    "name": "app-release.apk",
+                    "browser_download_url": "https://github.com/.../releases/download/v1.0.27/app-release.apk"
+                  }
+                ]
+              }
               ```
-              app
-              → https://<user-worker>.workers.dev/?url=https%3A%2F%2Fapi.bgm.tv%2Fcalendar
-                → CF Worker (CORSAPI) fetch api.bgm.tv/calendar
-                  → 拿 JSON 返回给 app
-              ```
-
-            - **不包含**（和之前方案对比）
-              - 不测优选 IP
-              - 不起本地代理 server
-              - 不查 CF Anycast 池
-              - worker 域名走 Anycast 路由，简单可靠
+            - 兜底链：拿不到 `apkDownloadUrl` 时（理论上不会发生，但防御一下）点按钮跳到 `html_url` 详情页
+            - 兼容之前 `VersionInfo` 的旧用法（`apkDownloadUrl` / `releasePageUrl` 是 nullable，不破坏现存调用）
 
             ---
 
-            ### 📦 配套部署
-
-            1. 部署 CORSAPI 到 Cloudflare Worker：https://github.com/djsevenx1/CORSAPI
-            2. 在 App 菜单填入 worker 域名（如 `xxx.workers.dev`）
-            3. 播放器测速自动走 worker
-            4. Bangumi 数据/图片自动走 worker
-
-            ---
-
-            安装提示：覆盖安装 v1.0.21 不会丢数据（仅修 build 流程）。
+            配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 `bgm.tv` 自动补 UA + Referer 兜头（commit `87435d7`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 `_worker.js` 即可。
           generate_release_notes: true
           files: build/app/outputs/flutter-apk/app-release.apk
