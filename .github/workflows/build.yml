@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ main, 'trae/**' ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
