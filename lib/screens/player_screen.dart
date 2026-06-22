@@ -865,7 +865,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // 从播放页返回详情页: 先保存一次, 恢复竖屏
+              // 从播放页返回详情页: 先保存一次, 恢复竖屏, 暂停播放
+              // (重点:必须先 stop/pause,否则 detail 视图上 player 还在后台继续播)
+              try {
+                await _player.stop();
+              } catch (_) {}
               await _saveCurrentProgress(force: true);
               await _onExitFullscreen();
               if (mounted) {
@@ -1536,8 +1540,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
               _iconBtn(
                 icon: Icons.arrow_back,
                 onTap: () {
-                  _onExitFullscreen();
-                  setState(() => _phase = 'detail');
+                  // 重点:从播放视图点返回箭头时也要先 stop,否则 player
+                  // 还在后台继续播,detail 视图上还能听到声音
+                  () async {
+                    try {
+                      await _player.stop();
+                    } catch (_) {}
+                    if (!mounted) return;
+                    await _onExitFullscreen();
+                    if (!mounted) return;
+                    setState(() => _phase = 'detail');
+                  }();
                 },
               ),
               const SizedBox(width: 4),

@@ -73,7 +73,11 @@ Future<String> getImageUrl(
 
 /// 返回加载网络图片所需的 HTTP 头（主要用于绕过特定站点的反盗链）。
 /// 注意：只有当 [source] 为 'douban' 或 URL 指向 douban 域名时才添加 Referer/UA。
-/// bangumi 源（lain.bgm.tv）也需要 UA，否则图片请求会被拒绝。
+/// bangumi 源（lain.bgm.tv）需要 UA + Referer，否则图片请求会被拒绝。
+///
+/// 重要：原始 URL 可能是被 CF Worker / ciao-cors 代理过的
+/// (形如 https://xx.workers.dev/?url=https%3A%2F%2Flain.bgm.tv%2F...),
+/// 所以判断 bgm.tv 时要全 URL 搜,不能只匹配域名段。
 Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
   final bool isDoubanSource = (source == 'douban') ||
       RegExp(r'https?://([^/]+\.)?douban(io|)\.com', caseSensitive: false)
@@ -88,13 +92,14 @@ Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
     };
   }
 
-  // Bangumi 图片服务器 lain.bgm.tv 需要 User-Agent
+  // Bangumi 图片服务器 lain.bgm.tv 需要 User-Agent + Referer
+  // 全 URL 搜 bgm.tv,避免被代理后 URL 域名变成 workers.dev 而漏检
   final bool isBangumiSource = (source == 'bangumi') ||
-      RegExp(r'https?://([^/]+\.)?bgm\.tv', caseSensitive: false)
-          .hasMatch(imageUrl);
+      imageUrl.toLowerCase().contains('bgm.tv');
   if (isBangumiSource) {
     return <String, String>{
-      'User-Agent': 'senshinya/LunaTV/1.0.0 (Android) (http://github.com/senshinya/LunaTV)',
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+      'Referer': 'https://bgm.tv/',
       'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     };
   }
