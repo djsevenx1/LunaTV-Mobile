@@ -88,6 +88,20 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.49': `## 更新日志
+
+            ### 🎨 体验改进
+
+            - **播放历史合并同一影片多源记录**
+              - 现象: 同一个电影 (比如"蜘蛛侠") 在源 A 看过、源 B 也看过, 历史里会显示两条一样的卡片, 列表显得重复
+              - 修复 ([history_grid.dart](file:///workspace/lib/widgets/history_grid.dart)):
+                - 新增 \`_dedupeByMovie()\`, 以 \`searchTitle\` (或 \`title\` 兜底) 为 key 合并多源记录
+                - 同一影片只显示一条卡片, 用 \`saveTime\` 最新的源作为主代表 (用户最近看的源)
+                - 全部源记录保留在 \`_recordSourceMap\`, 方便 \`removeHistoryFromUI\` 按 (source, id) 删
+                - UI 用 \`_dedupedRecords\` 渲染, \`build()\` 空状态判断也跟着改
+              - 原始 \`_playRecords\` 仍保留全量, 删条目时同步从 map 移除并重算 dedup
+
+            ---`,
               'v1.0.48': `## 更新日志
 
             ### 🐛 修复
