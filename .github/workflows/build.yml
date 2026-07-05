@@ -79,6 +79,32 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.36': `## 更新日志
+
+            ### 🐛 修复
+
+            - **平板模式下短剧卡片视觉问题**（v1.0.35 列数修复后引入）
+              - 现象：v1.0.35 把平板列数从 3 列改成 6~8 列后，每张卡片变窄，但卡片内部字号没相应缩放
+                - 集数胶囊 "X集" 字号还是 10、padding 6/3，在 135~185px 的窄卡片上占比偏大
+                - 评分胶囊堆叠在集数胶囊下方 (top:28)，把海报左上角纵向占掉 ~50px
+              - 修复：
+                - [short_drama_card.dart](file:///workspace/lib/widgets/short_drama_card.dart) 内部字号/padding 按 \`width < 200\` 阈值缩放
+                  - 集数胶囊字号 10→9，padding 6/3→4/2
+                  - 评分胶囊同上，星标 icon 10→8
+                  - 海报底部标题 12→11
+                  - 更新时间字号 10→9，外层 SizedBox 6→4
+                - 阈值 200 覆盖手机(~100)+平板(135~185)，PC 大卡(>300)保持原大小
+                - 评分胶囊从 left:4 top:28 移到 right:4 top:4，避免和集数胶囊堆叠挤占海报
+              - [short_drama_screen.dart](file:///workspace/lib/screens/short_drama_screen.dart) 网格层面同步调整
+                - \`mainAxisSpacing\` 平板/手机下 16→12，让窄卡视觉更紧凑
+                - \`childAspectRatio\` 中文字区高度按 \`cardWidth < 200\` 从 22→16，与卡片内字号缩放对齐
+
+            ### 🛠 实现细节
+
+            - 字号缩放阈值统一用 \`width < 200\`，覆盖手机 + 平板所有列数；PC 大卡不触发
+            - 评分胶囊移到右上角，与 [video_card.dart](file:///workspace/lib/widgets/video_card.dart) 电视剧卡片保持一致
+
+            ---`,
               'v1.0.35': `## 更新日志
 
             ### 🐛 修复

@@ -176,13 +176,17 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                     ),
                   ),
                   // 左上角：集数标签（只在集数>1时显示）
+                  // 平板 6~8 列下卡片变窄,字号/padding 随 width 缩放,避免胶囊占比过大
+                  // 阈值 200 覆盖手机(100)与平板(135~185),PC 大卡(>300)保持原大小
                   if (widget.drama.episodeCount > 1)
                     Positioned(
                       top: 4,
                       left: 4,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 3),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: width < 200 ? 4 : 6,
+                          vertical: width < 200 ? 2 : 3,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.7),
                           borderRadius: BorderRadius.circular(4),
@@ -191,20 +195,23 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                           '${widget.drama.episodeCount}集',
                           style: FontUtils.poppins(context,
                             color: Colors.white,
-                            fontSize: 10,
+                            fontSize: width < 200 ? 9 : 10,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
                     ),
-                  // 左上角下方：评分标签（只在评分>0时显示）
+                  // 右上角：评分标签（只在评分>0时显示)
+                  // 改到右上角,避免和集数标签在左上角纵向堆叠挤占海报
                   if (widget.drama.voteAverage > 0)
                     Positioned(
-                      top: widget.drama.episodeCount > 1 ? 28 : 4,
-                      left: 4,
+                      top: 4,
+                      right: 4,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 3),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: width < 200 ? 4 : 6,
+                          vertical: width < 200 ? 2 : 3,
+                        ),
                         decoration: BoxDecoration(
                           gradient: const LinearGradient(
                             colors: [
@@ -217,17 +224,17 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.star,
                               color: Colors.white,
-                              size: 10,
+                              size: width < 200 ? 8 : 10,
                             ),
                             const SizedBox(width: 2),
                             Text(
                               _formatScore(widget.drama.voteAverage),
                               style: FontUtils.poppins(context,
                                 color: Colors.white,
-                                fontSize: 10,
+                                fontSize: width < 200 ? 9 : 10,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -244,7 +251,9 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                       widget.drama.name,
                       style: FontUtils.poppins(context,
                         color: Colors.white,
-                        fontSize: width < 100 ? 11 : 12,
+                        fontSize: width < 200
+                            ? 11
+                            : 12,
                         fontWeight: FontWeight.w500,
                       ),
                       maxLines: 1,
@@ -320,13 +329,13 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                     ),
                 ],
               ),
-              const SizedBox(height: 6),
-              // 更新时间
+              SizedBox(height: width < 200 ? 4 : 6),
+              // 更新时间(窄卡片下字号同步缩小,保持视觉比例)
               if (_formatUpdateTime(widget.drama.updateTime).isNotEmpty)
                 Text(
                   _formatUpdateTime(widget.drama.updateTime),
                   style: FontUtils.poppins(context,
-                    fontSize: 10,
+                    fontSize: width < 200 ? 9 : 10,
                     color: themeService.isDarkMode
                         ? const Color(0xFF888888)
                         : const Color(0xFF999999),

@@ -369,15 +369,19 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     final double gridWidth = screenWidth - horizontalPadding * 2;
     final double spacing = isPC ? 16.0 : 12.0;
     final double cardWidth = (gridWidth - spacing * (crossAxisCount - 1)) / crossAxisCount;
+    // 平板 6~8 列下卡片更窄,行间距收紧 + 文字区按 cardWidth 缩放,避免海报视觉松散
+    final double mainAxisSpacing = isPC ? 16.0 : 12.0;
+    // PC 大卡文字区给 22,手机/平板窄卡统一给 16,与 ShortDramaCard 内部缩字号一致
+    final double textAreaHeight = cardWidth < 200 ? 16.0 : 22.0;
 
     return SliverPadding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       sliver: SliverGrid(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
-          mainAxisSpacing: 16,
+          mainAxisSpacing: mainAxisSpacing,
           crossAxisSpacing: spacing,
-          childAspectRatio: cardWidth / (cardWidth * 1.5 + 22),
+          childAspectRatio: cardWidth / (cardWidth * 1.5 + textAreaHeight),
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) {

@@ -127,3 +127,89 @@ fail-over 到 `google()` / `mavenCentral()`：
 - Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.35>
   - assets: `app-release.apk`
   - body: 729 字符（v1.0.35 changelog + 之前的实现细节）
+
+---
+
+# v1.0.36 · 平板短剧卡片视觉问题（v1.0.35 引入）
+
+## 现象
+
+用户安装 v1.0.35 后立即反馈：
+
+> 平板模式集数显示好大 / 海报尺寸也好变扭
+
+## 排查
+
+v1.0.35 把短剧页平板列数从 3 列改到 6~8 列后，每张卡片宽度从 ~120 缩到 135~185，
+但 [short_drama_card.dart](file:///workspace/lib/widgets/short_drama_card.dart)
+内部的字号 / padding 没跟着缩放：
+
+- 集数胶囊（"X集"）字号固定 10、padding 6/3，在窄卡片上占比偏大
+- 评分胶囊堆叠在集数胶囊下方（`top: 28`），把海报左上角纵向占掉 ~50px
+- 海报底部标题字号固定 12，更新时间字号 10，窄卡片下偏大
+
+对比 [video_card.dart](file:///workspace/lib/widgets/video_card.dart)
+（电视剧页卡片）：
+
+- 评分类标签放在右上角，不和左上角的标签纵向堆叠
+- 不同胶囊用颜色区分（绿色 / 粉色 / 黄橙渐变），视觉边界清晰
+
+[short_drama_screen.dart](file:///workspace/lib/screens/short_drama_screen.dart)
+层面：
+
+- `mainAxisSpacing: 16` 在平板 6~8 列下偏大，让窄卡视觉松散
+- `childAspectRatio` 的额外文字区固定 22，窄卡片下相对偏大
+
+## 修复
+
+### 卡片层 · [short_drama_card.dart](file:///workspace/lib/widgets/short_drama_card.dart)
+
+字号 / padding 按 `width < 200` 阈值缩放，覆盖手机（~100）+ 平板（135~185），
+PC 大卡（>300）保持原大小：
+
+| 元素           | 原值          | 新值（width<200） |
+| -------------- | ------------- | ----------------- |
+| 集数胶囊字号   | 10            | 9                 |
+| 集数胶囊 padding | h:6 v:3     | h:4 v:2           |
+| 评分胶囊字号   | 10            | 9                 |
+| 评分胶囊 icon  | 10            | 8                 |
+| 评分胶囊 padding | h:6 v:3     | h:4 v:2           |
+| 海报底部标题   | 11 / 12       | 11                |
+| 更新时间字号   | 10            | 9                 |
+| 更新时间 SizedBox | 6          | 4                 |
+
+评分胶囊位置：`left:4 top:28` → `right:4 top:4`，移到右上角，避免和
+集数胶囊在左上角纵向堆叠挤占海报。
+
+### 网格层 · [short_drama_screen.dart](file:///workspace/lib/screens/short_drama_screen.dart)
+
+```dart
+final double mainAxisSpacing = isPC ? 16.0 : 12.0;       // 平板/手机 16→12
+final double textAreaHeight = cardWidth < 200 ? 16.0 : 22.0;   // 22→16
+childAspectRatio: cardWidth / (cardWidth * 1.5 + textAreaHeight),
+```
+
+`mainAxisSpacing` 平板下从 16 减到 12，让窄卡视觉更紧凑；`textAreaHeight`
+按 `cardWidth < 200` 从 22 减到 16，跟卡片内字号缩放对齐。
+
+## 改动文件
+
+- `lib/widgets/short_drama_card.dart` — 字号 / padding / 评分胶囊位置
+- `lib/screens/short_drama_screen.dart` — `mainAxisSpacing` + `textAreaHeight`
+- `pubspec.yaml` — version 1.0.35+1 → 1.0.36+1
+- `.github/workflows/build.yml` — 追加 v1.0.36 changelog
+
+## 构建 / 发布
+
+走 v1.0.35 验证过的稳路径：从 main HEAD 打 `v1.0.36` tag → Actions tag 构建
+触发 Release → `softprops/action-gh-release` 创建 release → `github-script`
+把 changelog 写回 release body。
+
+## Release
+
+- tag: `v1.0.36`
+- 分支: `main` HEAD
+- 版本: 1.0.36+1
+- changelog: 已在 `build.yml` 的 `changelogs` map 顶部追加
+- Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.36>
+
