@@ -912,9 +912,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _selectSource(SearchResult result, {int episodeIndex = 0}) {
-    final clampedIndex =
-        episodeIndex.clamp(0, result.episodes.isEmpty ? 0 : result.episodes.length - 1);
+  /// v1.0.47: episodeIndex 默认值改成 _currentEpisodeIndex 而不是 0
+  /// 之前默认值是 0, 导致用户手动切源时 episode 被静默重置 (明明看到第 3 集,
+  /// 点切源就被弹回第 1 集, 因为新源默认从 0 开始播)
+  void _selectSource(SearchResult result, {int? episodeIndex}) {
+    // 不传 episodeIndex: 尽量保留当前 episode
+    //   - 切到的就是当前源 (罕见, 防呆): 不动 episode
+    //   - 切到新源: 尽量用当前 episode (新源可能有这么多集)
+    final int target = episodeIndex ?? _currentEpisodeIndex;
+    final maxIdx = result.episodes.isEmpty ? 0 : result.episodes.length - 1;
+    final clampedIndex = target.clamp(0, maxIdx);
     setState(() {
       _selectedSource = result;
       _currentEpisodeIndex = clampedIndex;

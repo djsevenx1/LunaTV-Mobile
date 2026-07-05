@@ -88,6 +88,20 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.47': `## 更新日志
+
+            ### 🐛 修复
+
+            - **手动切源时 episode 被静默重置 (v1.0.40 引入, v1.0.47 修)**
+              - 现象: 看到第 3 集, 切到另一个源, 仍从第 1 集开始
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                \`_selectSource(result, {int episodeIndex = 0})\` 默认值是 0, 用户点源 tile
+                (line 1464) 调 \`_selectSource(s)\` 不传参 → 切源后 episodeIndex = 0
+              - 修复: \`episodeIndex\` 改成可空, 默认 null, null 时用 \`_currentEpisodeIndex\`
+                (用户当前看的集), 新源没有这么多集时 clamp 到最后一集
+                (例: 当前第 5 集, 切到只有 3 集的新源 → 落到第 3 集)
+
+            ---`,
               'v1.0.46': `## 更新日志
 
             ### 🐛 修复
