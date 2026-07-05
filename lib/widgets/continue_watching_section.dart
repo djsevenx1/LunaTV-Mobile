@@ -452,8 +452,8 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
 
   @override
   Widget build(BuildContext context) {
-    // 如果没有数据且不在加载中，隐藏组件
-    if (!_isLoading && _playRecords.isEmpty) {
+    // v1.0.49: 用 _dedupedRecords 替换 _playRecords, 跟 UI 渲染保持一致
+    if (!_isLoading && _dedupedRecords.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -697,13 +697,15 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
             controller: _scrollController,
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _playRecords.length,
+            // v1.0.49: 用 _dedupedRecords 替换 _playRecords, 合并同影片多源
+            // (字段 v1.0.48 就有了, 但 UI 没接, 之前是死代码)
+            itemCount: _dedupedRecords.length,
             itemBuilder: (context, index) {
-              final playRecord = _playRecords[index];
+              final playRecord = _dedupedRecords[index];
               return Container(
                 width: cardWidth,
                 margin: EdgeInsets.only(
-                  right: index < _playRecords.length - 1 ? spacing : 0,
+                  right: index < _dedupedRecords.length - 1 ? spacing : 0,
                 ),
                 child: VideoCard(
                   videoInfo: VideoInfo.fromPlayRecord(playRecord),
@@ -869,6 +871,16 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
     setState(() {
       _playRecords
           .removeWhere((record) => record.source == source && record.id == id);
+      // v1.0.49: 同步从 _recordSourceMap 移除, 然后整组重算 (跟 history_grid 同模板)
+      _recordSourceMap.forEach((key, list) {
+        list.removeWhere((r) => r.source == source && r.id == id);
+      });
+      _recordSourceMap.removeWhere((_, list) => list.isEmpty);
+      _dedupedRecords = _recordSourceMap.values
+          .map((list) =>
+              (list..sort((a, b) => b.saveTime.compareTo(a.saveTime))).first)
+          .toList()
+        ..sort((a, b) => b.saveTime.compareTo(a.saveTime));
     });
   }
 }

@@ -101,6 +101,20 @@ jobs:
                 - UI 用 \`_dedupedRecords\` 渲染, \`build()\` 空状态判断也跟着改
               - 原始 \`_playRecords\` 仍保留全量, 删条目时同步从 map 移除并重算 dedup
 
+            - **首页「继续观看」同样合并同一影片多源 (v1.0.48 dedup 字段未接 UI, v1.0.49 修)**
+              - 现象: 首页"继续观看"区, 同一个电影多源看过也显示多条
+              - 根因 ([continue_watching_section.dart](file:///workspace/lib/widgets/continue_watching_section.dart)):
+                - v1.0.48 加了 \`_dedupedRecords\` / \`_recordSourceMap\` 字段和 \`_dedupeByMovie()\`,
+                  也设了 dedup 结果
+                - 但 \`ListView.builder\` 还用 \`_playRecords\` 渲染, 空状态判断也用 \`_playRecords\`,
+                  等于 dedup 字段是死代码
+                - \`removePlayRecordFromUI\` 也只删 \`_playRecords\`, 不重算 dedup
+              - 修复 (本版本):
+                - \`ListView.builder\` \`_playRecords\` → \`_dedupedRecords\`, 间距判断跟着改
+                - \`build()\` 空状态 \`_playRecords.isEmpty\` → \`_dedupedRecords.isEmpty\`
+                - \`removePlayRecordFromUI\` 同步从 \`_recordSourceMap\` 移除并重算 dedup
+                - 跟 [history_grid.dart](file:///workspace/lib/widgets/history_grid.dart) 同模板
+
             ### 🐛 修复
 
             - **音量手势慢滑会"抖" (亮度同款 bug 残留, v1.0.49 修)**
