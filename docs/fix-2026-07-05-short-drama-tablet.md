@@ -410,30 +410,51 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
   → 效果: Android 核心包走 Google 直接通道, Aliyun 502 只丢个别
     非 Android 核心 artifact, 不再卡死整个构建
 
+第六次 push: 又挂了 (step 10)
+  → 原因是 `org.eclipse.ee4j:project:1.0.5` / `com.google.errorprone:error_prone_annotations:2.11.0`
+    这些非 Android 核心包, 不会进 google() 仓库, 落到 Aliyun 还是 502
+  → google() 提前的修复**只对 Android 核心包有效**, Maven Central 那一波还是 502
+  → 单一 Aliyun 镜像不够, 必须多镜像互备
+
+第七次 push (这次): 全面加固
+  1. [android/build.gradle.kts](file:///workspace/android/build.gradle.kts) 加 Huawei + Tencent 镜像
+     - 镜像链: google() → Aliyun(google/public/gradle-plugin) → Huawei(2 个 URL) → Tencent → mavenCentral()
+     - Aliyun/Huawei/Tencent 任一挂, 其他能兜住
+  2. [android/settings.gradle.kts](file:///workspace/android/settings.gradle.kts) 同样加华为腾讯
+  3. [android/gradle.properties](file:///workspace/android/gradle.properties) 加 Gradle 网络弹性配置
+     - `http.connectionTimeout=60s` / `socketTimeout=300s` / `retry.max.attempts=5`
+     - 镜像返回 5xx 时 Gradle 内部重试 5 次, 间隔 1s 起
+  4. [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) step 10 套 nick-fields/retry
+     - 整个 step 失败时重试 3 次, 间隔 30s
+     - 即使 Gradle 重试也救不回来, workflow 层再兜一道
+
 ## 教训
 
 1. **Gradle fail-over 不像看上去那样工作** — 多个 repo 并列时,
    Gradle 在某个 repo 失败后会**整批 disable 它**, 不会继续尝试后续的 repo。
    所以"镜像在前 + 兜底在后"在 Gradle 这里**不是真的 fail-over**。
    真要兜底, 必须把稳定源 (google() / mavenCentral()) 放前面。
-2. **Dart refactor 改 state 字段名时，所有引用要一次全改**——
+2. **单一镜像不够, 多镜像互备才稳** — 国内云厂商的镜像 (Aliyun/Huawei/Tencent)
+   都会时不时 502, 必须**至少 3 个互备**才能把同时挂的概率压到极低。
+3. **Gradle 配置必须容忍 502** — 镜像 502 是常态, 必须用 retry + 多镜像 + 长超时
+   三道兜底, 不能假设"挂了就 retry 一次就好"。
+4. **Dart refactor 改 state 字段名时，所有引用要一次全改**——
    这次我从 state 字段 `_bannerWidth` 改成 `build()` 里的局部变量
    `bannerWidth`, 函数签名也改了, 但 PageView 的 itemBuilder 里
    调用没改到, 导致编译失败 2 次。改完应该 grep 一遍所有引用。
-3. **build.yml changelog 里的 markdown 反引号必须转义**——
+5. **build.yml changelog 里的 markdown 反引号必须转义**——
    JS 模板字符串里 `\` \`` 是单字符转义, `_\`x\`_` 才会被当成 markdown
    反引号而不是 JS 字符串结束符。后续加新 changelog 段要小心。
-4. **502 是网络问题, 不可预测** — 同一份代码连续 2 次构建可能 1 次过 1 次挂。
-   所以 Gradle 镜像策略必须能容忍 502, 不能假设"挂了就 retry"。
 
 ## 改动文件
 
 - `lib/screens/player_screen.dart` — 两个选集网格套 LayoutBuilder
 - `lib/widgets/hero_banner.dart` — filterQuality.high / memCacheWidth 重算
-- `android/build.gradle.kts` — google() 提前到第一位
-- `android/settings.gradle.kts` — google() 提前到第一位
+- `android/build.gradle.kts` — google() 第一 + Huawei/Tencent 兜底
+- `android/settings.gradle.kts` — google() 第一 + Huawei/Tencent 兜底
+- `android/gradle.properties` — 网络超时 + 重试
+- `.github/workflows/build.yml` — step 10 套 nick-fields/retry + 追加 v1.0.37/v1.0.38 changelog
 - `pubspec.yaml` — version 1.0.37+1 → 1.0.38+1
-- `.github/workflows/build.yml` — 追加 v1.0.37/v1.0.38 changelog
 
 ## Release
 
