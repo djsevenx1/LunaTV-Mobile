@@ -101,7 +101,15 @@ class PageCacheService
         return DataOperationResult.success(records);
       }
     } catch (e) {
-      return DataOperationResult.error('获取播放记录失败: ${e.toString()}');
+      // v1.0.50: 网络失败时 fallback local (savePlayRecord 内部双写),
+      // 防止 paused/杀 App 时云端没写盘, 重开又从 0 开始
+      try {
+        final localRecords = await LocalModeStorageService.getPlayRecords();
+        if (localRecords.isNotEmpty) {
+          setCache(cacheKey, localRecords);
+          return DataOperationResult.success(localRecords);
+        }
+      } catch (_) {}
     }
 
     return DataOperationResult.error('获取播放记录失败');
@@ -154,6 +162,17 @@ class PageCacheService
 
     // 优先操作缓存
     _addPlayRecordToCache(playRecord);
+
+    // v1.0.50: 兜底双写 local — paused/杀 App 时 unawaited 的网络
+    // 请求可能在 OS grace period 内没完成, 导致云端 playTime 没写盘.
+    // 这里先 await 一份 local (SharedPreferences 写入毫秒级, paused 时
+    // 也能完成), 网络失败 / 杀进程也至少有 local 数据, 下次启动
+    // getPlayRecords 走网络失败时 fallback 到 local 兜底.
+    try {
+      await LocalModeStorageService.savePlayRecord(playRecord);
+    } catch (_) {
+      // local 写失败静默, 不影响主路径
+    }
 
     try {
       final response = await ApiService.savePlayRecord(playRecord, context);

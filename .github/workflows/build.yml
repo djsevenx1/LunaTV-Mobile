@@ -88,6 +88,89 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.50': `## 更新日志
+
+            ### 🎨 视觉微调
+
+            - **中央 ± 按钮底色改回白色毛玻璃 (v1.0.49 黑色透明作废)**
+              - 现象: v1.0.49 把 ± 按钮 + 中央播放按钮改成 \`Colors.black.withOpacity(0.7)\`,
+                想跟左右亮度/音量浮窗统一黑色风
+              - 用户反馈: 看着跟"播控按钮"割裂, 之前白色毛玻璃 (kLunaFloatBtnBg) 才是 LunaTV 风格
+              - 修复 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - \`_buildSeekCircleButton\` 背景 \`Colors.black.withOpacity(0.7)\` → \`kLunaFloatBtnBg\` (0x26FFFFFF, 白色 15% 透明)
+                - BackdropFilter 模糊 (sigmaX/Y=12) + 白色 20% 边 + 阴影 保留
+                - 整圈按钮 (左 -6 / 中播放 / 右 +6) 三个都是白色毛玻璃
+
+            - **中央 ± 按钮往中央再多挪一点 (避开亮度/音量浮窗)**
+              - 现象: v1.0.49 sideOffset 改成 40/60 (竖屏/全屏) 之后,
+                用户反馈"挡着亮度和声音控件"
+                - ± 按钮中心在 68px / 84px 离屏左
+                - 亮度浮窗在 left=32 width=56, 中心 60px 离屏左
+                - 两个重叠! 拖动调亮度时 ± 按钮正好叠在亮度浮窗上
+              - 修复 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - sideOffset 40/60 → 110/140 (竖屏/全屏)
+                - ± 按钮中心移到 138px / 168px 离屏左
+                - 亮度浮窗 32~88, 音量浮窗 屏宽-88~屏宽-32, 中间留出 88~屏宽-88 区间
+                - ± 按钮完全落在中央 1/2 区域里, 不再跟两侧浮窗重叠
+
+            ### 🐛 修复
+
+            - **播放进度保存丢失 (home 键 / 上滑杀 App 后下次打开从 0 开始)**
+              - 现象: 看到 12 分钟, 按 home 键或上滑杀 App, 重开又是 0 开始
+                (之前 ed57928 修了 onPopInvoked 路径, 但 home 键 / 杀 App 路径还没修)
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - \`dispose()\` 里 \`_saveCurrentProgress(force: true)\` 没 await, fire-and-forget
+                - 然后同步 \`_player.stop()\` 把 state.position 重置成 0
+                - \`super.dispose()\` 立即返回, 那笔 fire-and-forget 走网络没完成就被切断
+                - 即便 \`_currentPosition\` 兜底拿到了 12 分钟, PageCacheService().savePlayRecord
+                  那笔 await 也没机会 await 完, playTime 没写盘
+                - home 键走 AppLifecycleState.paused 但代码没监听, 靠 10s progressTimer 救场,
+                  进度没在 10s 内就被上滑杀的话还是丢
+              - 修复 (本版本):
+                - \`_PlayerScreenState\` 加 \`with WidgetsBindingObserver\`
+                - \`didChangeAppLifecycleState\`: paused/inactive/hidden 时立即 \`unawaited _saveCurrentProgress(force: true)\`
+                - \`dispose()\` 改成 \`unawaited _disposeAndSave()\`, 内部串行 await \`save → stop → dispose\`
+                - 进程上滑杀时 OS 给 grace period, 大概率能完成网络写盘
+                - 配套: \`dispose()\` 里 \`WidgetsBinding.instance.removeObserver(this)\` 防泄漏
+
+            - **进度保存双写 local 兜底 (paused/杀 App 后网络没完成也保得住)**
+              - 现象: v1.0.50 第一版只加了 didChangeAppLifecycleState 监听
+                + dispose 串行 await, 但都是 unawaited / fire-and-forget 走网络
+                - 普通用户 home 键切后台, 5s 内 OS 杀 App 是常态
+                - ApiService.savePlayRecord 走 HTTP 几十~几百 ms, **5s 内能完成**
+                - 但 Android 12+ 杀后台激进, 部分机型 1-2s 内就杀, **网络请求来不及完成**
+                - 用户测试: home 键切后台, 重开 → playTime 还是 0 (云端没写)
+              - 根因: paused 触发时只能 fire-and-forget, 不能 await (回调是 void 同步),
+                即便 OS grace period 也可能被激进杀后台策略打断
+              - 修复 ([page_cache_service.dart](file:///workspace/lib/services/page_cache_service.dart)):
+                - \`savePlayRecord\` 普通 mode 也**先 await 一份 local**
+                  (SharedPreferences 写入毫秒级, 1-2s 内能完成)
+                  + 后 await ApiService 网络写云端 (best-effort)
+                - \`getPlayRecordsDirect\` 网络失败时 fallback local,
+                  下次启动从 local 兜底拿到最新进度
+                - local 始终保持最新 (每次 save 覆盖), 不污染普通 mode 用户体验
+                  (普通 mode 用户日常从云端拉, local 仅作 fallback)
+
+            - **修复 resume 场景下立即 save 覆盖云端进度 (根因修复)**
+              - 现象: 看到 12 分钟, 正常返回详情页, 重开又从 0 开始
+                (不是杀后台, 就是正常退出再进)
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - \`_playEpisode\` 里 \`_player.open + seek(12分钟)\` 之后
+                  立刻调 \`_saveCurrentProgress()\` 标记"已开始"
+                - 但 position stream 还没回传, \`state.position\` 和 \`_currentPosition\` 都还是 0
+                - \`state.playing=true\` 命中条件 → 存了一条 \`playTime=0\` 的记录
+                - 这条 \`playTime=0\` **覆盖了云端 12 分钟那条**
+                - 下次重开云端拉到 \`playTime=0\`, \`_pendingResumeAt=null\`, 从 0 开始
+              - 修复:
+                - \`_playEpisode\` 里 \`_saveCurrentProgress()\` 加 \`if (resumeAt == null)\` 条件
+                - resume 场景 (有 \`_pendingResumeAt\`) 跳过这次立即 save,
+                  让 10s 定时器第一次 tick 时再存 (那时 position stream 已回传 > 0)
+                - 非 resume 场景 (新集/切集) 保留立即 save 标记已开始
+              - 这是 v1.0.50 真正的根因修复, 之前的 didChangeAppLifecycleState
+                + dispose await + local 双写都是加固, 这个才是用户报告的
+                "看一半不看了 重开从 0 开始" 的直接原因
+
+            ---`,
               'v1.0.49': `## 更新日志
 
             ### 🎨 体验改进

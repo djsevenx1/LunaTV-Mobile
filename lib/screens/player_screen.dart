@@ -48,7 +48,8 @@ class _SourcePingItem {
   _SourcePingItem(this.source);
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen>
+    with WidgetsBindingObserver {
   // 播放器
   late final Player _player;
   late final VideoController _controller;
@@ -139,6 +140,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
+    // v1.0.50: 监听 AppLifecycleState, 进后台 (home 键) 时立即保存一次,
+    // 避免 10s progressTimer 还没触发就被上滑/杀进程, 进度丢
+    WidgetsBinding.instance.addObserver(this);
     // v1.0.41: 读系统初始亮度/音量, 进入播放器时同步到 UI
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
@@ -203,25 +207,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
-    // 退出时最后一次保存
-    _saveCurrentProgress(force: true);
+    // v1.0.50: 退出时最后一次保存, 改成 await 真的完成再 dispose _player
+    // 之前是 fire-and-forget, _player.stop() 同步把 state.position 重置成 0,
+    // saveCurrentProgress 那个 fire-and-forget 没机会拿到正确 position 就被 super.dispose 切断
+    // (虽然 _currentPosition 兜底有值, 但 PageCacheService().savePlayRecord 走网络
+    //  没 await 完进程被上滑/杀就丢, playTime 没写盘)
+    // 现在: unawaited + 内部 await 串行 (save → stop → dispose),
+    // 进程上滑杀时 OS 给 grace period, 大概率能完成网络写盘
+    unawaited(_disposeAndSave());
     _progressTimer?.cancel();
     _hideControlsTimer?.cancel();
     _seekHintTimer?.cancel();
     _videoParamsSub?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
-    // 强制停止播放器,避免关页面后还在后台继续播
-    try {
-      _player.stop();
-    } catch (_) {}
-    _player.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     // 恢复系统UI,方向交由系统控制
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
     super.dispose();
+  }
+
+  /// 退出时串行: save → stop → dispose
+  /// dispose 不能 await, 所以用 unawaited 在 dispose 末尾启动
+  Future<void> _disposeAndSave() async {
+    try {
+      await _saveCurrentProgress(force: true);
+    } catch (_) {}
+    try {
+      await _player.stop();
+    } catch (_) {}
+    try {
+      await _player.dispose();
+    } catch (_) {}
+  }
+
+  /// v1.0.50: App 进后台 (home 键) 时立即保存一次, 防止 10s progressTimer
+  /// 还没触发就被上滑/杀进程丢进度
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      // 进后台时立即保存, 走 _saveCurrentProgress 的 force 分支,
+      // _currentPosition 兜底能拿到最后一帧有效 position
+      unawaited(_saveCurrentProgress(force: true));
+    }
   }
 
   /// 判断视频是否为竖屏（高度 > 宽度）
@@ -1159,7 +1193,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 启动定时器,并立即保存一条(标记已开始)
       _startProgressTimer();
       _firstRecordSaved = false; // 重置,让定时器先存一次
-      _saveCurrentProgress();
+      // v1.0.50: resume 场景下 player 刚 open + seek, position stream 还没回传,
+      // state.position 和 _currentPosition 都还是 0, 此时 _saveCurrentProgress
+      // 会命中 state.playing=true 分支存一条 playTime=0 的记录,
+      // 把云端 12 分钟那条覆盖掉, 下次重开云端拉到 playTime=0 就从 0 开始.
+      // 修法: resume 场景跳过这次立即 save, 让 10s 定时器第一次 tick 时再存
+      // (那时 position stream 已经回传 > 0). 非 resume 场景 (新集/切集)
+      // 保留立即 save 标记已开始.
+      if (resumeAt == null) {
+        _saveCurrentProgress();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1972,8 +2015,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
     final size = _isFullscreen ? 64.0 : 56.0;
-    // v1.0.49: 离边 60/80 → 40/60, 按钮往中间挪一点 (与中央播放按钮的间距从 88/112px 缩到 68/92px)
-    final sideOffset = _isFullscreen ? 60.0 : 40.0;
+    // v1.0.50: 离边 40/60 → 110/140, 按钮往中央挪更多
+    // 原因: 之前 40/60 还会跟左右两侧的亮度/音量浮窗 (left/right 32 各 56 宽)
+    // 重叠, 用户拖动调音量/亮度时 ± 按钮挡在浮窗上, 现在挪到中央 1/2 区域外侧
+    final sideOffset = _isFullscreen ? 140.0 : 110.0;
     return Positioned.fill(
       child: Stack(
         alignment: Alignment.center,
@@ -2074,8 +2119,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           height: size,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            // v1.0.49: 底色跟亮度/音量浮窗一致用 Colors.black.withOpacity(0.7)
-            color: Colors.black.withOpacity(0.7),
+            // v1.0.50: 改回白色毛玻璃 (kLunaFloatBtnBg = 0x26FFFFFF),
+            // v1.0.49 改的黑色透明跟亮度音量浮窗冲突, 用户希望统一回毛玻璃
+            color: kLunaFloatBtnBg,
             border: Border.all(
               color: Colors.white.withOpacity(0.2),
               width: 1,
