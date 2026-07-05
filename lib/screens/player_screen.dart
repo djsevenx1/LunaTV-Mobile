@@ -232,10 +232,24 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 退出时串行: save → stop → dispose
   /// dispose 不能 await, 所以用 unawaited 在 dispose 末尾启动
+  ///
+  /// v1.0.50.1: 加 _phase == 'playing' 守门, 防止 phase=detail 时用
+  /// playTime=0 覆盖之前存的真实进度 (根因 3)
+  /// 正常流程: 用户看 → 返回键 → onPopInvoked(phase=playing) 已经 save 12 min
+  ///   + stop player → phase=detail → 用户再返回 → onPopInvoked(phase=detail)
+  ///   走空分支 → widget 销毁 → dispose 调本方法
+  ///   此时 player 已经被 stop, state.position=0, _currentPosition=0
+  ///   (stop 后 position stream 也会发射 0), 再 save 一次会写 playTime=0,
+  ///   覆盖掉 onPopInvoked 存的 12 分钟
+  /// 修法: phase=detail 说明 onPopInvoked 已经存过, 这里不再重复 save
+  ///       phase=playing 才是上滑杀 App / 系统回收等异常退出, 还要 save
+  ///       (最后一次救命机会, 走本地双写兜底)
   Future<void> _disposeAndSave() async {
-    try {
-      await _saveCurrentProgress(force: true);
-    } catch (_) {}
+    if (_phase == 'playing') {
+      try {
+        await _saveCurrentProgress(force: true);
+      } catch (_) {}
+    }
     try {
       await _player.stop();
     } catch (_) {}

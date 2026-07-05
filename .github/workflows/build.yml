@@ -185,6 +185,28 @@ jobs:
                 - \`didPop && phase==detail\` 分支不再调 \`_saveCurrentProgress\`
                 - 进度在 playing→detail 转换时已经存过, 退出详情页不需要再存
 
+            - **修复 dispose 时二次 save 覆盖进度 (根因 3, v1.0.50.1 补)**
+              - 现象: v1.0.50 第二版关了 onPopInvoked 详情分支的 save, 用户测试
+                还是从 0 开始, 说明还有一条覆盖路径
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - 正常流程: 用户看 → 返回键 → onPopInvoked(phase=playing) 已经
+                  save 12 分钟 + stop player → phase=detail → 用户再返回 →
+                  onPopInvoked(phase=detail) 走空分支 → widget 销毁
+                - 这时 \`dispose()\` 调 \`_disposeAndSave()\` → \`_saveCurrentProgress(force=true)\`
+                - 但 player 已经被 stop, \`state.position=0\`, \`_currentPosition=0\`
+                  (stop 后 position stream 也会发射 0)
+                - 这次 save 存了 \`playTime=0\`, **覆盖了 onPopInvoked 存的 12 分钟**
+                - 下次打开云端拉到 \`playTime=0\` → 从 0 开始
+              - 修复:
+                - \`_disposeAndSave()\` 加 \`_phase == 'playing'\` 守门
+                - phase='detail' 时 (说明 onPopInvoked 已经存过) 不再重复 save
+                - phase='playing' 时 (上滑杀 App / 系统回收等异常退出) 仍要 save,
+                  走本地双写兜底, 是最后一次救命机会
+              - 这是 v1.0.50 真正闭环的根因修复, 之前 didChangeAppLifecycleState
+                + dispose await + onPopInvoked 空分支 + local 双写 + _playEpisode
+                if(resumeAt==null) 都是铺垫, 这条加上才让"看 12 分钟→返回→再进"
+                完整路径不再被 0 覆盖
+
             ---`,
               'v1.0.49': `## 更新日志
 
