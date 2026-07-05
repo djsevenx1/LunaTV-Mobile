@@ -2144,10 +2144,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                   shape: BoxShape.circle,
                   // 半透明白色叠在模糊背景上, 形成毛玻璃质感
                   color: Colors.white.withOpacity(0.15),
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.25),
-                    width: 1,
-                  ),
                 ),
                 child: Center(child: child),
               ),
