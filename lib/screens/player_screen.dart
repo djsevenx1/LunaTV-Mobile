@@ -362,18 +362,25 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 根据当前位置更新跳过按钮的显示状态 / v1.0.57 自动 seek / v1.0.58 自动手动二选一
   ///
-  /// - 自动模式 (_autoSkipIntro/_autoSkipOutro = true): shouldShowIntro/Outro 时自动 _player.seek
+  /// - 自动模式 (_autoSkipIntro/_autoSkipOutro = true): shouldShowIntro/Outro 时自动 seek
   /// - 手动模式 (默认): shouldShowIntro/Outro 时显示右下角浮层按钮让用户点
   ///
   /// v1.0.58 加自动/手动开关: 之前 v1.0.57 强制自动, 但有的源没片头/片尾,
   /// 自动跳会跳到 _skipIntroEnd / durSec-_skipOutroStart 错误位置
   /// 默认手动 (跟 v1.0.57 之前一样), 用户主动开自动
   ///
+  /// v1.0.63 修片尾逻辑: 之前 v1.0.58 seek 到 durSec-_skipOutroStart
+  /// (片尾**开始**位置), 这跟"跳过片尾"语义相反 — 是**倒回**片头不是跳过.
+  /// 正确行为: 在片尾区间触发时, **直接播下一集** (有下集) / 不做任何事
+  /// (最后一集让 _maybeAutoPlayNext 自然触发).
+  ///
   /// 用户拖动进度条时不自动跳 (避免抢用户操作), 靠 _scrubbingValue 守门
   void _updateSkipButtonVisibility() {
     final posSec = _currentPosition.inSeconds;
     final durSec = _currentDuration.inSeconds;
     final shouldShowIntro = _skipIntroEnd > 0 && posSec < _skipIntroEnd && posSec > 1;
+    final hasNextEpisode = _selectedSource != null &&
+        _currentEpisodeIndex < _selectedSource!.episodes.length - 1;
     final shouldShowOutro = _skipOutroStart > 0 &&
         durSec > 0 &&
         posSec > 0 &&
@@ -390,8 +397,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         return;
       }
-      if (_autoSkipOutro && shouldShowOutro && durSec > 0) {
-        _player.seek(Duration(seconds: durSec - _skipOutroStart));
+      if (_autoSkipOutro && shouldShowOutro) {
+        // v1.0.63: 跳过片尾 = 播下一集 (有下集) / 不做事 (最后一集让
+        // _maybeAutoPlayNext 自然触发 end→next 流程)
+        if (hasNextEpisode) {
+          _autoPlayedThisEpisode = true; // 防止 _maybeAutoPlayNext 再触发
+          _playEpisode(_currentEpisodeIndex + 1);
+        }
         if (_showSkipOutro) {
           setState(() { _showSkipOutro = false; });
         }
@@ -412,6 +424,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   // v1.0.58: 恢复 _skipIntro / _skipOutro, 手动模式按钮调用
   // v1.0.57 删了, v1.0.58 加了自动/手动开关, 手动模式需要这两个函数
 
+  /// v1.0.63: 把秒数格式化成 "X 分钟" / "X 分 Y 秒" / "X 秒" 给人看
+  /// slider 内部仍存秒 (0~300), 只换显示文案
+  ///   30 → "30 秒"
+  ///   60 → "1 分钟"
+  ///   90 → "1 分 30 秒"
+  ///   180 → "3 分钟"
+  String _formatSkipTime(int seconds) {
+    if (seconds <= 0) return '关闭';
+    if (seconds < 60) return '$seconds 秒';
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    if (s == 0) return '$m 分钟';
+    return '$m 分 $s 秒';
+  }
+
   /// 手动跳过片头
   void _skipIntro() {
     if (_skipIntroEnd > 0) {
@@ -419,12 +446,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  /// 手动跳过片尾
+  /// 手动跳过片尾 — v1.0.63 修: 之前是 seek 到 durSec-_skipOutroStart
+  /// (片尾开始位置, 等于倒回), 正确行为是播下一集
   void _skipOutro() {
-    final durSec = _currentDuration.inSeconds;
-    if (durSec > 0 && _skipOutroStart > 0) {
-      _player.seek(Duration(seconds: durSec - _skipOutroStart));
-    }
+    final hasNextEpisode = _selectedSource != null &&
+        _currentEpisodeIndex < _selectedSource!.episodes.length - 1;
+    if (!hasNextEpisode) return; // 最后一集, 让 _maybeAutoPlayNext 自然触发
+    _autoPlayedThisEpisode = true; // 防止 _maybeAutoPlayNext 再触发
+    _playEpisode(_currentEpisodeIndex + 1);
   }
 
   /// 打开跳过片头片尾设置弹窗
@@ -485,7 +514,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
                     const Divider(color: Colors.white24, height: 24),
                     Text(
-                      '片头结束时间: ${intro > 0 ? "$intro 秒" : "未设置"}',
+                      '片头结束时间: ${intro > 0 ? _formatSkipTime(intro) : "未设置"}',
                       style: const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                     Slider(
@@ -494,13 +523,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                       max: 300,
                       divisions: 300,
                       activeColor: const Color(0xFF22C55E),
-                      label: intro > 0 ? '$intro 秒' : '关闭',
+                      label: intro > 0 ? _formatSkipTime(intro) : '关闭',
                       onChanged: (v) =>
                           setDialogState(() => intro = v.round()),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      '片尾提前时间: ${outro > 0 ? "$outro 秒" : "未设置"}',
+                      '片尾提前时间: ${outro > 0 ? _formatSkipTime(outro) : "未设置"}',
                       style: const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                     Slider(
@@ -509,13 +538,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                       max: 300,
                       divisions: 300,
                       activeColor: const Color(0xFF22C55E),
-                      label: outro > 0 ? '$outro 秒' : '关闭',
+                      label: outro > 0 ? _formatSkipTime(outro) : '关闭',
                       onChanged: (v) =>
                           setDialogState(() => outro = v.round()),
                     ),
+                    // v1.0.63: 60s=1分钟, 提示文案同步用分钟单位
                     const SizedBox(height: 8),
                     const Text(
-                      '提示: 有的源没有片头/片尾, 建议先关掉自动, 看到按钮再点, 确认有片头再开自动',
+                      '提示: 有的源没有片头/片尾, 建议先关掉自动, 看到按钮再点, 确认有片头再开自动\n'
+                      '单位: 60 秒 = 1 分钟 (0~5 分钟可调)',
                       style: TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                   ],

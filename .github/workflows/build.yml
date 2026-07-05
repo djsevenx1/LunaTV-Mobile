@@ -88,6 +88,51 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.63': `## 更新日志
+
+            ### 🐛 修复
+
+            - **v1.0.62 编译报错 ([debug_log_screen.dart#1](file:///workspace/lib/screens/debug_log_screen.dart))**
+              - 现象: v1.0.62 push 后 CI 三次 build 全部失败, 日志关键错:
+                \`lib/screens/debug_log_screen.dart:18:14: Error: Type 'StreamSubscription' not found.\`
+                和 \`Error: 'StreamSubscription' isn't a type.\`
+              - 根因: 用了 \`StreamSubscription<List<LogEntry>>\` 类型但漏 import \`dart:async\`
+                (Flutter SDK 里 \`StreamSubscription\` 来自 dart:async, 不是 package:flutter)
+              - v1.0.63 修: 在 [debug_log_screen.dart](file:///workspace/lib/screens/debug_log_screen.dart) 顶部加 \`import 'dart:async';\`
+
+            - **跳过片尾逻辑搞反了 ([player_screen.dart#_updateSkipButtonVisibility](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: v1.0.58 加自动跳过片尾时, 写的 \`_player.seek(Duration(seconds: durSec - _skipOutroStart))\`,
+                表面看是"跳到片尾前 N 秒", 实际效果是**回退**到片尾起点 (因为 seek
+                是绝对位置, 减一个值反而倒回片头方向)
+              - 用户反馈: "跳过片尾应该是到下一集你看你的逻辑"
+              - v1.0.63 修:
+                1. 自动跳过片尾: 距离结尾 \`< _skipOutroStart\` 时, **直接播下一集**
+                   (\`_playEpisode(_currentEpisodeIndex + 1)\`), 同时设
+                   \`_autoPlayedThisEpisode = true\` 防止 \`_maybeAutoPlayNext\`
+                   重复触发. 没下一集时啥也不做, 让 \`_maybeAutoPlayNext\` 自然
+                   end→next 流程接
+                2. 手动跳过片尾 (浮层按钮): 同样改成播下一集, **前提是有下一集**
+                3. 判定条件 \`shouldShowOutro\` 加 \`(durSec - posSec) > 1\`,
+                   避免视频最后一秒误触
+
+            ### 💄 优化
+
+            - **片头/片尾 slider 单位改成"分钟" ([player_screen.dart#_formatSkipTime](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: slider 内部存的是秒 (0\~300), 之前显示是 "30 秒" "90 秒" "180 秒"
+                这种纯秒数, 用户反馈"片头片尾应该 60s 为 1 分钟"
+              - v1.0.63 改:
+                1. 新增 \`_formatSkipTime(int seconds)\` 工具方法:
+                   - 30 → "30 秒"
+                   - 60 → "1 分钟"
+                   - 90 → "1 分 30 秒"
+                   - 180 → "3 分钟"
+                2. 弹窗里的两行 label + 两个 slider 的 floating label 全用这个
+                3. 内部存储仍是秒 (0\~300), **不影响 SharedPreferences 兼容**,
+                   v1.0.62 及之前用户保存的配置 (如 90) 装 v1.0.63 后会自动
+                   显示成 "1 分 30 秒", 不会丢值
+                4. 提示文案补一行"单位: 60 秒 = 1 分钟 (0\~5 分钟可调)"
+
+            ---`,
               'v1.0.62': `## 更新日志
 
             ### 🛠️ 调试工具
