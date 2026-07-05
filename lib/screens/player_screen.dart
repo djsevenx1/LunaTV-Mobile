@@ -121,6 +121,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _brightnessHideTimer;
   double? _dragStartVolume; // 拖动开始时的音量基线
   double? _dragStartBrightness;
+  // v1.0.45: 累计拖动 delta, 解决 v1.0.40 "每事件用 baseline + 单帧 delta 覆盖" 的 bug
+  // (以前 5 帧累计拖 100px, 每帧只算自己 20px, 实际只反映最后 1 帧的 delta)
+  double _totalDragVolumeDelta = 0;
+  double _totalDragBrightnessDelta = 0;
 
   // LunaTV Web 主题色
   static const Color kLunaTheme = Color(0xFF22C55E);
@@ -638,6 +642,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _brightnessHideTimer?.cancel();
     _hideControlsTimer?.cancel();
     _dragStartBrightness = _currentBrightness;
+    _totalDragBrightnessDelta = 0; // v1.0.45: 重置累计 delta
     setState(() {
       _isControlsVisible = true;
       _showBrightnessIndicator = true;
@@ -645,11 +650,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _onBrightnessSwipeUpdate(DragUpdateDetails details) {
+    // v1.0.45: 同音量手势, 用累计 delta + 1.0 灵敏度
+    _totalDragBrightnessDelta += -details.delta.dy; // 上滑增亮
     final screenHeight = MediaQuery.of(context).size.height;
-    final delta = -(details.delta.dy / screenHeight) * 2.0;
+    final normalized = (_totalDragBrightnessDelta / screenHeight) * 1.0;
     setState(() {
-      _currentBrightness = ((_dragStartBrightness ?? _currentBrightness) + delta)
-          .clamp(0.0, 1.0);
+      _currentBrightness = (_dragStartBrightness! + normalized).clamp(0.0, 1.0);
       _showBrightnessIndicator = true;
     });
     // v1.0.44: v0.2.2 / 2.0.8 API 是 ScreenBrightness() 实例, setScreenBrightness 而非 setApplicationScreenBrightness
