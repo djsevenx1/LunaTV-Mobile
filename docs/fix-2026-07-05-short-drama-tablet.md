@@ -1294,3 +1294,135 @@ if (_currentPosition < dur - const Duration(milliseconds: 1500)) {
 - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - _autoPlayNextEpisode 加 pos + dur 兜底守门
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.54+1 → 1.0.55+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.55 changelog
+
+---
+
+# v1.0.56 · 切集保存 index 错配 (v1.0.50 / v1.0.53 / v1.0.55 都漏修的核心 bug)
+
+## 现象
+
+用户装 v1.0.55 后反馈:
+
+> 集数问题好像是存的问题历史上面显示就是第三集我明明第二集都没看完
+> 还有进度条记忆问题我也怀疑存的问题
+
+**两个症状**:
+
+1. **历史显示第3集, 但用户明明第2集都没看完** — 云端存的 `index=3`, 但
+   用户实际上没看完第2集。
+2. **进度条记忆也异常** — 即使装 v1.0.55 后重开, 还是跳第3集 (云端脏
+   数据覆盖了之前的正确记录), 而且 playTime 还是第2集的位置, 跟第3集
+   index 错配。
+
+## 根因 (核心 bug, 一直没修)
+
+[_playEpisode](file:///workspace/lib/screens/player_screen.dart) 切集保存
+的**顺序错**:
+
+```dart
+// 之前的代码 (v1.0.50 / v1.0.53 / v1.0.55 都是这个顺序):
+setState(() {
+  _currentEpisodeIndex = index;  // ← 先改成新集
+  _isBuffering = true;
+  _phase = 'playing';
+});
+
+// 切集时先保存上一条的进度
+if (_firstRecordSaved) {
+  _saveCurrentProgress(force: true);  // ← 用 _currentEpisodeIndex 算 index
+}
+
+try {
+  await _player.stop();  // ← 这里才 stop, pos 才是新集
+  await _player.open(Media(url));
+  // ...
+}
+```
+
+[_saveCurrentProgress](file:///workspace/lib/screens/player_screen.dart) 内部
+`index: _currentEpisodeIndex + 1` 算 index, 但此时:
+
+- `_currentEpisodeIndex` 已经被 setState 改成**新集**
+- `_player.stop()` **还没调**, `state.position` / `_currentPosition` /
+  `state.duration` 都还是**旧集**的值
+
+→ **index 错配**: `playTime = 旧集 pos`, `index = 新集 index`
+
+## 触发链 (v1.0.54 之前 streams.completed 误触发)
+
+1. 用户看第2集 30 分钟, 10s 定时器存 `{index: 2, playTime: 30分钟}` ✓
+2. streams.completed 误触发 → `_autoPlayNextEpisode` → `_playEpisode(2)` (v1.0.55 已修)
+3. setState `_currentEpisodeIndex = 2` (第3集 0-based)
+4. `_saveCurrentProgress(force: true)` 存 `{index: 2+1 = 3, playTime: 30分钟}`
+   ← **错误! 应该是 `{index: 2, playTime: 30分钟}`**
+5. **覆盖云端 `index = 2` 那条**! 下次重开历史显示第3集
+6. 而且 `playTime = 30分钟` 还是第2集的位置, 跟第3集 index 错配
+   (用户报告"进度条记忆问题"就是这个 — 就算装 v1.0.55 也救不回来,
+    云端脏数据已经在)
+
+## 修复
+
+[_playEpisode](file:///workspace/lib/screens/player_screen.dart) 切集保存挪到
+`setState` **之前**:
+
+```dart
+// v1.0.56 修法:
+// 切集时先保存上一条的进度 (在 setState 之前, _currentEpisodeIndex 还是旧值)
+if (_firstRecordSaved) {
+  _saveCurrentProgress(force: true);
+}
+
+setState(() {
+  _currentEpisodeIndex = index;  // ← 这时才改成新集
+  _isBuffering = true;
+  _phase = 'playing';
+});
+
+try {
+  await _player.stop();
+  // ...
+}
+```
+
+这样 `_saveCurrentProgress` 调时:
+
+- `_currentEpisodeIndex` 仍是**旧集** (setState 还没调) → index 自动是旧集 ✓
+- `_player.stop()` 还没调 → `pos` / `_currentPosition` / `state.duration`
+  都是**旧集** ✓
+- 不需要传 `episodeIndex` 参数, 也不需要临时保存再恢复
+
+其他 force=true 保存路径 (onPopInvoked / didChangeAppLifecycleState /
+_disposeAndSave) 都没切集, `_currentEpisodeIndex` 是当前集, **正确**。
+
+## 用户需要做的
+
+v1.0.56 修了**未来**的切集保存, 但**已存在的云端脏数据**
+`{index: 3, playTime: 30分钟}` 还在 (后端不知道, App 也改不了云端)。
+
+用户**必须**做以下之一才能让历史回到正确状态:
+
+- **选项 A**: 装 v1.0.56 后, 重看第2集 **30 秒**, 10s 定时器触发存
+  正确数据 `{index: 2, playTime: 30s+}` 覆盖脏数据 ✓
+- **选项 B**: 在 App 历史页面**长按删除**该剧播放历史, 然后从搜索
+  结果或收藏入口重新进, 走 _loadSources 拉云端, 没有记录就是新集 ✓
+- **选项 C**: 后台手动调 `PUT /api/playrecords/{source+id}` 把 index 改回 2
+  (需要后端访问权限, 普通用户做不到)
+
+**修完后**: 重开第2集应该从之前 30 分钟位置继续, 不再跳第3集。
+
+## 教训
+
+1. **保存路径要全量审计 setState 顺序** — v1.0.50 / v1.0.53 / v1.0.55
+   反复修保存逻辑, 但每次都看"会不会写 0", 没看"写的 index 对不对"。
+   `_saveCurrentProgress` 内的 `index: _currentEpisodeIndex + 1` 跟外部
+   setState 时机有隐式依赖, 不显式化 (比如传 episodeIndex) 容易错。
+2. **跨版本数据迁移问题** — App 修 bug 后, 云端脏数据还在, 用户必须
+   主动触发新保存才能覆盖。这种情况 changelog 要明确告诉用户怎么做。
+3. **多症状可能同根因** — "跳第3集" + "进度条记忆异常" 是同一根因
+   (切集保存 index 错配导致云端脏数据), 不是两个独立 bug。
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - _playEpisode 切集保存挪到 setState 之前
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.55+1 → 1.0.56+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.56 changelog

@@ -1240,16 +1240,35 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 用完清掉, 避免切下一集时还 seek 回去
     _pendingResumeAt = null;
 
+    // 切集时先保存上一条的进度
+    //
+    // v1.0.56: 必须在 setState 之前调! 之前是 setState 之后调,
+    // setState 改了 _currentEpisodeIndex 成新集, _saveCurrentProgress
+    // 内部 `index: _currentEpisodeIndex + 1` 算出的是**新集 index**,
+    // 但此时 _player.stop() 还没调, pos / _currentPosition / state.duration
+    // 都还是**旧集**的值 — 错配 (playTime=旧集, index=新集)
+    //
+    // 用户场景 (v1.0.54 之前 streams.completed 误触发):
+    //   1. 用户看第2集 30 分钟, 10s 定时器存 {index:2, playTime:30min} ✓
+    //   2. streams.completed 误触发 → 切第3集 (v1.0.55 已修误触发)
+    //   3. setState _currentEpisodeIndex=2 (第3集 0-based)
+    //   4. _saveCurrentProgress(force:true) 存 {index:2+1=3, playTime:30min}
+    //      ← 错误! 应该是 {index:2, playTime:30min}
+    //   5. 覆盖云端 index=2 那条! 下次重开历史显示第3集
+    //   6. 而且 playTime=30min 还是第2集的位置, 跟第3集 index 错配
+    //      (用户报告"进度条记忆问题我也怀疑存的问题"就是这个)
+    //
+    // 修法: 把 setState 挪到 _saveCurrentProgress 之后, 让
+    //       _currentEpisodeIndex 在 save 时还是旧值, 自动得到旧集 index
+    if (_firstRecordSaved) {
+      _saveCurrentProgress(force: true);
+    }
+
     setState(() {
       _currentEpisodeIndex = index;
       _isBuffering = true;
       _phase = 'playing';
     });
-
-    // 切集时先保存上一条的进度
-    if (_firstRecordSaved) {
-      _saveCurrentProgress(force: true);
-    }
 
     try {
       await _player.stop();
