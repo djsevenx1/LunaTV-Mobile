@@ -752,9 +752,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     int totalTime = 0;
     try {
       final state = _player.state;
-      // 正在播放 或 视频已加载但暂停 (用 !completed 表示)
-      if (state.playing || (state.position > Duration.zero && !state.completed)) {
-        playTime = state.position.inMilliseconds;
+      Duration pos = state.position;
+      // v1.0.49 兜底: state.position 在 stop/pause 后可能回 0 或 stream 还没回传,
+      // 用本地 _currentPosition (stream 一直在跟) 兜底, 保证退出前最后一帧
+      // 还有效的 position 能写盘
+      if (pos < _currentPosition) pos = _currentPosition;
+
+      // 正在播放 或 有进度且未播完 (用 !completed 表示)
+      if (state.playing || (pos > Duration.zero && !state.completed)) {
+        playTime = pos.inMilliseconds;
         totalTime = state.duration.inMilliseconds;
       }
     } catch (_) {}
@@ -1172,12 +1178,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // 从播放页返回详情页: 先保存一次, 恢复竖屏, 暂停播放
-              // (重点:必须先 stop/pause,否则 detail 视图上 player 还在后台继续播)
+              // v1.0.49: 必须先 save 再 stop, 否则 stop 把 state.position 重置成 0,
+              // _saveCurrentProgress 读到的就是 0, 退出后下次打开从 0 开始.
+              // (之前的顺序是先 stop 再 save, 写盘的 playTime 一直是 0)
+              await _saveCurrentProgress(force: true);
+              // 从播放页返回详情页: 恢复竖屏, 暂停播放
               try {
                 await _player.stop();
               } catch (_) {}
-              await _saveCurrentProgress(force: true);
               await _onExitFullscreen();
               if (mounted) {
                 setState(() {
