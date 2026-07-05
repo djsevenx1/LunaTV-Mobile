@@ -275,14 +275,14 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _onVolumeSwipeStart(DragStartDetails details) {
-    if (!_isFullscreen || _isLocked) return;
+    if (_isLocked) return;
     _volumeHideTimer?.cancel();
     _hideTimer?.cancel();
     setState(() => _controlsVisible = true);
   }
 
   void _onVolumeSwipeUpdate(DragUpdateDetails details) {
-    if (!_isFullscreen || _isLocked) return;
+    if (_isLocked) return;
     final screenHeight = MediaQuery.of(context).size.height;
     final volumeChange = -(details.delta.dy / screenHeight) * 2;
     setState(() {
@@ -294,7 +294,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _onVolumeSwipeEnd(DragEndDetails details) {
-    if (!_isFullscreen || _isLocked) return;
+    if (_isLocked) return;
     _startVolumeHideTimer();
     _startHideTimer();
   }
@@ -309,14 +309,14 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _onBrightnessSwipeStart(DragStartDetails details) {
-    if (!_isFullscreen || _isLocked) return;
+    if (_isLocked) return;
     _brightnessHideTimer?.cancel();
     _hideTimer?.cancel();
     setState(() => _controlsVisible = true);
   }
 
   void _onBrightnessSwipeUpdate(DragUpdateDetails details) {
-    if (!_isFullscreen || _isLocked) return;
+    if (_isLocked) return;
     final screenHeight = MediaQuery.of(context).size.height;
     final brightnessChange = -(details.delta.dy / screenHeight) * 2;
     setState(() {
@@ -329,7 +329,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _onBrightnessSwipeEnd(DragEndDetails details) {
-    if (!_isFullscreen || _isLocked) return;
+    if (_isLocked) return;
     _startBrightnessHideTimer();
     _startHideTimer();
   }
@@ -513,8 +513,8 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
         _buildProgressBar(),
         _buildBottomControls(),
         if (_isLongPressing && !_isLocked) _buildLongPressIndicator(),
-        if (_isFullscreen && _showBrightnessIndicator && !_isLocked)
-          _buildBrightnessIndicator(),
+        if (_showBrightnessIndicator && !_isLocked) _buildBrightnessIndicator(),
+        if (_showVolumeIndicator && !_isLocked) _buildVolumeIndicator(),
         if (_isFullscreen) _buildRightOverlay(),
       ],
     );
@@ -542,29 +542,28 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     return Positioned.fill(
       child: Row(
         children: [
-          if (_isFullscreen)
-            Expanded(
-              flex: 1,
-              child: GestureDetector(
-                onTap: _toggleControlsVisibility,
-                onLongPressStart: _onLongPressStart,
-                onLongPressEnd: _onLongPressEnd,
-                onLongPressCancel: () {
-                  if (_isLongPressing) {
-                    _onLongPressEnd(const LongPressEndDetails());
-                  }
-                },
-                onHorizontalDragStart: _onSwipeStart,
-                onHorizontalDragUpdate: _onSwipeUpdate,
-                onHorizontalDragEnd: _onSwipeEnd,
-                onVerticalDragStart: _onBrightnessSwipeStart,
-                onVerticalDragUpdate: _onBrightnessSwipeUpdate,
-                onVerticalDragEnd: _onBrightnessSwipeEnd,
-                behavior: HitTestBehavior.opaque,
-              ),
-            ),
           Expanded(
-            flex: _isFullscreen ? 2 : 1,
+            flex: 1,
+            child: GestureDetector(
+              onTap: _toggleControlsVisibility,
+              onLongPressStart: _onLongPressStart,
+              onLongPressEnd: _onLongPressEnd,
+              onLongPressCancel: () {
+                if (_isLongPressing) {
+                  _onLongPressEnd(const LongPressEndDetails());
+                }
+              },
+              onHorizontalDragStart: _onSwipeStart,
+              onHorizontalDragUpdate: _onSwipeUpdate,
+              onHorizontalDragEnd: _onSwipeEnd,
+              onVerticalDragStart: _onBrightnessSwipeStart,
+              onVerticalDragUpdate: _onBrightnessSwipeUpdate,
+              onVerticalDragEnd: _onBrightnessSwipeEnd,
+              behavior: HitTestBehavior.opaque,
+            ),
+          ),
+          Expanded(
+            flex: 2,
             child: GestureDetector(
               onTap: _toggleControlsVisibility,
               onLongPressStart: _onLongPressStart,
@@ -580,27 +579,26 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
               behavior: HitTestBehavior.opaque,
             ),
           ),
-          if (_isFullscreen)
-            Expanded(
-              flex: 1,
-              child: GestureDetector(
-                onTap: _toggleControlsVisibility,
-                onLongPressStart: _onLongPressStart,
-                onLongPressEnd: _onLongPressEnd,
-                onLongPressCancel: () {
-                  if (_isLongPressing) {
-                    _onLongPressEnd(const LongPressEndDetails());
-                  }
-                },
-                onHorizontalDragStart: _onSwipeStart,
-                onHorizontalDragUpdate: _onSwipeUpdate,
-                onHorizontalDragEnd: _onSwipeEnd,
-                onVerticalDragStart: _onVolumeSwipeStart,
-                onVerticalDragUpdate: _onVolumeSwipeUpdate,
-                onVerticalDragEnd: _onVolumeSwipeEnd,
-                behavior: HitTestBehavior.opaque,
-              ),
+          Expanded(
+            flex: 1,
+            child: GestureDetector(
+              onTap: _toggleControlsVisibility,
+              onLongPressStart: _onLongPressStart,
+              onLongPressEnd: _onLongPressEnd,
+              onLongPressCancel: () {
+                if (_isLongPressing) {
+                  _onLongPressEnd(const LongPressEndDetails());
+                }
+              },
+              onHorizontalDragStart: _onSwipeStart,
+              onHorizontalDragUpdate: _onSwipeUpdate,
+              onHorizontalDragEnd: _onSwipeEnd,
+              onVerticalDragStart: _onVolumeSwipeStart,
+              onVerticalDragUpdate: _onVolumeSwipeUpdate,
+              onVerticalDragEnd: _onVolumeSwipeEnd,
+              behavior: HitTestBehavior.opaque,
             ),
+          ),
         ],
       ),
     );
@@ -1018,109 +1016,112 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     );
   }
 
-  Widget _buildRightOverlay() {
-    if (_showVolumeIndicator && !_isLocked) {
-      return Positioned(
-        right: 16.0,
-        top: 0,
-        bottom: 0,
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity( 0.7),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _currentVolume == 0
-                      ? Icons.volume_off
-                      : _currentVolume < 0.5
-                          ? Icons.volume_down
-                          : Icons.volume_up,
-                  color: Colors.white,
-                  size: 24,
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 100,
-                  width: 4,
-                  child: Stack(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity( 0.3),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: FractionallySizedBox(
-                          heightFactor: _currentVolume,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${(_currentVolume * 100).round()}',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
+  Widget _buildVolumeIndicator() {
     return Positioned(
       right: 16.0,
       top: 0,
       bottom: 0,
       child: Center(
-        child: AnimatedOpacity(
-          opacity: _controlsVisible ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 200),
-          child: IgnorePointer(
-            ignoring: !_controlsVisible,
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _isLocked = !_isLocked;
-                  _controlsVisible = true;
-                });
-                _startHideTimer();
-              },
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity( 0.5),
-                  borderRadius: BorderRadius.circular(24),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity( 0.7),
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _currentVolume == 0
+                    ? Icons.volume_off
+                    : _currentVolume < 0.5
+                        ? Icons.volume_down
+                        : Icons.volume_up,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 100,
+                width: 4,
+                child: Stack(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity( 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: FractionallySizedBox(
+                        heightFactor: _currentVolume,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                child: Icon(
-                  _isLocked ? Icons.lock : Icons.lock_open,
-                  color: Colors.white,
-                  size: 24,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${(_currentVolume * 100).round()}',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRightOverlay() {
+    if (_isFullscreen && !_showVolumeIndicator) {
+      return Positioned(
+        right: 16.0,
+        top: 0,
+        bottom: 0,
+        child: Center(
+          child: AnimatedOpacity(
+            opacity: _controlsVisible ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: IgnorePointer(
+              ignoring: !_controlsVisible,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isLocked = !_isLocked;
+                    _controlsVisible = true;
+                  });
+                  _startHideTimer();
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity( 0.5),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Icon(
+                    _isLocked ? Icons.lock : Icons.lock_open,
+                    color: Colors.white,
+                    size: 24,
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
 

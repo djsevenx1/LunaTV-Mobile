@@ -448,6 +448,90 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
   → v1.0.38 改 hero_banner 时加了 `gaplessPlayback: true`, 但 cached_network_image 3.4.0+ 已经移除这个参数
   → 修复: [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) 删掉 `gaplessPlayback: true` 一行
 
+# v1.0.39 · 海报清晰度 + 竖屏亮度/音量
+
+## 现象
+
+v1.0.38 出 APK 后用户装上, 反馈:
+
+1. 首页轮播图海报仍然模糊 (v1.0.38 改的没起作用)
+2. 播放器左侧上下调亮度 / 右侧上下调音量在**竖屏**下没反应
+
+## 排查
+
+### 1. 海报清晰度
+
+v1.0.38 加了 `FilterQuality.high` + `memCacheWidth` 是**渲染层**优化, 把现有
+像素做高质量重采样。但源图本身就是低分辨率:
+
+- [image_url.dart](file:///workspace/lib/utils/image_url.dart) 把豆瓣图从
+  `s_/m_` 升到 `l_ratio_poster` (约 600×900)
+- 平板 banner 跨满屏 2K 宽 × 500 高, 2x dpr 后 600×900 被强拉到 4K×1K
+- 6.7x 放大, 任何重采样都救不回来
+
+### 2. 竖屏亮度/音量
+
+[mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart)
+的 `_buildGestureLayer` 把左/右 1/3 区域的 `onVerticalDragStart/Update/End`
+监听器整段包在 `if (_isFullscreen)` 里:
+
+- 横屏 (`_isFullscreen = true`) 时三个 GestureDetector 都有纵向滑动监听, 正常
+- 竖屏 (`_isFullscreen = false`) 时左/右 1/3 区域根本不渲染, 整个屏幕只有一个
+  1/1 横向滑动监听器, 纵向滑动被吃掉
+
+之前 v1.0.37 排错时**只确认了横屏手势分配**就停手了, 没注意整个手势层在
+竖屏下被 disable 掉。`if (_isFullscreen)` 是误打误撞留下来的横屏专属实现。
+
+## 修复
+
+### 1. 海报清晰度
+
+[image_url.dart](file:///workspace/lib/utils/image_url.dart) `_upgradeDoubanPosterUrl`
+改用豆瓣 `raw` 原图 (约 1080×1620 起, 可达 2000+):
+
+```dart
+String _upgradeDoubanPosterUrl(String url) {
+  return url
+      .replaceFirst('l_ratio_poster', 'raw')
+      .replaceFirst('m_ratio_poster', 'raw')
+      .replaceFirst('s_ratio_poster', 'raw')
+      .replaceFirst('photo/s', 'photo/raw')
+      .replaceFirst('photo/m', 'photo/raw')
+      .replaceFirst('photo/l', 'photo/raw');
+}
+```
+
+放大倍率从 6.7x 降到 1~2x, 海报细节 (字幕/演职员表/电影标题) 在大屏上能看清。
+
+### 2. 竖屏亮度/音量
+
+[mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) 三处改动:
+
+- `_buildGestureLayer` 三个 GestureDetector 始终渲染 (flex 1/2/1), 不再 wrap
+  在 `if (_isFullscreen)` 里
+- `_onVolumeSwipeStart/Update/End` 和 `_onBrightnessSwipeStart/Update/End` 里的
+  `if (!_isFullscreen || _isLocked) return` 改为 `if (_isLocked) return`,
+  竖屏下也能调
+- 音量 / 亮度指示器从 `_buildRightOverlay` 拆出成独立 `_buildVolumeIndicator`
+  方法, 竖屏下也会显示右侧音量浮窗 (不再依赖 `if (_isFullscreen)`)
+- `_buildRightOverlay` 只在横屏 + 不显示音量指示器时才显示锁按钮,
+  避免和 `_buildVolumeIndicator` 在同一位置重叠
+
+## 改动文件
+
+- `lib/utils/image_url.dart` — `s_/m_/l_ratio_poster` → `raw`
+- `lib/widgets/mobile_player_controls.dart` — gesture layer + swipe handler
+  移除 `_isFullscreen` 限制; 音量指示器拆成独立方法
+- `pubspec.yaml` — 1.0.38+1 → 1.0.39+1
+- `.github/workflows/build.yml` — 追加 v1.0.39 changelog
+
+## Release
+
+- tag: `v1.0.39`
+- 分支: `main` HEAD
+- 版本: 1.0.39+1
+- changelog: 已在 `build.yml` 的 `changelogs` map 顶部追加
+
 ## 教训
 
 1. **Gradle fail-over 不像看上去那样工作** — 多个 repo 并列时,
