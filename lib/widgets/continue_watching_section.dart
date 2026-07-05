@@ -48,6 +48,11 @@ class ContinueWatchingSection extends StatefulWidget {
 class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
     with TickerProviderStateMixin {
   List<PlayRecord> _playRecords = [];
+  // v1.0.48: 原始记录按"影片"去重后的结果 (同名同电影合并成一条,
+  //   多源信息保存在 _recordSourceMap, 卡片显示合并后的 sourceCount)
+  // 原始 _playRecords 保留所有, 方便 removePlayRecordFromUI 用 (source, id) 删
+  List<PlayRecord> _dedupedRecords = [];
+  final Map<String, List<PlayRecord>> _recordSourceMap = {};
   bool _isLoading = true;
   bool _hasError = false;
   final PageCacheService _cacheService = PageCacheService();
@@ -177,17 +182,23 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
 
       if (cachedRecordsRes.success && cachedRecordsRes.data != null) {
         final cachedRecords = cachedRecordsRes.data!;
+        // v1.0.48: 按 searchTitle (或 title) 分组合并, 同一电影多源只显示一条卡片
+        final dedup = _dedupeByMovie(cachedRecords);
         // 有缓存数据，立即显示
         if (mounted) {
           setState(() {
             _playRecords = cachedRecords;
+            _dedupedRecords = dedup.$1;
+            _recordSourceMap
+              ..clear()
+              ..addAll(dedup.$2);
             _isLoading = false;
           });
         }
 
         // 预加载图片
         if (mounted) {
-          _preloadImages(cachedRecords);
+          _preloadImages(dedup.$1);
         }
       } else if (mounted) {
         setState(() {
@@ -203,6 +214,36 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
         });
       }
     }
+  }
+
+  /// v1.0.48: 按"影片"分组合并
+  ///   - key 优先用 searchTitle, 为空用 title
+  ///   - 同一 key 多条记录: 取 saveTime 最新那条当代表, 其他塞 _recordSourceMap
+  ///   - 返回 (合并后列表, 影片→所有源记录的 map)
+  ///   - map 顺序: 按 saveTime 降序, 第一条是主代表 (进度最高 / 最新)
+  (List<PlayRecord>, Map<String, List<PlayRecord>>) _dedupeByMovie(
+      List<PlayRecord> records) {
+    final grouped = <String, List<PlayRecord>>{};
+    for (final r in records) {
+      final key = (r.searchTitle.isNotEmpty ? r.searchTitle : r.title).trim();
+      if (key.isEmpty) {
+        // 没 title 的当独立条目
+        grouped['__no_title_${r.source}_${r.id}'] = [r];
+        continue;
+      }
+      grouped.putIfAbsent(key, () => []).add(r);
+    }
+    final out = <PlayRecord>[];
+    final map = <String, List<PlayRecord>>{};
+    grouped.forEach((key, list) {
+      // 按 saveTime 降序, 最新在前面
+      list.sort((a, b) => b.saveTime.compareTo(a.saveTime));
+      out.add(list.first);
+      map[key] = list;
+    });
+    // 整个列表也按 saveTime 降序, 跟原来的行为一致
+    out.sort((a, b) => b.saveTime.compareTo(a.saveTime));
+    return (out, map);
   }
 
   /// 预加载图片
