@@ -6,20 +6,20 @@ import 'package:luna_tv/services/user_data_service.dart';
 /// 豆瓣 `/view/photo/...` 路径里尺寸标识决定返回尺寸：
 /// - `s_ratio_poster` → 约 200×300（小）
 /// - `m_ratio_poster` → 约 400×600（中）
-/// - `l_ratio_poster` → 约 600×900（大）
-/// - `raw`           → 原图无压缩, 约 1080×1620 起, 可达 2000+
+/// - `l_ratio_poster` → 约 600×900（大，公开图最大）
 ///
-/// 默认源数据一般只给 `s_/m_/l_`, 直接用于轮播大图 (2K 宽 × 500) 会糊。
-/// Hero Banner 场景下必须用 `raw`, 牺牲一点解码时间换清晰度。
+/// ⚠️ `raw` 是私有原图, 仅登录用户可访问, 公开图请求会 404/403,
+///    导致轮播图整张不显示。**不要用 raw**。
+///
+/// 默认源数据一般给的是 `s_/m_`, 用于轮播大图 (2K 宽 × 500) 会糊,
+/// 但 l_ratio_poster 是公开图最大尺寸, 没得选。
 String _upgradeDoubanPosterUrl(String url) {
-  // 先把所有 ratio_poster 替换为 raw, 拿到原图
+  // 把 ratio_poster 前的小/中尺寸升级到大尺寸
   return url
-      .replaceFirst('l_ratio_poster', 'raw')
-      .replaceFirst('m_ratio_poster', 'raw')
-      .replaceFirst('s_ratio_poster', 'raw')
-      .replaceFirst('photo/s', 'photo/raw')
-      .replaceFirst('photo/m', 'photo/raw')
-      .replaceFirst('photo/l', 'photo/raw');
+      .replaceFirst('s_ratio_poster', 'l_ratio_poster')
+      .replaceFirst('m_ratio_poster', 'l_ratio_poster')
+      .replaceFirst('photo/s', 'photo/l')
+      .replaceFirst('photo/m', 'photo/l');
 }
 
 /// 根据来源处理图片 URL（例如豆瓣域名替换）。

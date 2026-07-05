@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:volume_controller/volume_controller.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
@@ -110,6 +112,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _seekHintText;
   Timer? _seekHintTimer;
 
+  // 亮度/音量手势 (v1.0.40 修复: 主播放器之前根本没接手势层)
+  double _currentVolume = 0.5; // 0.0 ~ 1.0
+  double _currentBrightness = 0.5;
+  bool _showVolumeIndicator = false;
+  bool _showBrightnessIndicator = false;
+  Timer? _volumeHideTimer;
+  Timer? _brightnessHideTimer;
+  double? _dragStartVolume; // 拖动开始时的音量基线
+  double? _dragStartBrightness;
+
   // LunaTV Web 主题色
   static const Color kLunaTheme = Color(0xFF22C55E);
   static const Color kLunaLoadingColor = Color(0xFF009688);
@@ -120,6 +132,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
+    // v1.0.40: 读系统初始亮度/音量, 进入播放器时同步到 UI
+    () async {
+      try {
+        final vol = await VolumeController().getVolume();
+        if (mounted && vol != null) setState(() => _currentVolume = vol);
+      } catch (_) {}
+      try {
+        final br = await ScreenBrightness().getScreenBrightness();
+        if (mounted && br != null) setState(() => _currentBrightness = br);
+      } catch (_) {}
+    }();
     // 监听视频参数，获取宽高用于全屏方向判断
     _videoParamsSub = _player.streams.videoParams.listen((params) {
       final w = params.dw ?? params.w ?? 0;
@@ -575,6 +598,96 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_isPlaying) _scheduleHideControls();
     }
   }
+
+  // ==================== 亮度/音量手势 (v1.0.40) ====================
+
+  void _onVolumeSwipeStart(DragStartDetails details) {
+    _volumeHideTimer?.cancel();
+    _hideControlsTimer?.cancel();
+    _dragStartVolume = _currentVolume;
+    setState(() {
+      _controlsVisible = true;
+      _showVolumeIndicator = true;
+    });
+  }
+
+  void _onVolumeSwipeUpdate(DragUpdateDetails details) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    // 上滑增加音量 (dy 为负 = 上滑), 整屏 1:1 映射
+    final delta = -(details.delta.dy / screenHeight) * 2.0;
+    setState(() {
+      _currentVolume = ((_dragStartVolume ?? _currentVolume) + delta)
+          .clamp(0.0, 1.0);
+      _showVolumeIndicator = true;
+    });
+    // 真调系统音量 (iOS 上需要传 null 安卓需要 stream type)
+    VolumeController().setVolume(_currentVolume);
+  }
+
+  void _onVolumeSwipeEnd(DragEndDetails details) {
+    _dragStartVolume = null;
+    _volumeHideTimer?.cancel();
+    _volumeHideTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showVolumeIndicator = false);
+    });
+    _scheduleHideControls();
+  }
+
+  void _onBrightnessSwipeStart(DragStartDetails details) {
+    _brightnessHideTimer?.cancel();
+    _hideControlsTimer?.cancel();
+    _dragStartBrightness = _currentBrightness;
+    setState(() {
+      _controlsVisible = true;
+      _showBrightnessIndicator = true;
+    });
+  }
+
+  void _onBrightnessSwipeUpdate(DragUpdateDetails details) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final delta = -(details.delta.dy / screenHeight) * 2.0;
+    setState(() {
+      _currentBrightness = ((_dragStartBrightness ?? _currentBrightness) + delta)
+          .clamp(0.0, 1.0);
+      _showBrightnessIndicator = true;
+    });
+    ScreenBrightness().setScreenBrightness(_currentBrightness);
+  }
+
+  void _onBrightnessSwipeEnd(DragEndDetails details) {
+    _dragStartBrightness = null;
+    _brightnessHideTimer?.cancel();
+    _brightnessHideTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showBrightnessIndicator = false);
+    });
+    _scheduleHideControls();
+  }
+
+  // 单击中央 = 切显隐
+  void _onCenterTap() {
+    _toggleControls();
+  }
+
+  // 中间区域水平拖动 = 快进快退
+  void _onCenterSwipeUpdate(DragUpdateDetails details) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    // 整屏 1:1 映射, 60s/半屏
+    final deltaMs = (details.delta.dx / screenWidth * 60000).round();
+    final newMs = (_currentPosition.inMilliseconds + deltaMs)
+        .clamp(0, _currentDuration.inMilliseconds)
+        .toInt();
+    _player.seek(Duration(milliseconds: newMs));
+    final isForward = deltaMs >= 0;
+    setState(() {
+      _seekHintText = isForward ? '快进${(deltaMs / 1000).round()}s' : '快退${(-deltaMs / 1000).round()}s';
+    });
+    _seekHintTimer?.cancel();
+    _seekHintTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _seekHintText = null);
+    });
+  }
+
+  // ==================== 进度条拖动 ====================
 
   /// 进度条拖动 - 开始
   void _onScrubStart(double value) {
@@ -2259,6 +2372,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
             onTap: _toggleControls,
           ),
         ),
+        // 亮度/音量/快进 快退 手势层 (v1.0.40 修复: 主播放器之前根本没接)
+        // 左 1/4 上下 = 亮度, 右 1/4 上下 = 音量, 中间 1/2 左右 = 快进快退
+        Positioned.fill(
+          child: Row(
+            children: [
+              // 左: 亮度
+              Expanded(
+                flex: 1,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onVerticalDragStart: _onBrightnessSwipeStart,
+                  onVerticalDragUpdate: _onBrightnessSwipeUpdate,
+                  onVerticalDragEnd: _onBrightnessSwipeEnd,
+                ),
+              ),
+              // 中: 快进快退
+              Expanded(
+                flex: 2,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: _onCenterSwipeUpdate,
+                ),
+              ),
+              // 右: 音量
+              Expanded(
+                flex: 1,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onVerticalDragStart: _onVolumeSwipeStart,
+                  onVerticalDragUpdate: _onVolumeSwipeUpdate,
+                  onVerticalDragEnd: _onVolumeSwipeEnd,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 亮度浮窗指示器 (左侧, 竖屏横屏都显示)
+        if (_showBrightnessIndicator) _buildBrightnessIndicator(),
+        // 音量浮窗指示器 (右侧, 竖屏横屏都显示)
+        if (_showVolumeIndicator) _buildVolumeIndicator(),
         // 顶部栏 (80px 渐变 + 集数胶囊)
         _buildLunaTopBar(),
         // 底部毛玻璃控制栏 (横屏改短)
@@ -2316,6 +2469,134 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 亮度浮窗 (左侧, v1.0.40 修复主播放器手势)
+  Widget _buildBrightnessIndicator() {
+    return Positioned(
+      left: 32,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: Container(
+          width: 56,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.brightness_6, color: Colors.white, size: 28),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: 4,
+                height: 120,
+                child: Stack(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: FractionallySizedBox(
+                        heightFactor: _currentBrightness,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${(_currentBrightness * 100).round()}',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 音量浮窗 (右侧, v1.0.40 修复主播放器手势)
+  Widget _buildVolumeIndicator() {
+    return Positioned(
+      right: 32,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: Container(
+          width: 56,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _currentVolume == 0
+                    ? Icons.volume_off
+                    : _currentVolume < 0.5
+                        ? Icons.volume_down
+                        : Icons.volume_up,
+                color: Colors.white,
+                size: 28,
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: 4,
+                height: 120,
+                child: Stack(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: FractionallySizedBox(
+                        heightFactor: _currentVolume,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${(_currentVolume * 100).round()}',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
               ),
             ],
           ),

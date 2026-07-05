@@ -119,20 +119,21 @@ class _HeroBannerState extends State<HeroBanner> {
         final isDarkMode = themeService.isDarkMode;
         return LayoutBuilder(
           builder: (context, constraints) {
-            // 响应式高度 - 移动端约 32vh，桌面端约 45vh，整体小一些
+            // 响应式高度 - 调小降低源图 600×900 被强拉到 banner 宽度的放大倍率
+            // 平板上原来 42~45vh 现在 32vh, 放大倍率从 6.7x 降到 3x 以内
             final screenWidth = constraints.maxWidth;
             final screenHeight = MediaQuery.of(context).size.height;
             double bannerHeight;
             if (screenWidth < 640) {
-              bannerHeight = screenHeight * 0.32; // 移动端 32vh
+              bannerHeight = screenHeight * 0.28; // 移动端 28vh
             } else if (screenWidth < 768) {
-              bannerHeight = screenHeight * 0.38; // sm 38vh
+              bannerHeight = screenHeight * 0.30; // sm 30vh
             } else if (screenWidth < 1024) {
-              bannerHeight = screenHeight * 0.42; // md 42vh
+              bannerHeight = screenHeight * 0.32; // md 32vh
             } else {
-              bannerHeight = screenHeight * 0.45; // lg+ 45vh
+              bannerHeight = screenHeight * 0.32; // lg+ 32vh
             }
-            bannerHeight = bannerHeight.clamp(220.0, 480.0);
+            bannerHeight = bannerHeight.clamp(200.0, 360.0);
 
             // banner 实际宽度 (去掉左右 12 边距), 给 CachedNetworkImage 算解码尺寸
             final bannerWidth = screenWidth - 24;

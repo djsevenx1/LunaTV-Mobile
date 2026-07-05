@@ -88,29 +88,41 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.40': `## 更新日志
+
+            ### 🐛 修复
+
+            - **首页轮播图海报不显示 (v1.0.39 引发的回归)**
+              - 现象: v1.0.39 装了 APK 后轮播图海报整张空白
+              - 原因: [image_url.dart](file:///workspace/lib/utils/image_url.dart) \`_upgradeDoubanPosterUrl\` 把
+                \`s_/m_/l_ratio_poster\` 全部替换成 \`raw\`, 但豆瓣 doubanio CDN 的 \`raw\` 尺寸仅登录用户
+                可访问, 公开图请求返回 404/403, 整张海报不显示
+              - 修复: 回滚到 \`l_ratio_poster\` (公开图最大 600×900), 同时调小 banner 高度降低放大倍率
+                - [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) 横屏 0.32vh / 竖屏 0.28vh, clamp 200~360
+                - 平板上 banner 放大倍率从 6.7x 降到 3x 以内, 字幕/演职员表在大屏上能看清
+
+            - **播放器亮度/音量调节还是没反应 (v1.0.39 漏修)**
+              - 现象: v1.0.39 装了 APK 后竖屏左右滑动屏幕还是没反应
+              - 原因: v1.0.39 只修了 [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart),
+                但**用户实际用的是 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 的 LunaTV 风格主播放器** (PlayerScreen),
+                完全没有 \`_buildGestureLayer\`, 只有一个 \`onTap: _toggleControls\` 调显隐
+                - mobile_player_controls.dart 只在 video_player_widget.dart 备用路径才用, 不是主播放器
+              - 修复: 给 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 主播放器加完整手势层
+                - 左 1/4 区域 \`onVerticalDrag\` → 调亮度
+                - 右 1/4 区域 \`onVerticalDrag\` → 调音量
+                - 中间 1/2 区域 \`onHorizontalDrag\` → 快进快退 (v1.0.37 已有)
+                - 音量/亮度浮窗指示器竖屏横屏都显示
+                - 新增字段: \`_currentVolume\` / \`_currentBrightness\` / \`_showVolumeIndicator\` / \`_showBrightnessIndicator\`
+                - 新增依赖: \`volume_controller\` 和 \`screen_brightness\`
+
+            ---`,
+
               'v1.0.39': `## 更新日志
 
             ### 🐛 修复
 
-            - **首页轮播图海报清晰度 (v1.0.38 改进未彻底)**
-              - 现象: v1.0.38 装了 \`FilterQuality.high\` + \`memCacheWidth\`, 但海报仍然糊
-              - 原因: 渲染层优化只是把现有像素做高质量重采样, 但源图本身就是低分辨率
-                - [image_url.dart](file:///workspace/lib/utils/image_url.dart) 把豆瓣图从 \`s_/m_\` 升到 \`l_ratio_poster\` (约 600×900)
-                - 平板上 banner 跨满屏 2K 宽 × 500 高, 2x dpr 后 600×900 被强拉到 4K×1K, 6.7x 放大, 糊
-              - 修复: [image_url.dart](file:///workspace/lib/utils/image_url.dart) \`_upgradeDoubanPosterUrl\` 改用豆瓣 \`raw\` 原图 (约 1080×1620 起, 可达 2000+)
-                - 替换 \`l_/m_/s_ratio_poster\` → \`raw\`
-                - 替换 \`photo/s|m|l\` → \`photo/raw\`
-                - 放大倍率从 6.7x 降到 1~2x, 海报细节 (字幕/演职员表/电影标题) 在大屏上能看清
-
-            - **播放器左侧上下调亮度 / 右侧上下调音量 (v1.0.38 之前竖屏不工作)**
-              - 现象: v1.0.38 装了 APK 后, 用户在竖屏下左右滑屏幕调节亮度/音量没反应
-              - 原因: [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) 的 \`_buildGestureLayer\` 把左/右 1/3 区域的 \`onVerticalDragStart/Update/End\` 监听器整段包在 \`if (_isFullscreen)\` 里
-                - 横屏 (\`_isFullscreen = true\`) 时三个 GestureDetector 都有纵向滑动监听, 正常
-                - 竖屏 (\`_isFullscreen = false\`) 时左/右 1/3 区域根本不渲染, 整个屏幕只有一个 1/1 横向滑动监听器, 纵向滑动被吃掉
-              - 修复:
-                - [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) \`_buildGestureLayer\` 三个 GestureDetector 始终渲染 (flex 1/2/1), 不再 wrap 在 \`if (_isFullscreen)\` 里
-                - \`_onVolumeSwipeStart/Update/End\` 和 \`_onBrightnessSwipeStart/Update/End\` 里的 \`if (!_isFullscreen || _isLocked) return\` 改为 \`if (_isLocked) return\`, 竖屏下也能调
-                - 音量 / 亮度指示器从 \`_buildRightOverlay\` 拆出成独立 \`_buildVolumeIndicator\` 方法, 竖屏下也会显示右侧音量浮窗 (不再依赖 \`if (_isFullscreen)\`)
+            - **首页轮播图海报清晰度 (v1.0.38 改进未彻底) — 已知回归, v1.0.40 修复**
+            - **播放器左侧上下调亮度 / 右侧上下调音量 (v1.0.38 之前竖屏不工作) — 漏修主播放器, v1.0.40 修复**
 
             ---`,
 
