@@ -428,6 +428,15 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
      - 整个 step 失败时重试 3 次, 间隔 30s
      - 即使 Gradle 重试也救不回来, workflow 层再兜一道
 
+第八次 push (这次): step 10 失败, 0 秒结束
+  → 真实错误是 nick-fields/retry 自己的校验报错, 不是 gradle 502:
+    ```
+    Must specify either timeout_minutes or timeout_seconds inputs
+    ```
+  → nick-fields/retry@v3 必须显式设置 timeout, 否则 0 秒立刻失败
+  → 修复: [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) step 10 加 `timeout_minutes: 60`
+  → 重新打 v1.0.38 tag → 重新触发
+
 ## 教训
 
 1. **Gradle fail-over 不像看上去那样工作** — 多个 repo 并列时,
@@ -445,6 +454,9 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
 5. **build.yml changelog 里的 markdown 反引号必须转义**——
    JS 模板字符串里 `\` \`` 是单字符转义, `_\`x\`_` 才会被当成 markdown
    反引号而不是 JS 字符串结束符。后续加新 changelog 段要小心。
+6. **nick-fields/retry 必须设 timeout**——不设 timeout_minutes / timeout_seconds
+   action 会自己报错退出 (0 秒), 表现为 step 失败但日志极短, 容易误判
+   为网络/编译问题。改 retry wrapper 时记得加 timeout。
 
 ## 改动文件
 
