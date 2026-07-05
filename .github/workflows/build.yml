@@ -55,7 +55,15 @@ jobs:
 
       # release 签名: keystore 已提交在 android/app/release.keystore
       # build.gradle.kts 直接读取, 每次 CI 构建签名一致
-      - run: flutter build apk --release
+      # 镜像 502 时 Flutter 会自动重试 1 次, 但 Aliyun/Huawei/Tencent 同步挂的时候
+      # 重试不够, 这里用 nick-fields/retry 兜底网络瞬时故障
+      - name: Run flutter build apk --release
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          retry_on: error
+          retry_wait_seconds: 30
+          command: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
         with:

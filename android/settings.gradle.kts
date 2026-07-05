@@ -8,11 +8,13 @@ pluginManagement {
     }
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
     repositories {
-        // google() 放第一位, Aliyun 502 不会卡主流程 (详见 android/build.gradle.kts 注释)
+        // google() + 多镜像互备 (跟 android/build.gradle.kts 同样的策略)
         google()
         maven { setUrl("https://maven.aliyun.com/repository/google") }
         maven { setUrl("https://maven.aliyun.com/repository/public") }
         maven { setUrl("https://maven.aliyun.com/repository/gradle-plugin") }
+        maven { setUrl("https://repo.huaweicloud.com/repository/maven/") }
+        maven { setUrl("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/") }
         mavenCentral()
         gradlePluginPortal()
     }
