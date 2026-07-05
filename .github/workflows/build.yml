@@ -79,6 +79,23 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.35': `## 更新日志
+
+            ### 🐛 修复
+
+            - **短剧页面平板视频列数异常**
+              - 之前 [short_drama_screen.dart](file:///workspace/lib/screens/short_drama_screen.dart) 的 \`_buildDramaGrid\` 只区分 PC / 非 PC 两支，非 PC 一律 3 列
+              - 平板被归到非 PC 分支，宽度 800+ 也只显示 3 张大卡片，每张被拉得很大（图 1）
+              - 电视剧页面用的 [douban_movies_grid.dart](file:///workspace/lib/widgets/douban_movies_grid.dart) 调的是 \`DeviceUtils.getTabletColumnCount()\`，宽度 1000/1200 阈值动态返回 6/7/8 列
+              - 短剧页补一个 \`DeviceUtils.isTablet(context)\` 分支，调用 \`getTabletColumnCount()\` 复用同一套列数算法，跟电视剧页观感一致
+              - 顺手把非 PC 分支的 \`spacing\` 从 10 调到 12、padding 从 12 调到 16，跟电视剧页对齐
+
+            ### 🛠 实现细节
+
+            - 三段分支：\`isPC\` → 4~6 列；\`isTablet\` → 6~8 列；其他（手机）→ 3 列
+            - 共享同一个 \`getTabletColumnCount\`，以后平板列数规则要改只动 [device_utils.dart](file:///workspace/lib/utils/device_utils.dart) 一处
+
+            ---`,
               'v1.0.34': `## 更新日志
 
             ### 🛠 回退
