@@ -2066,7 +2066,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           height: size,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: kLunaFloatBtnBg,
+            // v1.0.49: 底色跟亮度/音量浮窗一致用 Colors.black.withOpacity(0.7)
+            color: Colors.black.withOpacity(0.7),
             border: Border.all(
               color: Colors.white.withOpacity(0.2),
               width: 1,
