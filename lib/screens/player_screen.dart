@@ -1996,13 +1996,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
           ),
-          // 中间: 播放/暂停按钮 (v1.0.49: 颜色跟播控进度条一致用 kLunaTheme)
+          // 中间: 播放/暂停按钮 (v1.0.49: 颜色跟底部 _iconBtn 播控按钮一致用 Colors.white)
           _buildSeekCircleButton(
             size: size,
             onTap: _togglePlayPause,
             child: Icon(
               _isPlaying ? Icons.pause : Icons.play_arrow,
-              color: kLunaTheme,
+              color: Colors.white,
               size: 32,
             ),
           ),
