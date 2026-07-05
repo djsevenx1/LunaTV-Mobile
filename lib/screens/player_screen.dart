@@ -1964,7 +1964,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
     final size = _isFullscreen ? 64.0 : 56.0;
-    final sideOffset = _isFullscreen ? 80.0 : 60.0;
+    // v1.0.49: 离边 60/80 → 40/60, 按钮往中间挪一点 (与中央播放按钮的间距从 88/112px 缩到 68/92px)
+    final sideOffset = _isFullscreen ? 60.0 : 40.0;
     return Positioned.fill(
       child: Stack(
         alignment: Alignment.center,
