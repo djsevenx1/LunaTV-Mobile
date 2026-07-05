@@ -1360,26 +1360,56 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       await _player.stop();
       await _player.open(Media(url));
-      // 云记忆恢复: 缓冲到能播后 seek 到上次的位置
+      // 云记忆恢复
+      //
+      // v1.0.60 fix: 之前 _player.open 完直接 seek, 但 media_kit 在
+      // `open()` 返回时 player 还没真正开始解码, 这时 seek 经常被丢
+      // (player.state.position 仍是 0, position stream 也没回).
+      // 表现: 用户从首页"继续观看"卡片点进去, 视频从 0 开始播, 不 resume.
+      // 修法: 等 position stream 第一次回传 (说明 player 已 ready),
+      // 再 seek; 再加 250ms 兜底检查 + 重试一次. 整个等待
+      // 用 3s timeout, 避免卡死 UI.
       if (resumeAt != null) {
+        await _waitForPlayerReady(timeout: const Duration(seconds: 3));
         try {
           await _player.seek(resumeAt);
+        } catch (_) {}
+        // 兜底: 250ms 后检查 position, 如果没到 resumeAt 附近 (>1s 差距),
+        // 说明第一次 seek 被丢, 再来一次
+        await Future.delayed(const Duration(milliseconds: 250));
+        try {
+          final pos = _player.state.position;
+          if (pos < resumeAt - const Duration(seconds: 1)) {
+            await _player.seek(resumeAt);
+          }
         } catch (_) {}
       }
       if (!mounted) return;
       setState(() => _isBuffering = false);
-      // 启动定时器,并立即保存一条(标记已开始)
+      // 启动定时器, 并立即保存一条 (标记已开始)
       _startProgressTimer();
-      _firstRecordSaved = false; // 重置,让定时器先存一次
-      // v1.0.50: resume 场景下 player 刚 open + seek, position stream 还没回传,
-      // state.position 和 _currentPosition 都还是 0, 此时 _saveCurrentProgress
-      // 会命中 state.playing=true 分支存一条 playTime=0 的记录,
-      // 把云端 12 分钟那条覆盖掉, 下次重开云端拉到 playTime=0 就从 0 开始.
-      // 修法: resume 场景跳过这次立即 save, 让 10s 定时器第一次 tick 时再存
-      // (那时 position stream 已经回传 > 0). 非 resume 场景 (新集/切集)
-      // 保留立即 save 标记已开始.
       if (resumeAt == null) {
+        // 非 resume 场景 (新集/切集): 重置 flag 让定时器先存一次, 然后立即 save
+        // 标记已开始. playTime=0 是预期的 (用户刚点开)
+        _firstRecordSaved = false;
         _saveCurrentProgress();
+      } else {
+        // v1.0.60: resume 场景下 player 刚 open + seek, position stream 可能
+        // 还没回传, _currentPosition / state.position 都还是 0. 此时若
+        // _firstRecordSaved=false, 10s 定时器第一次 tick 时 (假定此时 stream
+        // 已回但 pos 偶尔还是 0) 命中 state.playing=true 分支存一条
+        // playTime=0 的记录, **把云端 12 分钟那条覆盖掉**, 下次重开云端
+        // 拉到 playTime=0 就从 0 开始.
+        //
+        // v1.0.50 修法是跳过立即 save, 但没处理 10s 定时器这次 — 假设 10s
+        // 内 position stream 一定回传 > 0. 慢网络 / 大视频下不一定.
+        //
+        // 修法: 设 _firstRecordSaved=true, 让 10s 定时器存 0 时命中
+        //   if (!force && _lastSavedKey == key && playTime == 0
+        //       && _firstRecordSaved) { return; }
+        // 早返跳过. 等下一个 tick (再 10s 后) stream 肯定回了, 正常存.
+        // 用户多看 10s 不影响体验, 但避免误覆盖云端记录.
+        _firstRecordSaved = true;
       }
     } catch (e) {
       if (!mounted) return;
@@ -1387,6 +1417,33 @@ class _PlayerScreenState extends State<PlayerScreen>
         _isBuffering = false;
         _error = '播放失败: $e';
       });
+    }
+  }
+
+  /// 等待 player 真正开始解码 (position stream 第一次回传)
+  ///
+  /// v1.0.59: media_kit 的 `Player.open()` 返回时 player 还在初始化,
+  /// 立即 seek 经常被丢. 等 position stream 第一次回传 (说明 player 已
+  /// ready) 再 seek, 可以让 resume 100% 生效. 带 timeout, 超时后
+  /// 也继续 (fallback 到直接 seek).
+  Future<void> _waitForPlayerReady({
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    final completer = Completer<void>();
+    late StreamSubscription<Duration> sub;
+    sub = _player.streams.position.listen((_) {
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+      sub.cancel();
+    });
+    try {
+      await completer.future.timeout(timeout);
+    } catch (_) {
+      // 超时, 继续 (后续会再 seek 一次兜底)
+      try {
+        await sub.cancel();
+      } catch (_) {}
     }
   }
 

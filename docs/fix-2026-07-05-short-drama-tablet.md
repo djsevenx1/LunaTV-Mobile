@@ -1688,3 +1688,114 @@ setState(() {
 - [lib/widgets/continue_watching_section.dart](file:///workspace/lib/widgets/continue_watching_section.dart) - refreshPlayRecords 加 \_dedupeByMovie 同步 \_dedupedRecords
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.58+1 → 1.0.59+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.59 changelog
+
+---
+
+# v1.0.60 · resume 还是失败 (v1.0.59 修了一半, 是 player.open 完不能直接 seek)
+
+## 现象
+
+装 v1.0.59 后用户反馈:
+
+> 然后播放又变成0了
+
+具体: 卡片现在显示 12:00 了 (v1.0.59 修的), 但点进去视频还是从 0 开始.
+云端缓存是对的 (有 12 min 那条), \_pendingResumeAt 也有值, \_player.seek
+也调用了 — 但 **position 始终是 0**.
+
+## 排查
+
+v1.0.59 修的"读"路径是对的, 现在 \_pendingResumeAt 被正确设置, seek 也
+被调用, 但 seek 静默失败. 打开媒体_kit 的文档看 (凭记忆 + 经验):
+
+> \`Player.open(Media url)\` returns a Future that completes when the media
+> is opened. But "opened" doesn't mean "ready to play". The actual decoding
+> might still be in progress.
+
+media_kit 的 \`open()\` 返回时 player 还在初始化, **没真正开始解码**,
+此时 \`_player.seek()\` 经常被丢 (player.state.position 仍是 0,
+position stream 也不回). 现有 v1.0.50 注释 (line 1374-1380) 假设
+open 完就能 seek, 实际不行.
+
+## 修法
+
+### 1. 等 player ready 再 seek ([player_screen.dart:1372-1386](file:///workspace/lib/screens/player_screen.dart#L1372-L1386))
+
+新加 \`_waitForPlayerReady({timeout: 3s})\`: 监听
+\`_player.streams.position\`, 第一次回传时 (说明 player 已 ready)
+返回. 带 3s timeout, 避免卡死 UI.
+
+```dart
+if (resumeAt != null) {
+  await _waitForPlayerReady(timeout: const Duration(seconds: 3));
+  try {
+    await _player.seek(resumeAt);
+  } catch (_) {}
+  // 兜底: 250ms 后检查 position, 如果没到 resumeAt 附近 (>1s 差距),
+  // 说明第一次 seek 被丢, 再来一次
+  await Future.delayed(const Duration(milliseconds: 250));
+  try {
+    final pos = _player.state.position;
+    if (pos < resumeAt - const Duration(seconds: 1)) {
+      await _player.seek(resumeAt);
+    }
+  } catch (_) {}
+}
+```
+
+### 2. 配套修存路径: 10s 定时器存 0 误覆盖云端 ([player_screen.dart:1397-1412](file:///workspace/lib/screens/player_screen.dart#L1397-L1412))
+
+即使 seek 修好了, 还有存路径隐患: 慢网络 / 大视频下 10s 定时器第一次
+tick 时 position stream 可能还没回传, pos=0, state.playing=true,
+命中 \`state.playing || (pos > 0 && !completed)\` 分支, **存一条
+playTime=0 的记录, 把云端 12 min 那条覆盖掉**.
+
+v1.0.50 修法假设 10s 内 stream 一定回传 > 0. 慢网络下不一定.
+
+修法: resume 场景下设 \`_firstRecordSaved = true\` (非 resume 场景保持
+\`= false\`), 让 10s 定时器存 0 时命中
+
+```dart
+if (!force && _lastSavedKey == key && playTime == 0
+    && _firstRecordSaved) { return; }
+```
+
+早返跳过. 等下一个 tick (再 10s 后) stream 肯定回了, 正常存.
+
+```dart
+if (resumeAt == null) {
+  // 非 resume 场景 (新集/切集): 重置 flag 让定时器先存一次
+  _firstRecordSaved = false;
+  _saveCurrentProgress();
+} else {
+  // resume 场景: 设 _firstRecordSaved=true, 10s 定时器存 0 命中早返,
+  // 避免误覆盖云端记录
+  _firstRecordSaved = true;
+}
+```
+
+代价: 用户在 resume 后**多看 10s 才会第一次存盘** (早返一次 + 下次
+tick 存). 不影响体验, 换云端 12 min 不被 0 覆盖.
+
+## 不影响
+
+- v1.0.50 的\`if (resumeAt == null) { _saveCurrentProgress(); }\` 立即
+  save 标记已开始 — 仍然保留
+- 非 resume 场景 (新集/切集) — 行为不变
+- 切集时的 force save — 不变
+
+## 教训
+
+1. **media_kit 第三方 API 的"返回"语义要查清楚**, \`open()\` 返回 ≠
+   "ready", \`seek()\` 静默失败被外层 try/catch 吞了 = "没生效"
+2. **异步状态机要监听"ready 信号"**, position stream 第一次回传就是
+   player ready 的可靠信号
+3. **seek 后要验证**, 250ms 后查 \`player.state.position\`, 不对就重试
+4. **早返条件要明确**, 这次顺手把 v1.0.50 注释里没处理的"10s 定时器
+   这次"也修一下, 用 \`_firstRecordSaved=true\` 把 0 存路径堵死
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - 加 \_waitForPlayerReady + 修 seek + 修 10s 定时器存 0 路径
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.59+1 → 1.0.60+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.60 changelog

@@ -88,6 +88,43 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.60': `## 更新日志
+
+            ### 🐛 修复
+
+            - **resume 失效, 视频从 0 开始播 (v1.0.59 修了一半)**
+              - 现象: v1.0.59 修了卡片显示 playTime, 用户从首页"继续观看"
+                点进去, 卡片显示 12:00, 但视频还是从 0 开始. 缓存层是对的
+                (云端有 12 min 那条), 播放器 seek 调用也确实触发了, 但
+                **position 始终是 0**, 视频从 0 播到 1, 2, 3, ...
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - media_kit 的 \`Player.open(Media url)\` 返回时 player
+                  还在初始化 (没真正开始解码), 此时 \`Player.seek()\`
+                  **被丢**, player.state.position 仍是 0, position stream
+                  也不回. v1.0.50 修存路径的注释 (line 1374-1380) 假设
+                  open 完就能 seek, 实际不行.
+                - \`_currentEpisodeIndex == 1\` 条件成立 (\`_pendingResumeAt\`
+                  被读), \`resumeAt\` 被赋值, \`_player.seek(resumeAt)\` 也
+                  被调用, 但 seek 静默失败 (外层 try/catch 吞了),
+                  视频从 0 播.
+              - 修法:
+                1. 新加 \`_waitForPlayerReady({timeout: 3s})\`: 监听
+                   \`_player.streams.position\`, 第一次回传时 (说明 player
+                   已 ready) 返回, 带 3s timeout 避免卡死.
+                2. seek 前先 \`await _waitForPlayerReady()\`, 再 seek.
+                3. seek 完 250ms 后检查 \`player.state.position\`, 如果跟
+                   \`resumeAt\` 差 > 1s 说明 seek 被丢, **重试一次**.
+              - 配套修存路径 ([player_screen.dart:1391-1413](file:///workspace/lib/screens/player_screen.dart#L1391-L1413)):
+                - v1.0.50 注释假设 10s 定时器第一次 tick 时 position stream
+                  一定回传 > 0. 慢网络下不一定.
+                - 修法: resume 场景下设 \`_firstRecordSaved = true\` (非
+                  resume 保持 \`= false\`), 让 10s 定时器存 0 时命中
+                  早返 \`!force && _lastSavedKey == key && playTime == 0
+                  && _firstRecordSaved\`, **跳过 0 覆盖**, 等下一个 tick
+                  (再 10s 后) stream 肯定回了再存.
+                - 用户多看 10s 不影响体验, 但避免误覆盖云端 12 min 那条.
+
+            ---`,
               'v1.0.59': `## 更新日志
 
             ### 🐛 修复
