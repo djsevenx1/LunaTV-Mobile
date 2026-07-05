@@ -316,4 +316,103 @@ tag 构建触发 Release → `softprops/action-gh-release` 创建 release →
 - changelog: 已在 `build.yml` 的 `changelogs` map 顶部追加
 - Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.37>
 
+> ⚠️ v1.0.37 release **body 是空的**——见下方「v1.0.37 release body 失败」一节
+> 原因: build.yml changelog 模板字符串里有未转义的 markdown 反引号
+> 表现: `softprops/action-gh-release` 创 release 成功（step 12 success）,
+> 但后续 `actions/github-script` 写 body 时 JS 报 SyntaxError, release body 留空
+> 影响: 用户从 v1.0.37 release 页面看不到任何 changelog,
+> APK 安装/下载不受影响
+
+---
+
+# v1.0.38 · 平板选集卡片过大 + 轮播图清晰度
+
+## 现象
+
+用户安装 v1.0.37 后反馈：
+
+1. 平板选集卡片巨大，6 列每张 200dp 居中显空（看"怎么选集"截图）
+2. 首页轮播图海报不清晰
+
+## 排查
+
+### 1. 平板选集卡片
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 的
+`_buildEpisodeSection` 写死 `crossAxisCount: 6, childAspectRatio: 1.2`，
+平板 1300+ 宽度下每张卡片约 200dp 宽、字号 11 显得小且居中。底部抽屉选集
+同样写死 `crossAxisCount: 5`。
+
+### 2. 轮播图清晰度
+
+[hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) 的
+`CachedNetworkImage` 用默认 `FilterQuality.medium`，源图被放大到 2~3 倍
+时重采样质量不够，马赛克明显。
+
+## 修复
+
+### 选集卡片 — [player_screen.dart](file:///workspace/lib/screens/player_screen.dart)
+
+两个选集网格都套 `LayoutBuilder` 按宽度动态算列数：
+
+- 详情选集: <600 6 列 / <900 8 列 / <1200 10 列 / ≥1200 12 列
+- 卡片宽 < 80dp 时 `childAspectRatio` 1.2 + 字号 11; 否则 1.0 + 字号 12
+- 底部抽屉选集: <500 5 列 / <800 8 列 / <1100 10 列 / ≥1100 12 列
+
+### 轮播图清晰度 — [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart)
+
+```dart
+CachedNetworkImage(
+  filterQuality: FilterQuality.high,  // 高质量重采样
+  gaplessPlayback: true,              // 切图时无白闪
+  memCacheWidth: (bannerWidth * dpr).round(),  // 按 banner 实际宽
+)
+```
+
+`bannerWidth` 作为参数从 `build()` 传到 `_buildBannerItem`（build 里
+LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
+
+## 构建失败反复记录（3 次才过）
+
+第一次 push: `Set release body` (step 13) 失败
+  → build.yml changelog 模板字符串里有未转义反引号
+  → 改成 `\`_buildGestureLayer\``
+
+第二次 push: `Run flutter build apk` (step 10) 失败
+  → [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) 内部用
+    `(_bannerWidth * dpr)` 引用了已删除的 state 字段
+  → 改成 `(bannerWidth * dpr)` 用函数参数
+
+第三次 push: 还是 step 10 失败
+  → [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) itemBuilder
+    还在传已删除的 `_bannerWidth` state 字段
+  → 改成局部变量 `bannerWidth`
+
+第四次才过。
+
+## 教训
+
+1. **Dart refactor 改 state 字段名时，所有引用要一次全改**——
+   这次我从 state 字段 `_bannerWidth` 改成 `build()` 里的局部变量
+   `bannerWidth`，函数签名也改了，但 PageView 的 itemBuilder 里
+   调用没改到，导致编译失败 2 次。改完应该 grep 一遍所有引用。
+2. **build.yml changelog 里的 markdown 反引号必须转义**——
+   JS 模板字符串里 `\` \`` 是单字符转义，`_\`x\`_` 才会被当成 markdown
+   反引号而不是 JS 字符串结束符。后续加新 changelog 段要小心。
+
+## 改动文件
+
+- `lib/screens/player_screen.dart` — 两个选集网格套 LayoutBuilder
+- `lib/widgets/hero_banner.dart` — filterQuality.high / memCacheWidth 重算
+- `pubspec.yaml` — version 1.0.37+1 → 1.0.38+1
+- `.github/workflows/build.yml` — 追加 v1.0.37/v1.0.38 changelog
+
+## Release
+
+- tag: `v1.0.38`
+- 分支: `main` HEAD
+- 版本: 1.0.38+1
+- changelog: 已在 `build.yml` 的 `changelogs` map 顶部追加
+- Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.38>
+
 
