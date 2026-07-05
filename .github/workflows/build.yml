@@ -88,6 +88,40 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.65': `## 更新日志
+
+            ### 🐛 修复
+
+            - **进度条记忆"有时候"从 0 开始 (v1.0.49/50.1/53 修漏的同模式 bug 第三条触发路径)**
+              - 现象: 用户反馈"进度条记忆修好了但是有时候还是从 0 开始".
+                现象具体: 看到一半 (10+ 分钟) 关掉重开, 偶尔从 0 开始, 不是稳定复现
+              - 根因: 三处 \`force: true\` 的 save 路径, 跟 v1.0.50.1 / v1.0.53
+                修的 dispose / paused 路径**完全同模板**:
+                1. \`onPopInvoked\` (playing→detail): 刚 play 没到 1s 就 back,
+                   position stream 还没回, \`_currentPosition=0\`, \`state.position=0\`,
+                   force=true 跳过 \`_firstRecordSaved\` 守门 → 存 \`playTime=0\` 覆盖之前
+                   10s 定时器存的真进度
+                2. \`didChangeAppLifecycleState\` (paused): 刚 play 完立刻 home 键,
+                   同上 → 存 0
+                3. \`_disposeAndSave\` (异常退出 / 杀 App): 玩家刚 open stream 还没回,
+                   同上 → 存 0
+                4. 这三处都用了 \`force: true\` 来"保证 save 成功", 但代价是
+                   \`_firstRecordSaved\` 守门失效, 一旦 pos=0 就存 0
+                5. v1.0.49 加了 "save 必须先于 stop" 但没考虑 pos 还是 0 的场景
+              - v1.0.65 修:
+                1. 加 \`_waitForValidPosition()\` 辅助方法, 等 position stream
+                   至少回一次 \`_currentPosition > 0\` (800ms timeout, player 没
+                   在播直接 return)
+                2. 三处 save 前都先 await \`_waitForValidPosition()\`, 然后判断
+                   \`_currentPosition > Duration.zero\` 才调 \`_saveCurrentProgress(force:true)\`
+                3. 仍然 0 就**跳过这次 save**, 让 10s 定时器下次 tick 兜底
+                4. 用户场景:
+                   - 看到 15 min 正常 back: \`_currentPosition=15min\` → 直接 save, 不等
+                   - 刚 play 1s 内 back: 等 800ms, 大概率 stream 已回 \`>0\` → save
+                   - 网络极慢 800ms 都没回: 跳过 save, 10s 定时器下次 tick 时 stream
+                     大概率已回, 正常存
+
+            ---`,
               'v1.0.64': `## 更新日志
 
             ### 🛠️ 清理

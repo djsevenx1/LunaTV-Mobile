@@ -271,9 +271,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///       (最后一次救命机会, 走本地双写兜底)
   Future<void> _disposeAndSave() async {
     if (_phase == 'playing') {
-      try {
-        await _saveCurrentProgress(force: true);
-      } catch (_) {}
+      // v1.0.65: 先等 _currentPosition > 0 再 save, 避免刚 play 就被 kill
+      // 时存 0 覆盖之前的真进度
+      await _waitForValidPosition();
+      if (_currentPosition > Duration.zero) {
+        try {
+          await _saveCurrentProgress(force: true);
+        } catch (_) {}
+      }
     }
     try {
       await _player.stop();
@@ -307,9 +312,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden) {
-      // 进后台时立即保存, 走 _saveCurrentProgress 的 force 分支,
-      // _currentPosition 兜底能拿到最后一帧有效 position
-      unawaited(_saveCurrentProgress(force: true));
+      // v1.0.65: 先等 _currentPosition > 0 再 save, 避免刚 play 就 home
+      // 键时存 0 覆盖之前的真进度. 仍然 0 就跳过 (10s 定时器下次兜底)
+      _waitForValidPosition().then((_) {
+        if (_currentPosition > Duration.zero) {
+          // 进后台时立即保存, 走 _saveCurrentProgress 的 force 分支,
+          // _currentPosition 兜底能拿到最后一帧有效 position
+          unawaited(_saveCurrentProgress(force: true));
+        }
+      });
     }
   }
 
@@ -1087,6 +1098,36 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 启动后云记忆里查到的 episode, 准备在 _playEpisode 时 seek 过去
   Duration? _pendingResumeAt;
 
+  /// v1.0.65: 等 position stream 至少回一次 _currentPosition > 0
+  /// (带 timeout). 防止"刚 open player 就 back / home 键 / 杀 App" 等
+  /// 场景下 state.position 和 _currentPosition 都还是 0 时,
+  /// 走 force=true 的 save 路径存 0, **覆盖了之前的真进度**
+  /// (云端 + local 双写都会被覆盖), 下次重开从 0 开始
+  ///
+  /// 三处会用到: onPopInvoked (playing→detail) / didChangeAppLifecycleState
+  /// (paused) / _disposeAndSave. 这三处都用 force=true 跳过 _firstRecordSaved
+  /// 守门, 没办法靠守门保护, 只能等 stream.
+  Future<void> _waitForValidPosition({
+    Duration timeout = const Duration(milliseconds: 800),
+  }) async {
+    if (_currentPosition > Duration.zero) return;
+    // player 都没在播, 等也是白等, 直接 return
+    if (!_player.state.playing) return;
+    final completer = Completer<void>();
+    late StreamSubscription<Duration> sub;
+    sub = _player.streams.position.listen((pos) {
+      if (pos > Duration.zero && !completer.isCompleted) {
+        completer.complete();
+      }
+    });
+    try {
+      await completer.future.timeout(timeout);
+    } catch (_) {}
+    try {
+      await sub.cancel();
+    } catch (_) {}
+  }
+
   // 加载多源并自动测速
   Future<void> _loadSources() async {
     final title = widget.videoInfo.searchTitle.isNotEmpty
@@ -1641,10 +1682,15 @@ class _PlayerScreenState extends State<PlayerScreen>
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // v1.0.49: 必须先 save 再 stop, 否则 stop 把 state.position 重置成 0,
-              // _saveCurrentProgress 读到的就是 0, 退出后下次打开从 0 开始.
-              // (之前的顺序是先 stop 再 save, 写盘的 playTime 一直是 0)
-              await _saveCurrentProgress(force: true);
+              // v1.0.65: 先等 _currentPosition > 0 再 save, 避免刚 play 就
+              // back 时存 0 覆盖之前的真进度. 仍然 0 就跳过
+              await _waitForValidPosition();
+              if (_currentPosition > Duration.zero) {
+                // v1.0.49: 必须先 save 再 stop, 否则 stop 把 state.position 重置成 0,
+                // _saveCurrentProgress 读到的就是 0, 退出后下次打开从 0 开始.
+                // (之前的顺序是先 stop 再 save, 写盘的 playTime 一直是 0)
+                await _saveCurrentProgress(force: true);
+              }
               // 从播放页返回详情页: 恢复竖屏, 暂停播放
               try {
                 await _player.stop();
