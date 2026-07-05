@@ -1236,8 +1236,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                 });
               }
             } else if (didPop && _phase == 'detail') {
-              // 真正退出页面: 最后保存一次
-              await _saveCurrentProgress(force: true);
+              // v1.0.50: 真正退出页面时不再 save.
+              // 之前这里调 _saveCurrentProgress(force: true), 但 player 在
+              // playing→detail 那次已经 stop 了, state.position 和 _currentPosition
+              // 都是 0, 这次 save 会存 playTime=0 覆盖掉之前存的 12 分钟,
+              // 下次打开云端拉到 playTime=0 又从 0 开始.
+              // 进度已经在 playing→detail 转换时存过了, 这里不需要再存.
             }
           },
           child: Scaffold(
