@@ -85,6 +85,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 跳过片头片尾
   int _skipIntroEnd = 0; // 片头结束时间（秒），0 表示不跳
   int _skipOutroStart = 0; // 片尾开始时间（秒，从结尾倒数），0 表示不跳
+  // v1.0.58: 默认手动, 有的源没片头/片尾, 自动跳会跳错
+  // 用户在设置弹窗里能切到自动模式
+  bool _autoSkipIntro = false;
+  bool _autoSkipOutro = false;
   Duration _currentPosition = Duration.zero;
   Duration _currentDuration = Duration.zero;
   StreamSubscription<Duration>? _positionSub;
@@ -327,10 +331,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       final prefs = await SharedPreferences.getInstance();
       final intro = prefs.getInt('${_skipPrefKey}_intro') ?? 0;
       final outro = prefs.getInt('${_skipPrefKey}_outro') ?? 0;
+      // v1.0.58: 加载自动/手动开关, 默认 false (手动)
+      final autoIntro = prefs.getBool('${_skipPrefKey}_auto_intro') ?? false;
+      final autoOutro = prefs.getBool('${_skipPrefKey}_auto_outro') ?? false;
       if (mounted) {
         setState(() {
           _skipIntroEnd = intro;
           _skipOutroStart = outro;
+          _autoSkipIntro = autoIntro;
+          _autoSkipOutro = autoOutro;
         });
       }
     } catch (_) {}
@@ -342,21 +351,22 @@ class _PlayerScreenState extends State<PlayerScreen>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('${_skipPrefKey}_intro', _skipIntroEnd);
       await prefs.setInt('${_skipPrefKey}_outro', _skipOutroStart);
+      // v1.0.58: 持久化自动/手动开关
+      await prefs.setBool('${_skipPrefKey}_auto_intro', _autoSkipIntro);
+      await prefs.setBool('${_skipPrefKey}_auto_outro', _autoSkipOutro);
     } catch (_) {}
   }
 
-  /// 根据当前位置更新跳过按钮的显示状态 + v1.0.57: 自动 seek 跳片头/片尾
+  /// 根据当前位置更新跳过按钮的显示状态 / v1.0.57 自动 seek / v1.0.58 自动手动二选一
   ///
-  /// 之前是显示"跳过片头"按钮让用户手动点 seek
-  /// v1.0.57 改成自动 seek, 用户不需要点任何按钮
+  /// - 自动模式 (_autoSkipIntro/_autoSkipOutro = true): shouldShowIntro/Outro 时自动 _player.seek
+  /// - 手动模式 (默认): shouldShowIntro/Outro 时显示右下角浮层按钮让用户点
+  ///
+  /// v1.0.58 加自动/手动开关: 之前 v1.0.57 强制自动, 但有的源没片头/片尾,
+  /// 自动跳会跳到 _skipIntroEnd / durSec-_skipOutroStart 错误位置
+  /// 默认手动 (跟 v1.0.57 之前一样), 用户主动开自动
+  ///
   /// 用户拖动进度条时不自动跳 (避免抢用户操作), 靠 _scrubbingValue 守门
-  ///
-  /// 触发条件 (跟之前按钮显示条件一致, 用户已经在设置里配了
-  /// _skipIntroEnd / _skipOutroStart > 0 才生效):
-  /// - shouldShowIntro: posSec < _skipIntroEnd && posSec > 1
-  ///   → 自动 seek 到 _skipIntroEnd (跳过片头)
-  /// - shouldShowOutro: (durSec - posSec) < _skipOutroStart && (durSec - posSec) > 1
-  ///   → 自动 seek 到 durSec - _skipOutroStart (跳过片尾)
   void _updateSkipButtonVisibility() {
     final posSec = _currentPosition.inSeconds;
     final durSec = _currentDuration.inSeconds;
@@ -367,19 +377,27 @@ class _PlayerScreenState extends State<PlayerScreen>
         (durSec - posSec) < _skipOutroStart &&
         (durSec - posSec) > 1;
 
-    // v1.0.57: 自动 seek 跳片头/片尾
-    // _scrubbingValue != null 表示用户在拖动进度条, 不抢用户操作
+    // v1.0.58: 自动模式才自动 seek, 手动模式显示按钮让用户点
     if (_scrubbingValue == null) {
-      if (shouldShowIntro) {
+      if (_autoSkipIntro && shouldShowIntro) {
         _player.seek(Duration(seconds: _skipIntroEnd));
-        return; // 本次只跳一个, 跳完下一次 _updateSkipButtonVisibility 重新判断
+        // v1.0.58: 立即隐藏按钮, 避免按钮在 seek 完前闪烁
+        if (_showSkipIntro) {
+          setState(() { _showSkipIntro = false; });
+        }
+        return;
       }
-      if (shouldShowOutro && durSec > 0) {
+      if (_autoSkipOutro && shouldShowOutro && durSec > 0) {
         _player.seek(Duration(seconds: durSec - _skipOutroStart));
+        if (_showSkipOutro) {
+          setState(() { _showSkipOutro = false; });
+        }
         return;
       }
     }
 
+    // 手动模式显示按钮 (自动模式 seek 后 shouldShow=false, 按钮自然不显示)
+    // _showSkipIntro/Outro 字段保留, UI 里根据它显隐按钮
     if (shouldShowIntro != _showSkipIntro ||
         shouldShowOutro != _showSkipOutro) {
       setState(() {
@@ -388,13 +406,31 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
     }
   }
-  // v1.0.57: _skipIntro / _skipOutro 函数删了, 自动 seek 逻辑在
-  // _updateSkipButtonVisibility 里, 不需要外部入口
+  // v1.0.58: 恢复 _skipIntro / _skipOutro, 手动模式按钮调用
+  // v1.0.57 删了, v1.0.58 加了自动/手动开关, 手动模式需要这两个函数
+
+  /// 手动跳过片头
+  void _skipIntro() {
+    if (_skipIntroEnd > 0) {
+      _player.seek(Duration(seconds: _skipIntroEnd));
+    }
+  }
+
+  /// 手动跳过片尾
+  void _skipOutro() {
+    final durSec = _currentDuration.inSeconds;
+    if (durSec > 0 && _skipOutroStart > 0) {
+      _player.seek(Duration(seconds: durSec - _skipOutroStart));
+    }
+  }
 
   /// 打开跳过片头片尾设置弹窗
   Future<void> _showSkipSettingsDialog() async {
     int intro = _skipIntroEnd;
     int outro = _skipOutroStart;
+    // v1.0.58: 加自动/手动开关
+    bool autoIntro = _autoSkipIntro;
+    bool autoOutro = _autoSkipOutro;
     await showDialog<void>(
       context: context,
       builder: (ctx) {
@@ -406,45 +442,81 @@ class _PlayerScreenState extends State<PlayerScreen>
                 '跳过片头片尾',
                 style: TextStyle(color: Colors.white, fontSize: 18),
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '片头结束时间: ${intro > 0 ? "$intro 秒" : "未设置"}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                  Slider(
-                    value: intro.toDouble(),
-                    min: 0,
-                    max: 300,
-                    divisions: 300,
-                    activeColor: const Color(0xFF22C55E),
-                    label: intro > 0 ? '$intro 秒' : '关闭',
-                    onChanged: (v) =>
-                        setDialogState(() => intro = v.round()),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    '片尾提前时间: ${outro > 0 ? "$outro 秒" : "未设置"}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                  Slider(
-                    value: outro.toDouble(),
-                    min: 0,
-                    max: 300,
-                    divisions: 300,
-                    activeColor: const Color(0xFF22C55E),
-                    label: outro > 0 ? '$outro 秒' : '关闭',
-                    onChanged: (v) =>
-                        setDialogState(() => outro = v.round()),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    '片头: 播放到该时间点前显示"跳过片头"按钮\n片尾: 距离结尾该时间时显示"跳过片尾"按钮',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                ],
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // v1.0.58: 自动/手动开关
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        '自动跳过片头',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      subtitle: Text(
+                        autoIntro
+                            ? '自动: 播到片头结束时间自动 seek 跳过'
+                            : '手动: 显示"跳过片头"按钮, 用户点才跳',
+                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                      ),
+                      value: autoIntro,
+                      activeColor: const Color(0xFF22C55E),
+                      onChanged: (v) => setDialogState(() => autoIntro = v),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        '自动跳过片尾',
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                      subtitle: Text(
+                        autoOutro
+                            ? '自动: 距结尾 < 提前时间自动 seek 跳过'
+                            : '手动: 显示"跳过片尾"按钮, 用户点才跳',
+                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                      ),
+                      value: autoOutro,
+                      activeColor: const Color(0xFF22C55E),
+                      onChanged: (v) => setDialogState(() => autoOutro = v),
+                    ),
+                    const Divider(color: Colors.white24, height: 24),
+                    Text(
+                      '片头结束时间: ${intro > 0 ? "$intro 秒" : "未设置"}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                    Slider(
+                      value: intro.toDouble(),
+                      min: 0,
+                      max: 300,
+                      divisions: 300,
+                      activeColor: const Color(0xFF22C55E),
+                      label: intro > 0 ? '$intro 秒' : '关闭',
+                      onChanged: (v) =>
+                          setDialogState(() => intro = v.round()),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '片尾提前时间: ${outro > 0 ? "$outro 秒" : "未设置"}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                    Slider(
+                      value: outro.toDouble(),
+                      min: 0,
+                      max: 300,
+                      divisions: 300,
+                      activeColor: const Color(0xFF22C55E),
+                      label: outro > 0 ? '$outro 秒' : '关闭',
+                      onChanged: (v) =>
+                          setDialogState(() => outro = v.round()),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '提示: 有的源没有片头/片尾, 建议先关掉自动, 看到按钮再点, 确认有片头再开自动',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -457,6 +529,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                     setState(() {
                       _skipIntroEnd = intro;
                       _skipOutroStart = outro;
+                      // v1.0.58: 持久化自动/手动开关
+                      _autoSkipIntro = autoIntro;
+                      _autoSkipOutro = autoOutro;
                     });
                     _saveSkipConfig();
                     Navigator.pop(ctx);
@@ -2672,14 +2747,66 @@ class _PlayerScreenState extends State<PlayerScreen>
         _buildLunaTopBar(),
         // 底部毛玻璃控制栏 (横屏改短)
         _buildLunaBottomBar(),
-        // v1.0.57: 跳过片头/片尾改成自动 seek, 不再需要右下角浮层按钮
-        // 之前是 _showSkipIntro/_showSkipOutro 控制的浮层按钮, 用户点
-        // 触发 _skipIntro/_skipOutro
-        // 现在 _updateSkipButtonVisibility 自动 seek 跳, 按钮删了
-        // 用户如果想看片头/片尾, 在设置里把 _skipIntroEnd/_skipOutroStart 改 0
-        // 中央双圆快进/快退 (放在最上层, 避免被顶部栏/底部栏遮挡)
+        // v1.0.58: 恢复跳过片头/片尾浮层按钮 (手动模式)
+        // 之前 v1.0.57 强制自动跳删了按钮, v1.0.58 加了自动/手动开关,
+        // 手动模式 (默认) 仍需要按钮让用户点
+        // 自动模式 _showSkipIntro/_showSkipOutro=false, 按钮不显示
+        if (_showSkipIntro && _isControlsVisible)
+          Positioned(
+            right: 16,
+            bottom: 100,
+            child: _skipButton('跳过片头', kLunaTheme, _skipIntro),
+          ),
+        if (_showSkipOutro && _isControlsVisible)
+          Positioned(
+            right: 16,
+            bottom: 100,
+            child: _skipButton(
+                '跳过片尾', const Color(0xFF3B82F6), _skipOutro),
+          ),
+        // 中央双圆快进/快退 (放在最上层, 避免被顶部栏/底部栏/跳过按钮遮挡)
         _buildSideSeekButtons(),
       ],
+    );
+  }
+
+  /// 跳过片头/片尾的浮层按钮 (手动模式用)
+  Widget _skipButton(String label, Color color, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.92),
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.fast_forward, color: Colors.white, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

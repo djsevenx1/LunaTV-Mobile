@@ -1503,3 +1503,51 @@ if (_scrubbingValue == null) {
 - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - _updateSkipButtonVisibility 改成自动 seek, 删按钮 UI 和 dead code
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.56+1 → 1.0.57+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.57 changelog
+
+---
+
+# v1.0.58 · 跳过片头/片尾加自动/手动开关, 适配没片头/片尾的源
+
+## 现象
+
+用户反馈:
+
+> 跳过片头里面加个自动 手动开关吧有的源没有片头
+
+v1.0.57 强制自动 seek 跳片头/片尾, 但**有的源没片头** (intro 长度 0
+或片头短于 \_skipIntroEnd), 自动跳会跳到 \_skipIntroEnd 错误位置,
+跳过正片开头。
+
+## 修法
+
+加 \_autoSkipIntro / \_autoSkipOutro 字段 (默认 false 手动模式), 在
+设置弹窗加 Switch 切换。\_updateSkipButtonVisibility 改逻辑:
+
+- **自动模式** + shouldShowIntro → \_player.seek + 立即 setState 隐藏
+  按钮 (避免按钮在 seek 完前闪烁)
+- **手动模式** (默认) → 走原来 setState 显示按钮逻辑, 用户手动点
+- 用户拖动进度条时不自动跳, 靠 \_scrubbingValue 守门
+
+恢复 v1.0.57 删了的代码 (手动模式需要):
+- 右下角浮层按钮 (Positioned + \_skipButton)
+- \_skipIntro / \_skipOutro 函数
+
+## 行为变化
+
+- **新装用户**: 默认手动, 跟 v1.0.57 之前一样, 看到按钮可点可不点
+- **v1.0.57 升级用户**: SharedPreferences 没 \_auto_intro 字段,
+  默认 false, 行为从"强制自动"回退到"显示按钮手动"
+- 这是有意为之, 因为 v1.0.57 强制自动有"跳错"风险, v1.0.58 让用户
+  主动确认再开自动
+
+## 推荐使用流程 (应对"有的源没片头")
+
+1. 先把 \_skipIntroEnd/\_skipOutroStart 配好 (默认都是 0 = 不跳)
+2. 默认手动模式, 看几集确认有片头/片尾
+3. 确认有片头/片尾后, 切到自动模式, 之后不用手动点
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - 加自动/手动开关字段 + 改 \_updateSkipButtonVisibility + 恢复按钮 UI + 设置弹窗加 Switch
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.57+1 → 1.0.58+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.58 changelog
