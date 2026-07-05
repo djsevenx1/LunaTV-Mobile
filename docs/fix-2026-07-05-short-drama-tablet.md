@@ -1228,3 +1228,69 @@ volume_controller API, 永远会弹系统 UI。
 - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - initState/dispose 加 showSystemUI 开关
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.53+1 → 1.0.54+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.54 changelog
+
+---
+
+# v1.0.55 · 修重开第2集会自动跳第3集 (streams.completed 误触发)
+
+## 现象
+
+用户装 v1.0.54 后反馈:
+
+> 还有问题 比如我播放第二集没看完 然后打开再看会自动跳转第三集
+
+具体: 播放第2集没看完, 退出, 重开第2集 → 加载后**自动跳到第3集** (跳过第2集)。
+
+## 排查
+
+不是保存问题 (v1.0.50 / v1.0.53 已经修过多个覆盖路径), 也不是
+position 接近 dur 触发 (用户看 30 分钟, dur 是 45 分钟, remainMs 还很大,
+不可能 _maybeAutoPlayNext 触发).
+
+### streams.completed 误触发
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart#L197-L199):
+
+```dart
+_player.streams.completed.listen((_) {
+  _autoPlayNextEpisode();
+});
+```
+
+部分 m3u8 源 (直播流 / 解析失败 / seek 到 duration 附近) `open` 后
+**立即发 `completed=true`**, 此时 pos=0, dur=0 或 45min。
+
+`_autoPlayNextEpisode` 之前**没有任何 pos 守门**,
+`_autoPlayedThisEpisode=false` (刚切集重置) → 直接切下一集。
+
+对比 `_maybeAutoPlayNext` (走 position stream 路径) 有 `remainMs > 1500`
+守门能拦住, 但 `streams.completed` 路径**绕过了这道守门**。
+
+注释里也明确写过: "部分源 position 不走完会直接发 completed" (line 196),
+是已知问题, 但之前没在 `_autoPlayNextEpisode` 内部加固, 只在
+`_maybeAutoPlayNext` 守门, 漏了 completed 直触路径。
+
+## 修复
+
+[_autoPlayNextEpisode](file:///workspace/lib/screens/player_screen.dart#L1201) 加兜底守门:
+
+```dart
+final dur = _currentDuration;
+if (dur <= Duration.zero) return; // 时长还没拿到
+if (dur < const Duration(seconds: 30)) return; // 直播流/异常源 dur 太短
+if (_currentPosition < dur - const Duration(milliseconds: 1500)) {
+  return; // pos 还没到结尾附近, completed 误触发
+}
+```
+
+三道守门, 跟 `_maybeAutoPlayNext` 的 `remainMs > 1500` 阈值保持一致:
+
+- 正常播完时 pos 走到 dur - 1.5s 附近, 三道守门都过, 仍然切下一集 ✓
+- streams.completed 误触发 (pos=0, dur=45min) 时三道守门拦得住 ✓
+- 直播流 (dur=NaN/0) 时 `dur <= 0` 或 `dur < 30s` 拦得住 ✓
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - _autoPlayNextEpisode 加 pos + dur 兜底守门
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.54+1 → 1.0.55+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.55 changelog

@@ -1188,6 +1188,16 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 切到下一集: 只有在「还有下一集」时才自动播放
   /// 最后一集播完就停在播放页, 不再继续
+  ///
+  /// v1.0.55: 加 pos + dur 兜底守门
+  /// 之前没守门, 走 streams.completed listener 直接调本函数时
+  /// (line 198 `streams.completed.listen((_) { _autoPlayNextEpisode(); })`)
+  /// 不经过 _maybeAutoPlayNext 的 remainMs > 1500 守门, 一发就切
+  /// 用户场景: 播放第2集没看完, 重开第2集 → video open 后 m3u8 源立刻发
+  /// streams.completed=true (直播流 / 解析失败 / seek 到 duration 附近) →
+  /// _autoPlayNextEpisode → 切第3集
+  /// 修法: pos 必须 ≥ dur - 1.5s 才允许切 (跟 _maybeAutoPlayNext 同阈值),
+  ///       dur < 30s 也跳过 (直播流 / 异常源)
   void _autoPlayNextEpisode() {
     if (_autoPlayedThisEpisode) return;
     if (_phase != 'playing') return;
@@ -1196,6 +1206,16 @@ class _PlayerScreenState extends State<PlayerScreen>
     final nextIndex = _currentEpisodeIndex + 1;
     if (nextIndex >= source.episodes.length) return; // 最后一集
     if (source.episodes[nextIndex].isEmpty) return; // 下一集没 url
+
+    // v1.0.55: 兜底守门 (堵 streams.completed 误触发)
+    final dur = _currentDuration;
+    if (dur <= Duration.zero) return; // 时长还没拿到
+    if (dur < const Duration(seconds: 30)) return; // 时长太短, 直播流/异常
+    if (_currentPosition < dur - const Duration(milliseconds: 1500)) {
+      // pos 还没到结尾附近, completed 误触发, 不切
+      return;
+    }
+
     _autoPlayedThisEpisode = true; // 立刻上锁, 防止 position/completed 双触发
     _playEpisode(nextIndex);
   }
