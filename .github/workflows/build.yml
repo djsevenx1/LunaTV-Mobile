@@ -88,6 +88,23 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.46': `## 更新日志
+
+            ### 🐛 修复
+
+            - **历史播放每次都从第 1 集开始 (v1.0.40 引入, v1.0.46 修)**
+              - 现象: 从"继续观看"/"播放历史"点进去, 不管上次看到第几集, 都从第 1 集开始
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart) \`_testAllSourcesInBackground\`):
+                - \`_loadSources\` 里从 \`widget.videoInfo.index\` 算出 \`resumeIndex\` 传给 \`_selectSource\`, 本来是对的
+                - **但** 测速完成后, \`_testAllSourcesInBackground\` 会自动选"最快源" (用于从搜索进入的场景)
+                - 自动选源时调 \`_selectSource(src)\` **不传 episodeIndex**, \`_selectSource\` 默认 \`episodeIndex = 0\`
+                - 历史上看的源 ≠ 测出来的最快源 (CDN 速度不同) → 触发自动切源 → episode 被重置成 0
+              - 修复:
+                - 在 \`_testAllSourcesInBackground\` 里判断 \`cameFromHistory = videoInfo.source 非空 且 index > 0\`
+                - 从历史进来的: **跳过自动选源**, 只按测速重排源列表 (用户可手动切), 防止 episode 被重置
+                - 从搜索/收藏进来的 (没 source/index): 保持原行为, 自动选最快源
+
+            ---`,
               'v1.0.45': `## 更新日志
 
             ### 🐛 修复

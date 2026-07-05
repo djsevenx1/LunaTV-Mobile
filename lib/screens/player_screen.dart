@@ -952,8 +952,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted) return;
     if (mounted) setState(() {});
 
-    // 自动选最快源 (除非用户已经主动选过)
-    if (_autoSelectedSource == null && _sourceResults.isNotEmpty) {
+    // 自动选最快源 (除非用户已经主动选过, 或从历史点进来明确指定了源)
+    // v1.0.46 fix: 之前从历史进来也会被自动改源, 因为 _selectSource 不传 episodeIndex
+    //   会重置到 0, 导致每次历史播放都从第 1 集开始
+    final cameFromHistory = widget.videoInfo.source.isNotEmpty && widget.videoInfo.index > 0;
+    if (!cameFromHistory && _autoSelectedSource == null && _sourceResults.isNotEmpty) {
       _SourceSpeedInfo? bestSpeed;
       String? bestSource;
       for (final s in _sourceResults) {
@@ -971,9 +974,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _selectSource(src);
         }
       }
+    } else if (cameFromHistory) {
+      // 从历史进来的: 标记自动已选 (用历史源), 防止后续逻辑再触发自动切源
+      _autoSelectedSource = _selectedSource?.source ?? widget.videoInfo.source;
     }
 
-    // 按综合分从高到低重排源列表
+    // 按综合分从高到低重排源列表 (历史模式也排, 让用户能直观看到哪个源更快)
     _sortSourcesBySpeed();
   }
 
