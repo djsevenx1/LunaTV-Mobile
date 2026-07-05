@@ -346,7 +346,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     final double screenWidth = MediaQuery.of(context).size.width;
 
     int crossAxisCount;
-    double cardWidth;
     double horizontalPadding;
 
     if (isPC) {
@@ -358,14 +357,18 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         crossAxisCount = 4;
       }
       horizontalPadding = 24;
+    } else if (DeviceUtils.isTablet(context)) {
+      // 平板模式：根据屏幕宽度动态展示 6～8 列
+      crossAxisCount = DeviceUtils.getTabletColumnCount(context);
+      horizontalPadding = 16;
     } else {
       crossAxisCount = 3;
       horizontalPadding = 12;
     }
 
     final double gridWidth = screenWidth - horizontalPadding * 2;
-    final double spacing = isPC ? 16.0 : 10.0;
-    cardWidth = (gridWidth - spacing * (crossAxisCount - 1)) / crossAxisCount;
+    final double spacing = isPC ? 16.0 : 12.0;
+    final double cardWidth = (gridWidth - spacing * (crossAxisCount - 1)) / crossAxisCount;
 
     return SliverPadding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
