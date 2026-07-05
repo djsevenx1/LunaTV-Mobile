@@ -5,6 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
+
+import '../services/log_service.dart';
+import 'debug_log_screen.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
@@ -939,8 +942,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
 
     final key = '${source.source}+${source.id}';
+    // v1.0.62 调试日志
+    LogService.instance.info('Save', '_saveCurrentProgress '
+        'force=$force, key=$key, playTime=$playTime, '
+        '_currentPosition=$_currentPosition, '
+        '_firstRecordSaved=$_firstRecordSaved, '
+        '_lastSavedKey=$_lastSavedKey, '
+        'state.playing=${_player.state.playing}, '
+        'state.position=${_player.state.position}');
     // 没播放过(skip) || 同一集还没开始播且已存过(避免启动时连发两条空)
     if (!force && _lastSavedKey == key && playTime == 0 && _firstRecordSaved) {
+      LogService.instance.info('Save', '  ↩ early return (playTime=0 已存过)');
       return;
     }
 
@@ -1014,10 +1026,17 @@ class _PlayerScreenState extends State<PlayerScreen>
         ? (resume.index - 1).clamp(0, 1 << 30)
         : (widget.videoInfo.index - 1).clamp(0, 1 << 30);
     if (resume != null && resume.playTime > 0) {
-      _pendingResumeAt = Duration(milliseconds: resume.playTime);
-    } else if (widget.videoInfo.playTime > 0) {
-      _pendingResumeAt = Duration(milliseconds: widget.videoInfo.playTime);
-    }
+    _pendingResumeAt = Duration(milliseconds: resume.playTime);
+  } else if (widget.videoInfo.playTime > 0) {
+    _pendingResumeAt = Duration(milliseconds: widget.videoInfo.playTime);
+  }
+  LogService.instance.info('Player', '_loadSources resume: '
+      'videoInfo.title="${widget.videoInfo.title}", '
+      'videoInfo.source="${widget.videoInfo.source}", '
+      'videoInfo.index=${widget.videoInfo.index}, '
+      'videoInfo.playTime=${widget.videoInfo.playTime}ms, '
+      '_pendingResumeAt=$_pendingResumeAt, '
+      'resume(from cloud)=$resume');
 
     try {
       final results = await ApiService.fetchSourcesData(title);
@@ -1357,9 +1376,19 @@ class _PlayerScreenState extends State<PlayerScreen>
       _phase = 'playing';
     });
 
+    // v1.0.62 调试日志: 记录 _playEpisode 入口的关键参数
+    LogService.instance.info('Player', '▶ _playEpisode($index) start, '
+        'resumeAt=$resumeAt, _currentEpisodeIndex=$_currentEpisodeIndex, '
+        '_pendingResumeAt=$_pendingResumeAt, '
+        'url=${url.length > 60 ? "${url.substring(0, 60)}..." : url}');
     try {
       await _player.stop();
+      LogService.instance.info('Player', '  ✓ _player.stop() done');
       await _player.open(Media(url));
+      LogService.instance.info('Player', '  ✓ _player.open() done, '
+          'state.playing=${_player.state.playing}, '
+          'state.buffering=${_player.state.buffering}, '
+          'state.position=${_player.state.position}');
       // 云记忆恢复
       //
       // v1.0.61 fix: v1.0.60 等了 position stream, 但根因是 player 在
@@ -1380,20 +1409,52 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 1. 显式 play 强制进入 playing 状态
         try {
           await _player.play();
-        } catch (_) {}
+          LogService.instance.info('Player', '  ✓ _player.play() done, '
+              'state.playing=${_player.state.playing}');
+        } catch (e) {
+          LogService.instance.warn('Player', '  ✗ _player.play() failed: $e');
+        }
         // 2. 等 buffering 完成
+        LogService.instance.info('Player',
+            '  ⏳ _waitForBufferingComplete start, '
+            'state.buffering=${_player.state.buffering}');
         await _waitForBufferingComplete(timeout: const Duration(seconds: 5));
+        LogService.instance.info('Player',
+            '  ✓ _waitForBufferingComplete done, '
+            'state.buffering=${_player.state.buffering}, '
+            'state.playing=${_player.state.playing}, '
+            'state.position=${_player.state.position}');
         // 3. seek
         try {
           await _player.seek(resumeAt);
-        } catch (_) {}
+          LogService.instance.info('Player',
+              '  ✓ _player.seek($resumeAt) done, '
+              'state.position=${_player.state.position}');
+        } catch (e) {
+          LogService.instance.warn('Player', '  ✗ _player.seek failed: $e');
+        }
         // 4. 验证: 用 position stream 检查 position 是否到 resumeAt 附近,
         // 250ms 内没到就重试一次
         await Future.delayed(const Duration(milliseconds: 250));
-        if (!await _verifySeekByStream(resumeAt)) {
+        final ok = await _verifySeekByStream(resumeAt);
+        LogService.instance.info('Player',
+            '  ${ok ? "✓" : "✗"} _verifySeekByStream result=$ok, '
+            'state.position=${_player.state.position}');
+        if (!ok) {
           try {
             await _player.seek(resumeAt);
-          } catch (_) {}
+            LogService.instance.info('Player',
+                '  ↻ retry _player.seek($resumeAt), '
+                'state.position=${_player.state.position}');
+          } catch (e) {
+            LogService.instance.warn('Player', '  ✗ retry seek failed: $e');
+          }
+          // 再验证一次
+          await Future.delayed(const Duration(milliseconds: 250));
+          final ok2 = await _verifySeekByStream(resumeAt);
+          LogService.instance.info('Player',
+              '  ${ok2 ? "✓" : "✗"} retry verify result=$ok2, '
+              'state.position=${_player.state.position}');
         }
       }
       if (!mounted) return;
@@ -1691,15 +1752,26 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  widget.videoInfo.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : Colors.black,
-                    height: 1.3,
+                GestureDetector(
+                  // v1.0.62 调试入口: 长按视频标题打开调试日志
+                  onLongPress: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DebugLogScreen(),
+                      ),
+                    );
+                  },
+                  child: Text(
+                    widget.videoInfo.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black,
+                      height: 1.3,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),

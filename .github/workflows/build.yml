@@ -88,6 +88,29 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.62': `## 更新日志
+
+            ### 🛠️ 调试工具
+
+            - **新增调试日志界面 ([debug_log_screen.dart](file:///workspace/lib/screens/debug_log_screen.dart))**:
+              - 入口: 播放器"详情"页**长按视频标题**打开
+              - 实时显示 \`LogService\` 里 500 条循环缓冲日志, 自动滚到最新
+              - 支持过滤 (按 tag / 关键词), 复制全部, 清空
+              - 记录的关键事件:
+                1. \`_loadSources\` 入口: \`videoInfo.playTime\`,
+                   \`_pendingResumeAt\`, 云端拉到的 resume 记录
+                2. \`_playEpisode\` 入口: \`resumeAt\`, \`_currentEpisodeIndex\`,
+                   \`_pendingResumeAt\`, url
+                3. \`_player.stop/open/play/seek\` 每一步完成时间点 +
+                   \`state.playing/buffering/position\`
+                4. \`_waitForBufferingComplete\` 起止 + 中间状态
+                5. \`_verifySeekByStream\` 验证结果 (true=生效 / false=被丢)
+                6. \`_saveCurrentProgress\`: 每次 \`playTime\`,
+                   \`_firstRecordSaved\`, \`_lastSavedKey\`, 早返判断
+              - 用途: 排查 resume / seek / buffering / 存 0 覆盖等
+                各类问题, 复现一次把日志复制出来发给我即可
+
+            ---`,
               'v1.0.61': `## 更新日志
 
             ### 🐛 修复
