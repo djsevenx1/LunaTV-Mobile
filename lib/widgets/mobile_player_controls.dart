@@ -107,13 +107,13 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   void _initSystemControls() {
-    VolumeController().showSystemUI = false;
-    VolumeController().getVolume().then((value) {
+    VolumeController.instance.showSystemUI = false;
+    VolumeController.instance.getVolume().then((value) {
       if (mounted) {
         setState(() => _currentVolume = value);
       }
     }).catchError((_) {});
-    ScreenBrightness().current.then((value) {
+    ScreenBrightness.instance.application.then((value) {
       if (mounted) {
         setState(() => _currentBrightness = value);
       }
@@ -157,7 +157,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     _volumeHideTimer?.cancel();
     _brightnessHideTimer?.cancel();
     _timeUpdateTimer?.cancel();
-    VolumeController().showSystemUI = true;
+    VolumeController.instance.showSystemUI = true;
     super.dispose();
   }
 
@@ -289,7 +289,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
       _currentVolume = (_currentVolume + volumeChange).clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
-    VolumeController().setVolume(_currentVolume);
+    VolumeController.instance.setVolume(_currentVolume, showSystemUI: false);
     _startVolumeHideTimer();
   }
 
@@ -324,7 +324,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
           (_currentBrightness + brightnessChange).clamp(0.0, 1.0);
       _showBrightnessIndicator = true;
     });
-    ScreenBrightness().setScreenBrightness(_currentBrightness);
+    ScreenBrightness.instance.setApplicationScreenBrightness(_currentBrightness);
     _startBrightnessHideTimer();
   }
 

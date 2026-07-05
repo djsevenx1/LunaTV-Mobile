@@ -88,6 +88,23 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.41': `## 更新日志
+
+            ### 🐛 修复
+
+            - **编译报错 (v1.0.40 引入)**
+              - 现象: v1.0.40 push 触发 CI 构建失败, retry 3 次都失败 (step 10, 7m 50s)
+              - 真实错误: Dart 编译错, [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 用了
+                \`VolumeController().setVolume(...)\` / \`ScreenBrightness().setScreenBrightness(...)\` 老 v1.x API,
+                但 \`pubspec.yaml\` 锁的是 \`volume_controller: ^2.0.0\` / \`screen_brightness: ^0.2.2\`,
+                俩包 v2+ 改成 \`.instance\` 单例 API
+              - 修复 (本版本):
+                - [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 改用 \`VolumeController.instance.setVolume(..., showSystemUI: false)\`
+                  / \`ScreenBrightness.instance.setApplicationScreenBrightness(...)\` / \`.application\` 读亮度
+                - 同时 [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) 也对齐到 v2 API
+
+            ---`,
+
               'v1.0.40': `## 更新日志
 
             ### 🐛 修复

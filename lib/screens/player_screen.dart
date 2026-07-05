@@ -132,14 +132,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
-    // v1.0.40: 读系统初始亮度/音量, 进入播放器时同步到 UI
+    // v1.0.41: 读系统初始亮度/音量, 进入播放器时同步到 UI
+    // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
       try {
-        final vol = await VolumeController().getVolume();
+        final vol = await VolumeController.instance.getVolume();
         if (mounted && vol != null) setState(() => _currentVolume = vol);
       } catch (_) {}
       try {
-        final br = await ScreenBrightness().getScreenBrightness();
+        final br = await ScreenBrightness.instance.application;
         if (mounted && br != null) setState(() => _currentBrightness = br);
       } catch (_) {}
     }();
@@ -621,7 +622,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showVolumeIndicator = true;
     });
     // 真调系统音量 (iOS 上需要传 null 安卓需要 stream type)
-    VolumeController().setVolume(_currentVolume);
+    VolumeController.instance.setVolume(_currentVolume, showSystemUI: false);
   }
 
   void _onVolumeSwipeEnd(DragEndDetails details) {
@@ -651,7 +652,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .clamp(0.0, 1.0);
       _showBrightnessIndicator = true;
     });
-    ScreenBrightness().setScreenBrightness(_currentBrightness);
+    ScreenBrightness.instance.setApplicationScreenBrightness(_currentBrightness);
   }
 
   void _onBrightnessSwipeEnd(DragEndDetails details) {
