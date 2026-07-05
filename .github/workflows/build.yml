@@ -88,7 +88,7 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v1.0.50': `## 更新日志
+              'v1.0.51': `## 更新日志
 
             ### 🎨 视觉微调
 
