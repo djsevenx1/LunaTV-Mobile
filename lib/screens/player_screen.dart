@@ -2014,11 +2014,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 跟控件一起显隐, 点击后短暂显示提示文字
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
-    final size = _isFullscreen ? 64.0 : 56.0;
-    // v1.0.50: 离边 40/60 → 110/140, 按钮往中央挪更多
-    // 原因: 之前 40/60 还会跟左右两侧的亮度/音量浮窗 (left/right 32 各 56 宽)
-    // 重叠, 用户拖动调音量/亮度时 ± 按钮挡在浮窗上, 现在挪到中央 1/2 区域外侧
-    final sideOffset = _isFullscreen ? 140.0 : 110.0;
+    final size = _isFullscreen ? 64.0 : 48.0;
+    // v1.0.50: 竖屏 sideOffset 110 → 90, size 56 → 48
+    // 110 时竖屏 360px 三个 56 按钮挤一起, 缩到 90 + 48 给中间留出空间
+    // 90 仍 > 浮窗右边 88 (left=32 width=56), 不挡亮度/音量浮窗
+    final sideOffset = _isFullscreen ? 140.0 : 90.0;
     return Positioned.fill(
       child: Stack(
         alignment: Alignment.center,
@@ -2109,6 +2109,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     required Widget child,
     required double size,
   }) {
+    // v1.0.50: 修毛玻璃没生效的问题
+    // 之前 BackdropFilter 在 Container 内部, 只模糊了 child 没模糊背景,
+    // Container 的 color 画在 BackdropFilter 下面被遮住, 毛玻璃没效果
+    // 正确做法: 外层 Container 负责阴影, ClipOval + BackdropFilter 模糊背景,
+    // 内层 Container 半透明白色叠加 + border
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -2119,13 +2124,6 @@ class _PlayerScreenState extends State<PlayerScreen>
           height: size,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            // v1.0.50: 改回白色毛玻璃 (kLunaFloatBtnBg = 0x26FFFFFF),
-            // v1.0.49 改的黑色透明跟亮度音量浮窗冲突, 用户希望统一回毛玻璃
-            color: kLunaFloatBtnBg,
-            border: Border.all(
-              color: Colors.white.withOpacity(0.2),
-              width: 1,
-            ),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.3),
@@ -2137,7 +2135,18 @@ class _PlayerScreenState extends State<PlayerScreen>
           child: ClipOval(
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Center(child: child),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  // 半透明白色叠在模糊背景上, 形成毛玻璃质感
+                  color: Colors.white.withOpacity(0.15),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.25),
+                    width: 1,
+                  ),
+                ),
+                child: Center(child: child),
+              ),
             ),
           ),
         ),
