@@ -136,11 +136,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
       try {
-        final vol = await VolumeController.instance.getVolume();
+        final vol = await VolumeController().getVolume();
         if (mounted && vol != null) setState(() => _currentVolume = vol);
       } catch (_) {}
       try {
-        final br = await ScreenBrightness.instance.application;
+        final br = await ScreenBrightness().current;
         if (mounted && br != null) setState(() => _currentBrightness = br);
       } catch (_) {}
     }();
@@ -607,7 +607,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsTimer?.cancel();
     _dragStartVolume = _currentVolume;
     setState(() {
-      _controlsVisible = true;
+      _isControlsVisible = true;
       _showVolumeIndicator = true;
     });
   }
@@ -621,8 +621,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
-    // 真调系统音量 (iOS 上需要传 null 安卓需要 stream type)
-    VolumeController.instance.setVolume(_currentVolume, showSystemUI: false);
+    // v1.0.44: v0.2.2 / 2.0.8 API 是 VolumeController() 实例, setVolume 不带 showSystemUI 参数
+    VolumeController().setVolume(_currentVolume);
   }
 
   void _onVolumeSwipeEnd(DragEndDetails details) {
@@ -652,7 +652,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .clamp(0.0, 1.0);
       _showBrightnessIndicator = true;
     });
-    ScreenBrightness.instance.setApplicationScreenBrightness(_currentBrightness);
+    // v1.0.44: v0.2.2 / 2.0.8 API 是 ScreenBrightness() 实例, setScreenBrightness 而非 setApplicationScreenBrightness
+    ScreenBrightness().setScreenBrightness(_currentBrightness);
   }
 
   void _onBrightnessSwipeEnd(DragEndDetails details) {

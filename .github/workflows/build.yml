@@ -88,6 +88,42 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.44': `## 更新日志
+
+            ### 🐛 修复
+
+            - **彻底回滚 v1.0.41 ~ v1.0.43 走错的方向, 用回 v0.2.2 / 2.0.8 老 API**
+              - 现象: v1.0.43 push 触发 CI 构建, **5 个新错**:
+                1. \`player_screen.dart:610\` setter \`_controlsVisible\` 未定义
+                   (v1.0.42 我只改了 line 642, **漏了 line 610**)
+                2. \`player_screen.dart:625\` \`VolumeController.instance.setVolume\`
+                   没有 \`showSystemUI\` 参数 (v3.6.0 移除了)
+                3. \`mobile_player_controls.dart:292\` 同上
+                4. \`media_kit_video 1.3.1\` 内部用 \`onPopInvokedWithResult\`,
+                   Flutter 3.22.2 的 PopScope 还没这参数 (3.24+ 才有)
+                5. \`screen_brightness_android 2.1.6\` Kotlin 源码
+                   \`Unresolved reference 'toUri'\` — 需要 androidx.core.net.toUri
+                   import, 我们这版没注入
+              - 根因: 我之前 v1.0.41 ~ v1.0.43 一直把 API 升级方向搞反了,
+                **pubspec.lock 实际锁的就是 v0.2.2 / 2.0.8, 老代码用的也是这套 API**,
+                真正出问题的 v1.0.40 那次就是因为我从
+                [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart)
+                抄手势处理方法时把 \`VolumeController()\` 抄成 \`VolumeController.instance\`
+              - 修复 (本版本):
+                1. [pubspec.yaml](file:///workspace/pubspec.yaml) 把 \`screen_brightness: ^2.1.0\` / \`volume_controller: ^3.0.0\` /
+                   \`media_kit_video: ^1.2.1\` **改回 exact pin** \`0.2.2+1\` / \`2.0.8\` / \`1.2.5\`,
+                   锁到 pubspec.lock 之前那个能 compile 的版本
+                2. [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) +
+                   [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart)
+                   全部 \`VolumeController.instance.*\` → \`VolumeController()\`,
+                   \`ScreenBrightness.instance.application\` → \`ScreenBrightness().current\`,
+                   \`setApplicationScreenBrightness\` → \`setScreenBrightness\`,
+                   \`setVolume(_, showSystemUI: false)\` → \`setVolume(_)\`
+                3. [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) line 610
+                   \`_controlsVisible = true\` → \`_isControlsVisible = true\`
+                   (v1.0.42 漏修的那行)
+
+            ---`,
               'v1.0.43': `## 更新日志
 
             ### 🐛 修复
