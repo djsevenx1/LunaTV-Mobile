@@ -70,9 +70,6 @@ class _HeroBannerState extends State<HeroBanner> {
   Timer? _autoScrollTimer;
   int _currentPage = 0;
 
-  // banner 实际显示宽度 (build 时由 LayoutBuilder 写入, 供 _buildBannerItem 算 memCacheWidth)
-  double _bannerWidth = 0;
-
   @override
   void initState() {
     super.initState();
@@ -137,8 +134,8 @@ class _HeroBannerState extends State<HeroBanner> {
             }
             bannerHeight = bannerHeight.clamp(220.0, 480.0);
 
-            // 记录 banner 实际宽度 (去掉左右 12 边距), 给 CachedNetworkImage 算解码尺寸
-            _bannerWidth = screenWidth - 24;
+            // banner 实际宽度 (去掉左右 12 边距), 给 CachedNetworkImage 算解码尺寸
+            final bannerWidth = screenWidth - 24;
 
             return Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -241,7 +238,7 @@ class _HeroBannerState extends State<HeroBanner> {
     );
   }
 
-  Widget _buildBannerItem(HeroBannerItem item, bool isDarkMode) {
+  Widget _buildBannerItem(HeroBannerItem item, bool isDarkMode, double bannerWidth) {
     return GestureDetector(
       onTap: () => widget.onTap?.call(item),
       child: Stack(
@@ -254,11 +251,11 @@ class _HeroBannerState extends State<HeroBanner> {
             builder: (context, snapshot) {
               final imageUrl = snapshot.data ?? item.imageUrl;
               final headers = getImageRequestHeaders(imageUrl, item.source);
-              // 按 banner 实际显示尺寸 (LayoutBuilder 父容器) × devicePixelRatio 解码,
+              // 按 banner 实际显示尺寸 (build 时记录的 _bannerWidth) × devicePixelRatio 解码,
               // 平板上 banner 跨满屏,源图被放大到 2~3 倍很常见,
               // 必须用 FilterQuality.high 做高质量重采样,否则马赛克很明显
               final dpr = MediaQuery.of(context).devicePixelRatio;
-              final bannerPx = (bannerWidth * dpr).round();
+              final bannerPx = (_bannerWidth * dpr).round();
               return CachedNetworkImage(
                 imageUrl: imageUrl,
                 fit: BoxFit.cover,
