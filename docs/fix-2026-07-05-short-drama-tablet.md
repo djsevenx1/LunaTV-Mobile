@@ -213,3 +213,107 @@ childAspectRatio: cardWidth / (cardWidth * 1.5 + textAreaHeight),
 - changelog: 已在 `build.yml` 的 `changelogs` map 顶部追加
 - Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.36>
 
+---
+
+# v1.0.37 · 播放器快进按钮 / 自动播下一集
+
+## 现象
+
+用户安装 v1.0.36 后反馈：
+
+> 这个快进图标样式太丑了改成文字 -60 +60
+> 然后播放器不会自动播放下一集
+> 还有播放器左边往上下 是亮度调节 右边是声音条件（调节）
+
+## 排查
+
+### 1. 快进按钮样式
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 的
+`_buildSideSeekButtons` 调用 `_buildSeekIcon(forward:)`，里面用
+`CustomPaint` + `_ArcArrowPainter` 自绘 3/4 圆 + 三角形箭头，
+**视觉效果跟 YouTube 风格差不多，但用户看着像"刷新/循环"图标，跟"快进"
+语义对不上**。
+
+`_ArcArrowPainter` 类本身也跟"快进 60s"这个核心信息脱节——YouTube 的圆弧
+箭头是"循环重看 10s"的语义，**这里其实应该直接显示 "+60" / "-60" 数字**
+更直接。
+
+### 2. 自动播下一集
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 旧
+line 160：
+
+```dart
+// 不再自动播下一集,由用户控制
+_loadSources();
+```
+
+这是 v1.0.34 回退 autoPlay 模式时留下的注释，**实际行为**：播完一集就停。
+需要监听播放进度，在快到结尾时自动切下一集。
+
+### 3. 左亮度 / 右音量
+
+[mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart)
+的 `_buildGestureLayer` 把屏幕横分 3 段（1:2:1）：
+
+- 左 1/3（lines 545-565）：`onVerticalDragStart/Update/End` →
+  `_onBrightnessSwipeXxx`
+- 右 1/3（lines 583-602）：`onVerticalDragStart/Update/End` →
+  `_onVolumeSwipeXxx`
+- 中 2/3：横向拖动 = 进度条，竖向拖动无
+
+**这部分代码本来就是正确的**（"左边是亮度调节 右边是声音调节"就是预期），
+不需要改动。
+
+## 修复
+
+### 1. 快进/快退按钮改文字
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart#L1691-L1716)
+里 `_buildSeekIcon(forward: ...)` 替换为 `_SeekLabel(label: '-60' / '+60')`，
+文件底部新增 `_SeekLabel` StatelessWidget（白字 18px w700），
+**删掉整个 `_ArcArrowPainter` 类（约 40 行）**。旧的 `_buildSeekIcon` 留作
+`// ignore: unused_element` 兜底，避免破坏可能的外部调用。
+
+### 2. 自动播下一集
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart)：
+
+- 新增状态字段 `_autoPlayedThisEpisode`，防止 position / completed 双触发
+- position stream 末尾调 `_maybeAutoPlayNext()`：
+  - 距离结尾 `< 1.5s` 时尝试切下一集
+  - `_currentDuration <= 0` 直接 return（时长还没拿到不要误判）
+- 新增 `streams.completed` 监听兜底（部分源 position 不走完直接发 completed）
+- `_playEpisode` 开头重置 `_autoPlayedThisEpisode = false`
+- 新增 `_autoPlayNextEpisode()`：
+  - 只在 `_phase == 'playing'` 时触发
+  - 最后一集播完停在播放页，**不**自动跳详情页
+  - 下一集 url 为空时跳过
+- 更新旧 line 160 注释：「不再自动播下一集」→「一集播完自动播下一集」
+
+### 3. 左亮度 / 右音量
+
+无代码改动。已在排查里确认实现。
+
+## 改动文件
+
+- `lib/screens/player_screen.dart` — 文字按钮 + 自动切下一集 + 删 _ArcArrowPainter
+- `pubspec.yaml` — version 1.0.36+1 → 1.0.37+1
+- `.github/workflows/build.yml` — 追加 v1.0.37 changelog
+
+## 构建 / 发布
+
+走 v1.0.35 / v1.0.36 验证过的稳路径：从 main HEAD 打 `v1.0.37` tag → Actions
+tag 构建触发 Release → `softprops/action-gh-release` 创建 release →
+`github-script` 把 changelog 写回 release body。
+
+## Release
+
+- tag: `v1.0.37`
+- 分支: `main` HEAD
+- 版本: 1.0.37+1
+- changelog: 已在 `build.yml` 的 `changelogs` map 顶部追加
+- Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.37>
+
+

@@ -79,6 +79,32 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.37': `## 更新日志
+
+            ### 🎨 体验改进
+
+            - **快进/快退按钮: 圆弧箭头 → 文字 -60 / +60**
+              - 之前 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 用 [CustomPaint](file:///workspace/lib/screens/player_screen.dart#L1812-L1830) 自绘 YouTube 风格的圆弧箭头 + 三角形尾巴, 实际观感像"刷新/循环"图标, 跟"快进"语义不符
+              - 改为静态文字 "-60" / "+60", 白字 18px w700, 居中放在同一个 56/64px 毛玻璃圆按钮里
+              - 删掉约 40 行的 [\_ArcArrowPainter](file:///workspace/lib/screens/player_screen.dart) 自定义 painter
+              - 留一个 [\_SeekLabel](file:///workspace/lib/screens/player_screen.dart) StatelessWidget, 复用同一个文字样式
+
+            ### ✨ 新增功能
+
+            - **自动播放下一集**
+              - 之前 v1.0.34 回退时, 注释里写"不再自动播下一集, 由用户控制" ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 旧 160 行), 但实际上用户本来就应该拿"继续看"体验
+              - 监听 [streams.position](file:///workspace/lib/screens/player_screen.dart) + [streams.duration](file:///workspace/lib/screens/player_screen.dart), 距离结尾 < 1.5s 时自动调 [\_playEpisode](file:///workspace/lib/screens/player_screen.dart) 切到下一集
+              - 兜底: 监听 [streams.completed](file:///workspace/lib/screens/player_screen.dart), 部分源 position 不走完会直接发 completed
+              - 加 [\_autoPlayedThisEpisode](file:///workspace/lib/screens/player_screen.dart) 标志防止 position + completed 双触发
+              - 最后一集播完停在播放页, 不再继续
+
+            ### ✅ 行为确认
+
+            - **全屏手势: 左侧上下 = 亮度, 右侧上下 = 音量**
+              - [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) `_buildGestureLayer` 把屏幕横分 3 段 (1:2:1), 左 1/3 绑 \`_onBrightnessSwipeXxx\`, 右 1/3 绑 \`_onVolumeSwipeXxx\`
+              - 用户反馈"左边是亮度调节 右边是声音调节"就是预期, 这部分代码之前已经正确, 不需要改动
+
+            ---`,
               'v1.0.36': `## 更新日志
 
             ### 🐛 修复

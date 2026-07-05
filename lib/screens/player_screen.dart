@@ -87,6 +87,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showSkipIntro = false;
   bool _showSkipOutro = false;
 
+  // 自动播下一集: 防止 position/completed 重复触发
+  bool _autoPlayedThisEpisode = false;
+
   // UI 控制
   bool _isPlaying = false;
   bool _isControlsVisible = true;
@@ -128,15 +131,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
       }
     });
-    // 监听播放位置和总时长，用于跳过片头片尾
+    // 监听播放位置和总时长，用于跳过片头片尾 / 自动播下一集
     _positionSub = _player.streams.position.listen((pos) {
       if (_scrubbingValue == null) {
         _currentPosition = pos;
         _updateSkipButtonVisibility();
+        // 自动播下一集: 距离结尾 < 1.5s 且还没自动切过
+        _maybeAutoPlayNext();
       }
     });
     _durationSub = _player.streams.duration.listen((dur) {
       _currentDuration = dur;
+    });
+    // streams.completed 兜底: 部分源 position 不走完会直接发 completed
+    _player.streams.completed.listen((_) {
+      _autoPlayNextEpisode();
     });
     // 监听播放/暂停状态,用于控制栏图标
     _player.streams.playing.listen((playing) {
@@ -157,7 +166,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _loadPlaybackRate();
     // 加载收藏状态
     _loadFavorite();
-    // 不再自动播下一集,由用户控制
+    // 一集播完自动播下一集 (避免用户点下一集的繁琐)
     _loadSources();
   }
 
@@ -872,6 +881,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return ms;
   }
 
+  /// position stream 触发的检查: 距离结尾 < 1.5s 时尝试自动切下一集
+  void _maybeAutoPlayNext() {
+    if (_autoPlayedThisEpisode) return;
+    final dur = _currentDuration;
+    if (dur <= Duration.zero) return; // 时长还没拿到, 不要误判
+    final remainMs = dur.inMilliseconds - _currentPosition.inMilliseconds;
+    if (remainMs > 1500) return; // 还没到结尾附近
+    _autoPlayNextEpisode();
+  }
+
+  /// 切到下一集: 只有在「还有下一集」时才自动播放
+  /// 最后一集播完就停在播放页, 不再继续
+  void _autoPlayNextEpisode() {
+    if (_autoPlayedThisEpisode) return;
+    if (_phase != 'playing') return;
+    final source = _selectedSource;
+    if (source == null) return;
+    final nextIndex = _currentEpisodeIndex + 1;
+    if (nextIndex >= source.episodes.length) return; // 最后一集
+    if (source.episodes[nextIndex].isEmpty) return; // 下一集没 url
+    _autoPlayedThisEpisode = true; // 立刻上锁, 防止 position/completed 双触发
+    _playEpisode(nextIndex);
+  }
+
   /// 播放指定集数
   Future<void> _playEpisode(int index) async {
     final source = _selectedSource;
@@ -879,6 +912,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (index < 0 || index >= source.episodes.length) return;
     final url = source.episodes[index];
     if (url.isEmpty) return;
+
+    // 切集时先把自动切下一集标志重置, 让新一集播完时能再次触发
+    _autoPlayedThisEpisode = false;
 
     // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
     // 仅在用户主动开新集时且和云记忆吻合的那次才用
@@ -1688,7 +1724,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 左: 快退60s 按钮
+          // 左: 快退60s 按钮(文字 -60)
           Positioned(
             left: sideOffset,
             top: 0,
@@ -1697,11 +1733,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: _buildSeekCircleButton(
                 size: size,
                 onTap: () => _seekBySeconds(-60, '快退60s'),
-                child: _buildSeekIcon(forward: false),
+                child: const _SeekLabel(label: '-60'),
               ),
             ),
           ),
-          // 右: 快进60s 按钮
+          // 右: 快进60s 按钮(文字 +60)
           Positioned(
             right: sideOffset,
             top: 0,
@@ -1710,7 +1746,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: _buildSeekCircleButton(
                 size: size,
                 onTap: () => _seekBySeconds(60, '快进60s'),
-                child: _buildSeekIcon(forward: true),
+                child: const _SeekLabel(label: '+60'),
               ),
             ),
           ),
@@ -1808,25 +1844,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 圆弧箭头图标 (YouTube 风格快进/快退, 不显示数字)
+  /// 圆弧箭头图标 (已废弃, 快进/快退按钮改用 _SeekLabel 文字)
+  // ignore: unused_element
   Widget _buildSeekIcon({required bool forward}) {
-    return SizedBox(
-      width: 32,
-      height: 32,
-      child: Transform(
-        alignment: Alignment.center,
-        transform: forward
-            ? (Matrix4.identity())
-            : (Matrix4.rotationY(3.14159)),
-        child: CustomPaint(
-          size: const Size(32, 32),
-          painter: _ArcArrowPainter(
-            color: Colors.white,
-            forward: true,
-          ),
-        ),
-      ),
-    );
+    return _SeekLabel(label: forward ? '+60' : '-60');
   }
 
   /// 圆形小按钮 (40x40, LunaTV Web 控制按钮)
@@ -2260,48 +2281,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-/// 圆弧箭头绘制器 (YouTube 风格快进图标)
-class _ArcArrowPainter extends CustomPainter {
-  _ArcArrowPainter({required this.color, required this.forward});
-  final Color color;
-  final bool forward;
+/// 快进/快退 60s 按钮的文字标签 (替代原先的自绘圆弧箭头, 视觉更直接)
+class _SeekLabel extends StatelessWidget {
+  final String label;
+  const _SeekLabel({required this.label});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill
-      ..strokeWidth = 1.8
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r = size.width * 0.42;
-
-    // 圆弧 (3/4 圆)
-    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: r);
-    canvas.drawArc(rect, -0.4, 5.0, false, paint..style = PaintingStyle.stroke);
-
-    // 三角形箭头 (尾部)
-    final tailPath = Path();
-    if (forward) {
-      tailPath.moveTo(cx - r * 0.95, cy - r * 0.05);
-      tailPath.lineTo(cx - r * 0.65, cy - r * 0.4);
-      tailPath.lineTo(cx - r * 0.5, cy + r * 0.05);
-      tailPath.close();
-    } else {
-      tailPath.moveTo(cx + r * 0.95, cy - r * 0.05);
-      tailPath.lineTo(cx + r * 0.65, cy - r * 0.4);
-      tailPath.lineTo(cx + r * 0.5, cy + r * 0.05);
-      tailPath.close();
-    }
-    canvas.drawPath(tailPath, paint);
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant _ArcArrowPainter old) =>
-      old.color != color || old.forward != forward;
 }
 
 enum PingState { idle, testing, fast, medium, slow, unavailable }
