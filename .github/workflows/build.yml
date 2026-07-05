@@ -88,6 +88,36 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.53': `## 更新日志
+
+            ### 🐛 修复
+
+            - **didChangeAppLifecycleState 漏 \`phase='playing'\` 守门, 详情页 home 键触发 playTime=0 覆盖 12 分钟 (v1.0.50.1 修了 dispose 路径, 漏了 paused 路径)**
+              - 现象: 看到 12 分钟, 按返回键回到详情页, 在详情页按 home 键 (或切后台 / 系统杀 App), 重开还是从 0 开始
+                - v1.0.50 修的"onPopInvoked 顺序 + dispose 串行 + local 双写 + resume 跳过立即 save + dispose 守门", 这些路径都修了
+                - 但"详情页按 home 键"这条路径没修, 触发的还是 playTime=0 覆盖
+                - 用户测试 v1.0.51 / v1.0.52 反馈"还是不记忆"就是这个路径
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - v1.0.50.1 在 \`_disposeAndSave()\` 加了 \`if (_phase == 'playing')\` 守门,
+                  防止 phase=detail 时 (onPopInvoked 已经 stop + 存过) 再 save 一次 0 覆盖
+                - 但 \`didChangeAppLifecycleState(paused)\` **没加同款守门**
+                - 触发链:
+                  1. 播放页 12 min
+                  2. onPopInvoked(phase=playing): \`await _saveCurrentProgress(force=true)\` 存 12min,
+                     \`await _player.stop()\` (同步把 state.position 重置成 0, position stream 发射 0
+                     → \`_currentPosition\` 也被重置成 0), \`_phase='detail'\`
+                  3. 详情页按 home 键 → \`didChangeAppLifecycleState(paused)\` 触发,
+                     **没守门** → \`unawaited(_saveCurrentProgress(force=true))\`
+                  4. 内部: \`pos=state.position=0\`, \`_currentPosition=0\`, \`state.playing=false\`
+                     → 条件 \`state.playing || (pos>0 && !state.completed)\` 不满足 → \`playTime=0\`
+                  5. \`force=true\` 跳过 return 守门 → 存一条 \`playTime=0\` → **覆盖 12 min**
+              - 修复:
+                - \`didChangeAppLifecycleState\` 开头加 \`if (_phase != 'playing') return;\` 守门
+                - 跟 \`_disposeAndSave\` (v1.0.50.1) **完全同模板**, 同模式 bug 的另一条触发路径:
+                  \`_disposeAndSave\` 守了 dispose 路径, \`didChangeAppLifecycleState\` 守了 paused 路径
+                - phase=detail 时不再触发 save, 避免 player 已 stop 状态下写 0 覆盖
+
+            ---`,
               'v1.0.52': `## 更新日志
 
             ### 🐛 修复

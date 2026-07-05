@@ -269,9 +269,25 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// v1.0.50: App 进后台 (home 键) 时立即保存一次, 防止 10s progressTimer
   /// 还没触发就被上滑/杀进程丢进度
+  ///
+  /// v1.0.53: 加 `if (_phase != 'playing') return;` 守门
+  /// 之前没守门, onPopInvoked 已经 stop player + _phase='detail' 之后
+  /// (用户从播放页按返回键回到详情页), 这时再按 home 键 / 切后台 →
+  /// didChangeAppLifecycleState(paused) → _saveCurrentProgress(force=true) →
+  /// player 已 stop, state.position=0, _currentPosition 已经被 stream 发射 0 重置,
+  /// state.playing=false → 条件 `state.playing || (pos > 0 && !state.completed)`
+  /// 不满足 → playTime=0 → force=true 跳过 return 守门 → 存一条 playTime=0
+  /// **覆盖掉 onPopInvoked 已经存的 12 分钟** → 下次重开从 0 开始
+  /// 守门同 _disposeAndSave (v1.0.50.1), 是同模式 bug 的另一条触发路径:
+  ///   _disposeAndSave 守了 dispose 路径
+  ///   didChangeAppLifecycleState 漏了 paused 路径
+  /// 两条路径都会在 player 已 stop 时触发 save, 都会覆盖 0
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    // v1.0.53: 守门同 _disposeAndSave. phase!=playing 说明 player 已经被
+    // onPopInvoked 停过, 此时 save 必出 0, 必覆盖之前存的真进度
+    if (_phase != 'playing') return;
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden) {
