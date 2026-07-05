@@ -88,6 +88,38 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.66': `## 更新日志
+
+            ### 🐛 修复
+
+            - **打开 CF Worker 加速后源列表显示"全是不可用" ([player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: 启用 CF Worker 加速后, 源测速结果"全红" (不可用), 但
+                实际播放速度明显变快. 用户体感矛盾 → 怀疑测速坏了
+              - 根因 ([player_screen.dart:1320](file:///workspace/lib/screens/player_screen.dart#L1320) 旧代码):
+                测速时调 \`buildProxiedUrl(forceM3u8: true)\`, 强制把所有源都
+                打到 worker 的 \`/m3u8\` 端点, 不管原 URL 是不是 .m3u8.
+                现实里有一堆**直链 MP4 / 非 .m3u8 后缀的源**, worker 的
+                \`/m3u8\` 端点收到直链后 fetch 出来不是合法 M3U8 文本 →
+                \`_fetchM3U8Content\` 返回 \`null\` → 回退到 \`_measureDirectStream\`
+                做 Range 请求 → 但 worker 转发 Range 给直链不一定支持 / 不一定
+                走相同的缓存路径 → 测速失败 → 整源判 "unavailable"
+                (因为 \`_testSourceSpeed\` 只用 worker URL 测, 没回退原始 URL)
+              - 为什么实际播放没问题:
+                播放器用的是 [player_screen.dart#L1504](file:///workspace/lib/screens/player_screen.dart#L1504)
+                \`_player.open(Media(url))\`, \`url\` 是
+                \`source.episodes[index]\` 原链接, 根本不走 worker, 所以播放正常
+              - v1.0.66 修:
+                1. 去掉 \`forceM3u8: true\`, 让 \`buildProxiedUrl\` 自己按
+                   \`.m3u8\` 后缀选端点 (有 .m3u8 走 /m3u8, 没走 /, 跟原始 URL
+                   类型匹配)
+                2. 加 \`_testOneUrl\` 抽出单 URL 测速 (m3u8.getStreamInfo + HEAD fallback)
+                3. \`_testSourceSpeed\` 改成**先试 proxied URL, 失败回退原始 URL 再试**,
+                   这样即便 worker 端点配错 / 源类型不匹配, 测速也能从原始 URL 拿到
+                   真实数据, 不会全红
+                4. 缓存 \`_pingCache\` 按 URL 分键, worker URL 和原始 URL 各自缓存,
+                   不会因为 worker 失败 3000ms 的标记污染原始 URL 后续测速
+
+            ---`,
               'v1.0.65': `## 更新日志
 
             ### 🐛 修复

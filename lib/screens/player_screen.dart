@@ -1317,7 +1317,28 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 测单个源: 走 M3U8Service 完整测速, 失败 fallback 到 HEAD ping
   Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
     if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
-    final url = UserDataService.buildProxiedUrl(s.episodes.first, forceM3u8: true);
+    final orig = s.episodes.first;
+    // v1.0.66: 不再 forceM3u8: true.
+    // 之前强制走 worker /m3u8 端点, 对直链 MP4 (没 .m3u8 后缀) worker
+    // 收不到合法 manifest 解析失败 → 整源判 "unavailable" → "打开 CF 后
+    // 源显示全是不可用". 实际播放用的是原始 URL (player_screen.dart
+    // _player.open(Media(url)), url 是 source.episodes[index] 原链接)
+    // 不走 worker, 所以播放没问题.
+    // 修法: 让 buildProxiedUrl 自己按 .m3u8 后缀选端点, worker 失败再回退原始 URL.
+    final proxied = UserDataService.buildProxiedUrl(orig);
+    final urlsToTry = <String>[
+      if (proxied != orig) proxied,
+      orig,
+    ];
+    for (final url in urlsToTry) {
+      final info = await _testOneUrl(m3u8, url);
+      if (info.success) return info;
+    }
+    return _SourceSpeedInfo.unavailable();
+  }
+
+  /// v1.0.66: 单 URL 测速, 内部走 m3u8.getStreamInfo + HEAD fallback, 都套 4s 超时
+  Future<_SourceSpeedInfo> _testOneUrl(M3U8Service m3u8, String url) async {
     try {
       // v1.0.45: 优化后单源测速 0.5~1.5s, 给 4s 超时足够
       final result = await m3u8.getStreamInfo(url).timeout(
