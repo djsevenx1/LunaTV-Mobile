@@ -1996,13 +1996,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
           ),
-          // 中间: 播放/暂停按钮
+          // 中间: 播放/暂停按钮 (v1.0.49: 颜色跟播控进度条一致用 kLunaTheme)
           _buildSeekCircleButton(
             size: size,
             onTap: _togglePlayPause,
             child: Icon(
               _isPlaying ? Icons.pause : Icons.play_arrow,
-              color: Colors.white,
+              color: kLunaTheme,
               size: 32,
             ),
           ),
@@ -2705,8 +2705,8 @@ class _SeekLabel extends StatelessWidget {
     return Center(
       child: Text(
         label,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: color,
           fontSize: 18,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
