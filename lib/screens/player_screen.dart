@@ -1318,23 +1318,22 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
     if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
     final orig = s.episodes.first;
-    // v1.0.66: 不再 forceM3u8: true.
-    // 之前强制走 worker /m3u8 端点, 对直链 MP4 (没 .m3u8 后缀) worker
-    // 收不到合法 manifest 解析失败 → 整源判 "unavailable" → "打开 CF 后
-    // 源显示全是不可用". 实际播放用的是原始 URL (player_screen.dart
-    // _player.open(Media(url)), url 是 source.episodes[index] 原链接)
-    // 不走 worker, 所以播放没问题.
-    // 修法: 让 buildProxiedUrl 自己按 .m3u8 后缀选端点, worker 失败再回退原始 URL.
-    final proxied = UserDataService.buildProxiedUrl(orig);
-    final urlsToTry = <String>[
-      if (proxied != orig) proxied,
-      orig,
-    ];
-    for (final url in urlsToTry) {
-      final info = await _testOneUrl(m3u8, url);
-      if (info.success) return info;
-    }
-    return _SourceSpeedInfo.unavailable();
+    // v1.0.67: 不回退到原始 URL.
+    //
+    // 上一版 (v1.0.66) 试过 proxied 失败就回退原始 URL, 结果是"开不开 CF
+    // 测速结果一样" → 因为 proxied 失败 → 回退 orig → 等于没测 CF, 跟 CF off
+    // 走 orig 是同一个结果, 用户根本看不到 CF 加速有没有生效.
+    //
+    // 修法: CF 开关就是测速开关.
+    //   - CF on  → buildProxiedUrl 按 .m3u8 后缀选端点 → 测 worker URL,
+    //              worker 失败 = unavailable, 用户能立刻看到 CF 配错了
+    //              (比如 worker 只配了 /m3u8 端点, 测直链就一片红)
+    //   - CF off → 直接测原 URL, 跟 v1.0.45 之前行为一致
+    //
+    // 同时把 forceM3u8: true 去掉 (这个从 v1.0.66 就修了, 但用户之前没注意到):
+    // 之前所有源都被硬塞到 worker /m3u8, 直链 MP4 必然 worker 失败.
+    final url = UserDataService.buildProxiedUrl(orig);
+    return _testOneUrl(m3u8, url);
   }
 
   /// v1.0.66: 单 URL 测速, 内部走 m3u8.getStreamInfo + HEAD fallback, 都套 4s 超时

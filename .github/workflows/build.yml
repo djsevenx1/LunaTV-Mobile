@@ -88,6 +88,30 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.67': `## 更新日志
+
+            ### 🐛 修复
+
+            - **v1.0.66 测速"开不开 CF 结果一样" ([player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: v1.0.66 我加了"proxied 失败回退原始 URL" 想兜底, 结果用户
+                反馈"开不开 CF 加速测速结果一样" → 回退逻辑相当于绕过了 CF, 等于没测 CF
+              - 根因:
+                1. v1.0.66: \`urlsToTry = [if (proxied != orig) proxied, orig]\`
+                   proxied 失败 → 试 orig → orig 一般能通 (因为播放本来就不走 worker)
+                   → 测速结果 = 直链速度, 跟 CF off 完全一样
+                2. 用户本来想要"开 CF 后能测到 CF 加速效果", 实际拿到的是直链结果,
+                   等于 CF 开关在测速里没用
+              - v1.0.67 修:
+                1. **去掉回退到原始 URL 的逻辑**, CF 开关 = 测速开关
+                2. \`_testSourceSpeed\` 直接 \`buildProxiedUrl\` 拿 URL, 拿不到就 = 测原 URL
+                3. CF on 时:
+                   - M3U8 链接 → worker /m3u8 端点 → 真测 CF 加速
+                   - 直链 → worker / 端点 → 真测 CF 加速
+                   - worker 失败 → unavailable (用户立刻能看出 CF 配错了)
+                4. CF off 时: 走原始 URL, 行为跟 v1.0.45 之前一致
+                5. 这样"开 CF 测速变快 / 开 CF 测速变红"都能如实反映 CF 状态
+
+            ---`,
               'v1.0.66': `## 更新日志
 
             ### 🐛 修复
