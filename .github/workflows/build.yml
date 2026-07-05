@@ -88,6 +88,49 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.61': `## 更新日志
+
+            ### 🐛 修复
+
+            - **resume 还是失效 (v1.0.60 假设错了, Player.open 后没真进入 playing 状态)**
+              - 现象: v1.0.60 用户装完反馈"没用啊". 卡片显示 12:00, 但视频
+                还是从 0 开始播. v1.0.60 的"等 position stream 再 seek"
+                兜底没生效.
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - media_kit 的 \`Player.open(Media url)\` 返回时 player 在
+                  某些 libmpv / 网络场景下**没进入 playing 状态**, 停在
+                  stopped.
+                - 在 stopped 状态下:
+                  1. \`streams.position\` 不会回 (因为没在播), 但也可能
+                     会回个 0 然后停了 (false ready 信号)
+                  2. \`Player.seek()\` **被 libmpv 静默丢**, state.position
+                     仍是 0
+                  3. v1.0.60 的 "250ms 后检查 state.position, 不对就重试"
+                     **救不回来**, 因为 state.position 永远 0, 重试的
+                     seek 同样被丢
+                - v1.0.60 假设 "open 完 player 已经在 playing 状态" 是错的
+              - 修法:
+                1. 显式 \`await \_player.play()\` 强制 player 进入 playing
+                   状态 (这是 v1.0.60 漏的关键一步)
+                2. 新加 \`_waitForBufferingComplete()\`: 监听
+                   \`\_player.streams.buffering\`, 等从 true→false (说明
+                   player 已开始解码), 5s timeout 兜底. **比 v1.0.60 的
+                   position stream 等待更可靠** (position stream 可能在
+                   buffering 期间也回 0, 容易误判 ready).
+                3. 然后 \`_player.seek(resumeAt)\`
+                4. 新加 \`_verifySeekByStream()\`: 用 streams.position
+                   而不是 state.position 验证 seek 是否生效 (state 是
+                   快照可能没及时更新). 给 800ms window, 看 stream
+                   是否回 ≥ resumeAt-1s 的位置. 失败就重试一次 seek.
+              - 验证流程:
+                1. 装 v1.0.61 → 卡片显示 12:00 ✓ (v1.0.59 修的)
+                2. 点卡片 → \`Player.open\` → 显式 \`play()\` → 等
+                   buffering 完成 → \`seek(12:00)\` → position stream
+                   回 ~12:00 ✓
+                3. 视频从 12:00 开始 ✓
+                4. (兜底) 验证失败再 seek 一次, 概率很低
+
+            ---`,
               'v1.0.60': `## 更新日志
 
             ### 🐛 修复

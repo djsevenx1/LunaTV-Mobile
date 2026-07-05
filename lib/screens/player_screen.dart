@@ -1362,27 +1362,39 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _player.open(Media(url));
       // 云记忆恢复
       //
-      // v1.0.60 fix: 之前 _player.open 完直接 seek, 但 media_kit 在
-      // `open()` 返回时 player 还没真正开始解码, 这时 seek 经常被丢
-      // (player.state.position 仍是 0, position stream 也没回).
-      // 表现: 用户从首页"继续观看"卡片点进去, 视频从 0 开始播, 不 resume.
-      // 修法: 等 position stream 第一次回传 (说明 player 已 ready),
-      // 再 seek; 再加 250ms 兜底检查 + 重试一次. 整个等待
-      // 用 3s timeout, 避免卡死 UI.
+      // v1.0.61 fix: v1.0.60 等了 position stream, 但根因是 player 在
+      // `open()` 后没进入 playing 状态 (某些 libmpv / 网络场景下不 auto-play),
+      // 停在 stopped. 在 stopped 状态下:
+      //   1. position stream 不会回 (因为没在播)
+      //   2. _player.seek() 被 libmpv 静默丢, state.position 仍是 0
+      //   3. v1.0.60 的 "250ms 后检查 position, 不对就重试" 也救不回来,
+      //      因为 state.position 永远 0, 重试的 seek 同样被丢
+      // 表现: 用户装 v1.0.60 后还是从 0 开始播
+      // 修法:
+      //   1. 显式 _player.play() 强制 player 进入 playing 状态
+      //   2. 监听 streams.buffering, 等 buffering 完成 (从 true→false)
+      //   3. 再 seek
+      //   4. 用 streams.position 验证 (而不是 state.position, state 是
+      //      快照可能没更新), 验证失败重试一次
       if (resumeAt != null) {
-        await _waitForPlayerReady(timeout: const Duration(seconds: 3));
+        // 1. 显式 play 强制进入 playing 状态
+        try {
+          await _player.play();
+        } catch (_) {}
+        // 2. 等 buffering 完成
+        await _waitForBufferingComplete(timeout: const Duration(seconds: 5));
+        // 3. seek
         try {
           await _player.seek(resumeAt);
         } catch (_) {}
-        // 兜底: 250ms 后检查 position, 如果没到 resumeAt 附近 (>1s 差距),
-        // 说明第一次 seek 被丢, 再来一次
+        // 4. 验证: 用 position stream 检查 position 是否到 resumeAt 附近,
+        // 250ms 内没到就重试一次
         await Future.delayed(const Duration(milliseconds: 250));
-        try {
-          final pos = _player.state.position;
-          if (pos < resumeAt - const Duration(seconds: 1)) {
+        if (!await _verifySeekByStream(resumeAt)) {
+          try {
             await _player.seek(resumeAt);
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
       if (!mounted) return;
       setState(() => _isBuffering = false);
@@ -1394,7 +1406,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _firstRecordSaved = false;
         _saveCurrentProgress();
       } else {
-        // v1.0.60: resume 场景下 player 刚 open + seek, position stream 可能
+        // v1.0.59: resume 场景下 player 刚 open + seek, position stream 可能
         // 还没回传, _currentPosition / state.position 都还是 0. 此时若
         // _firstRecordSaved=false, 10s 定时器第一次 tick 时 (假定此时 stream
         // 已回但 pos 偶尔还是 0) 命中 state.playing=true 分支存一条
@@ -1422,10 +1434,13 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 等待 player 真正开始解码 (position stream 第一次回传)
   ///
-  /// v1.0.59: media_kit 的 `Player.open()` 返回时 player 还在初始化,
+  /// v1.0.60: media_kit 的 `Player.open()` 返回时 player 还在初始化,
   /// 立即 seek 经常被丢. 等 position stream 第一次回传 (说明 player 已
   /// ready) 再 seek, 可以让 resume 100% 生效. 带 timeout, 超时后
   /// 也继续 (fallback 到直接 seek).
+  ///
+  /// v1.0.61: 这个函数在新流程里被 _waitForBufferingComplete 替代,
+  /// 但保留作为兜底 (万一 buffering 监测失败).
   Future<void> _waitForPlayerReady({
     Duration timeout = const Duration(seconds: 3),
   }) async {
@@ -1445,6 +1460,71 @@ class _PlayerScreenState extends State<PlayerScreen>
         await sub.cancel();
       } catch (_) {}
     }
+  }
+
+  /// 等待 buffering 完成 (从 true→false)
+  ///
+  /// v1.0.61: media_kit 在某些 libmpv 场景下 Player.open() 不 auto-play,
+  /// player 停在 stopped, 此时 seek 被丢. 修法: 显式 play + 等
+  /// streams.buffering 从 true 变 false (说明 player 已开始解码). 比
+  /// v1.0.60 的 position stream 等待更可靠 (position stream 可能在
+  /// buffering 期间也回 0, 容易误判 ready).
+  Future<void> _waitForBufferingComplete({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    // 先看一下当前 buffering 状态, 如果本来就是 false, 立即返回
+    try {
+      if (!_player.state.buffering) {
+        return;
+      }
+    } catch (_) {}
+    final completer = Completer<void>();
+    late StreamSubscription<bool> sub;
+    sub = _player.streams.buffering.listen((isBuffering) {
+      if (!isBuffering && !completer.isCompleted) {
+        completer.complete();
+      }
+    });
+    try {
+      await completer.future.timeout(timeout);
+    } catch (_) {
+      // 超时, 继续 (后续会再 seek 一次兜底)
+    }
+    try {
+      await sub.cancel();
+    } catch (_) {}
+  }
+
+  /// 用 position stream 验证 seek 是否生效
+  ///
+  /// v1.0.61: \_player.state.position 是快照, libmpv 在某些场景下不会
+  /// 及时更新 state, 但 streams.position 会在 buffer decode 完成后
+  /// 立即回新位置. 用 stream 验证比用 state 可靠.
+  ///
+  /// 返回 true 表示 seek 生效 (position 到了 resumeAt 附近), false
+  /// 表示没生效需要重试.
+  Future<bool> _verifySeekByStream(
+    Duration resumeAt, {
+    Duration window = const Duration(milliseconds: 800),
+  }) async {
+    final completer = Completer<bool>();
+    late StreamSubscription<Duration> sub;
+    var hit = false;
+    sub = _player.streams.position.listen((pos) {
+      if (!hit && pos >= resumeAt - const Duration(seconds: 1)) {
+        hit = true;
+        if (!completer.isCompleted) completer.complete(true);
+      }
+    });
+    try {
+      // 给 [window] 时间, 看 stream 是否回 ≥ resumeAt-1s 的位置
+      await Future.delayed(window);
+    } catch (_) {}
+    try {
+      await sub.cancel();
+    } catch (_) {}
+    if (!completer.isCompleted) completer.complete(false);
+    return await completer.future;
   }
 
   @override
