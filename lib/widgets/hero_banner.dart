@@ -121,21 +121,21 @@ class _HeroBannerState extends State<HeroBanner> {
           builder: (context, constraints) {
             // 响应式高度 - 调小降低源图 600×900 被强拉到 banner 宽度的放大倍率
             // 平板上原来 42~45vh 现在 32vh, 放大倍率从 6.7x 降到 3x 以内
-            // v1.0.48: 重新加高 (32~45vh, clamp 240~520), 配合 v1.0.39 raw 图升级
-            // 1~2x 放大倍率不会糊, 平板看着更舒展
+            // v1.0.48: 只调平板模式 (md/lg 32vh → 40/45vh), 手机/sm 保持 28/30vh
+            // 配合 v1.0.39 raw 图升级, 平板 1~2x 放大不糊
             final screenWidth = constraints.maxWidth;
             final screenHeight = MediaQuery.of(context).size.height;
             double bannerHeight;
             if (screenWidth < 640) {
-              bannerHeight = screenHeight * 0.32; // 移动端 32vh
+              bannerHeight = screenHeight * 0.28; // 移动端 28vh (不变)
             } else if (screenWidth < 768) {
-              bannerHeight = screenHeight * 0.38; // sm 38vh
+              bannerHeight = screenHeight * 0.30; // sm 30vh (不变)
             } else if (screenWidth < 1024) {
-              bannerHeight = screenHeight * 0.42; // md 42vh
+              bannerHeight = screenHeight * 0.40; // md (平板竖) 32vh → 40vh
             } else {
-              bannerHeight = screenHeight * 0.45; // lg+ 45vh
+              bannerHeight = screenHeight * 0.45; // lg+ (平板横/PC) 32vh → 45vh
             }
-            bannerHeight = bannerHeight.clamp(240.0, 520.0);
+            bannerHeight = bannerHeight.clamp(200.0, 520.0);
 
             // banner 实际宽度 (去掉左右 12 边距), 给 CachedNetworkImage 算解码尺寸
             final bannerWidth = screenWidth - 24;
