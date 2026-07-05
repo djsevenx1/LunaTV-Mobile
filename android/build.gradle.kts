@@ -1,8 +1,9 @@
 allprojects {
     repositories {
-        // 阿里云镜像放第一个,绕开 repo.maven.apache.org 在 CI runner 地区被墙返 403
-        maven { setUrl("https://maven.aliyun.com/repository/public") }
+        // 阿里云镜像放前面,绕开 repo.maven.apache.org 在 CI runner 地区被墙返 403
+        // 但 Aliyun 偶尔 502,加上 Google 镜像和 mavenCentral 让 Gradle 自动 fail-over
         maven { setUrl("https://maven.aliyun.com/repository/google") }
+        maven { setUrl("https://maven.aliyun.com/repository/public") }
         maven { setUrl("https://maven.aliyun.com/repository/gradle-plugin") }
         google()
         mavenCentral()
