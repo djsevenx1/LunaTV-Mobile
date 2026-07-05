@@ -437,6 +437,17 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
   → 修复: [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) step 10 加 `timeout_minutes: 60`
   → 重新打 v1.0.38 tag → 重新触发
 
+第九次 push (这次): gradle 跑完才发现是 Dart 编译错, retry 3 次都重蹈覆辙
+  → retry wrapper 这次工作了, gradle 真跑了 3 次 33s/23s/215s 都失败
+  → 但**真实错误是 step 10 输出的 Dart kernel_snapshot failed**, 不是网络:
+    ```
+    lib/widgets/hero_banner.dart:263:17: Error: No named parameter with the name 'gaplessPlayback'.
+                    gaplessPlayback: true,
+    .pub-cache/hosted/pub.dev/cached_network_image-3.4.1/lib/src/cached_image_widget.dart:212:3: Context: Found this candidate, but the arguments don't match.
+    ```
+  → v1.0.38 改 hero_banner 时加了 `gaplessPlayback: true`, 但 cached_network_image 3.4.0+ 已经移除这个参数
+  → 修复: [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) 删掉 `gaplessPlayback: true` 一行
+
 ## 教训
 
 1. **Gradle fail-over 不像看上去那样工作** — 多个 repo 并列时,
@@ -457,6 +468,13 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
 6. **nick-fields/retry 必须设 timeout**——不设 timeout_minutes / timeout_seconds
    action 会自己报错退出 (0 秒), 表现为 step 失败但日志极短, 容易误判
    为网络/编译问题。改 retry wrapper 时记得加 timeout。
+7. **retry 失败时第一件事是看 build 输出的最后几行**——
+   nick-fields/retry 把 "Attempt N failed" 标成 warning 跟真正的 step 错混在一起,
+   容易把 retry 自己的告警当成错误原因, 错过真正的 kernel_snapshot failed。
+   关注 [stderr] / [error] 行, 找 "Error: No named parameter" 这类 Dart 编译错。
+8. **第三方包的 API 兼容性**——`cached_network_image` 3.4.0+ 移除了
+   `gaplessPlayback` 参数, 但 IDE 自动补全还可能提示有这个参数, 改 widget API
+   前先看 pubspec.lock 里实际版本, 再去对应版本 pub.dev 文档确认参数名。
 
 ## 改动文件
 

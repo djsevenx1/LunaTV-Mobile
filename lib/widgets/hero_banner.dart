@@ -260,7 +260,6 @@ class _HeroBannerState extends State<HeroBanner> {
                 imageUrl: imageUrl,
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.high,
-                gaplessPlayback: true,
                 httpHeaders: headers,
                 memCacheWidth: bannerPx,
                 placeholder: (context, url) => Container(
