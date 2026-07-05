@@ -579,3 +579,71 @@ String _upgradeDoubanPosterUrl(String url) {
 - Release: <https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/v1.0.38>
 
 
+
+---
+
+# v1.0.42 · 修 v1.0.41 漏掉的 `_controlsVisible` 字段名
+
+## 现象
+
+用户让我看 run #394 (v1.0.40 失败) 的 SAS 日志，确认根因。
+
+## 真实错误 (3 个，全在 player_screen.dart)
+
+```
+lib/screens/player_screen.dart:142:45: Error: The method 'getScreenBrightness' isn't
+    defined for the class 'ScreenBrightness'.
+    - 'ScreenBrightness' is from 'package:screen_brightness/screen_brightness.dart'
+      ('screen_brightness-0.2.2+1').
+    final br = await ScreenBrightness().getScreenBrightness();
+
+lib/screens/player_screen.dart:609:7: Error: The setter '_controlsVisible' isn't
+    defined for the class '_PlayerScreenState'.
+    _controlsVisible = true;
+
+lib/screens/player_screen.dart:641:7: Error: The setter '_controlsVisible' isn't
+    defined for the class '_PlayerScreenState'.
+    _controlsVisible = true;
+```
+
+## 排查
+
+- v1.0.40 我从 [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart)
+  把亮度/音量手势处理方法 (`_onVolumeSwipeXxx` / `_onBrightnessSwipeXxx`) 抄到
+  [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 时
+  **漏改了字段名**: 旧 widget 里是 `_controlsVisible`，新 widget 里实际声明的是
+  `_isControlsVisible` (line 97)。
+- v1.0.41 修 v2 API 时只盯了 `VolumeController` / `ScreenBrightness` 两类报错，
+  漏了这条 `setter _controlsVisible` 报错。
+- 结果: v1.0.41 push 也会同样失败。
+
+## 修复
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 第 610/642 行
+`_controlsVisible = true;` → `_isControlsVisible = true;`（两处都改）。
+
+## 教训
+
+1. **从另一个 widget 抄方法时要 grep 字段名**——这次我从 `mobile_player_controls.dart`
+   抄两个 handler 到 `player_screen.dart`，handler 里用的字段 `_controlsVisible` 在
+   两个 widget 里名字不一样（一个叫 `_controlsVisible` 一个叫 `_isControlsVisible`），
+   IDE 不会在 copy 时提醒。抄完应该 `grep` 一下用到的字段在新 widget 里是否声明。
+2. **修 API 报错时要看完整错误列表**——v1.0.41 我只解决了最上面的
+   `getScreenBrightness` 报错就提交，没看 Dart 还报了另外 2 个 `setter` 错。
+   编译错的链是**全部解决**才能 build，不是**解决一个**就能 build。
+3. **CI 不会因为 retry 3 次就修好代码问题**——retry wrapper 救的是网络/瞬时错误，
+   代码错误 3 次都是同样错。retry 3 次都失败时第一件事是看每次失败的最后几行，
+   找代码错而不是改网络配置。
+
+## 改动文件
+
+- `lib/screens/player_screen.dart` — 第 610/642 行字段名 `_controlsVisible` → `_isControlsVisible`
+- `pubspec.yaml` — version 1.0.41+1 → 1.0.42+1
+- `.github/workflows/build.yml` — 顶部追加 v1.0.42 changelog
+
+## Release
+
+- tag: `v1.0.42`
+- 分支: main HEAD
+- 版本: 1.0.42+1
+- 触发: `git push origin v1.0.42` → Actions 跑 Build APK → 成功后自动创建 release

@@ -88,6 +88,21 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.42': `## 更新日志
+
+            ### 🐛 修复
+
+            - **编译报错 (v1.0.40 引入, v1.0.41 漏修)**
+              - 现象: v1.0.41 push 触发 CI 构建, 同样会 retry 3 次都失败
+              - 真实错误: [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 第 610/642 行引用了
+                \`_controlsVisible\`, 但 \_PlayerScreenState 里实际声明的是 \`_isControlsVisible\`
+                (v1.0.40 我从 [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart)
+                抄手势处理方法时漏改了字段名, v1.0.41 修 v2 API 时又只盯了 VolumeController / ScreenBrightness,
+                漏了这条)
+              - 修复 (本版本): [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 第 610/642 行
+                \`_controlsVisible = true\` → \`_isControlsVisible = true\`
+
+            ---`,
               'v1.0.41': `## 更新日志
 
             ### 🐛 修复

@@ -639,7 +639,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsTimer?.cancel();
     _dragStartBrightness = _currentBrightness;
     setState(() {
-      _controlsVisible = true;
+      _isControlsVisible = true;
       _showBrightnessIndicator = true;
     });
   }
