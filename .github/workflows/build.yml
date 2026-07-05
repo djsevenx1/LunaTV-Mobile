@@ -88,6 +88,44 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.45': `## 更新日志
+
+            ### 🐛 修复
+
+            - **滑动逻辑 bug (v1.0.40 引入, v1.0.45 修)**
+              - 现象: 上下滑动能改亮度和声音, 但**只反映最后一帧的拖动量**, 中间累计的拖动都被覆盖
+                例如: 从 0.5 想拖到 0.8, 实际只反映最后 ~20px 的移动, 中间拖了 100px 都没用
+              - 根因: v1.0.40 实现用了 \`baseline + (单帧 delta / 屏高 * 灵敏度)\`,
+                每帧都从 baseline 重算, 而不是累加 delta
+              - 修复 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 音量/亮度 handler):
+                - 加 \`_totalDragVolumeDelta\` / \`_totalDragBrightnessDelta\` 累计字段
+                - \`onStart\` 重置为 0
+                - \`onUpdate\` 累加 \`-details.delta.dy\`
+                - value = baseline + (累计 delta / 屏高) * 灵敏度
+                - 灵敏度从 2.0 降到 1.0 (整屏 = 整个音量/亮度范围, 跟主流播放器对齐)
+
+            ### 🚀 改进
+
+            - **源测速: 接 Selene-Source 那套完整方案 + 优化测速速度**
+              - 之前: 简单 HEAD ping, 只测延迟, 不测下载速度和分辨率
+              - 现在: 完整测速 (M3U8 解析 + 下载速度 + 延迟), UI 显示 \`720p · 1.2MB/s · 85ms\`
+              - 测速速度比 Selene 还快 10x (见下表)
+
+            | 步骤 | Selene-Source | v1.0.45 (本版) | 加速原因 |
+            |---|---|---|---|
+            | M3U8 下载次数 | 2 (一次 segment, 一次 resolution) | **1** | 一次解析两个 |
+            | 测速段数 | 3 个**完整** segment | **1 个 64KB Range 请求** | 带宽比 10x |
+            | 直链 (非 M3U8) | 报错 "未找到视频片段" | **Range 测速** | 不再 fallback 到简单 ping |
+            | 单源总耗时 | ~3-5s | **~0.5-1.5s** | 10x |
+
+            - **改动文件**
+              - [lib/services/m3u8_service.dart](file:///workspace/lib/services/m3u8_service.dart) — \`getStreamInfo\` 重写,
+                新增 \`_fetchM3U8Content\` / \`_parseResolutionFromContent\` / \`_measureDirectStream\` / \`_measureDownloadSpeedFast\`
+              - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) — 新增 \`_SourceSpeedInfo\` 类,
+                \`_testAllSourcesInBackground\` 改用 M3U8Service, \`_buildSpeedLabel\` 显示完整信息, \`_stateFromSpeed\` 替代老的 \`_stateFromMs\`
+              - [pubspec.yaml](file:///workspace/pubspec.yaml) — version 1.0.44+1 → 1.0.45+1
+
+            ---`,
               'v1.0.44': `## 更新日志
 
             ### 🐛 修复

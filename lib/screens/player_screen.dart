@@ -61,8 +61,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // 多源结果
   List<SearchResult> _sourceResults = [];
   bool _sourcesLoading = true;
-  final Map<String, int> _pingCache = {};
+  final Map<String, int> _pingCache = {}; // 兼容旧 fallback 测速
   final Map<String, PingState> _pingState = {};
+  // v1.0.45: 完整测速信息 (分辨率 + 下载速度 + ping), 用 M3U8Service
+  final Map<String, _SourceSpeedInfo> _sourceSpeeds = {};
   String? _autoSelectedSource;
 
   // 当前选中的源 / 集
@@ -919,7 +921,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  /// 后台测速所有源：并发测速，并按速度从快到慢排序源列表
+  /// 后台测速所有源：并发用 M3U8Service 测速, 并按综合分从高到低排序源列表
+  /// v1.0.45: 完整测速 (分辨率 + 下载速度 + ping) 替代 v1.0.40 之前的简单 HEAD ping
   Future<void> _testAllSourcesInBackground() async {
     // 先标记所有源为测速中
     final pending = <_SourcePingItem>[];
@@ -930,14 +933,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     if (mounted) setState(() {});
 
-    // 并发测速（最多同时 6 个，避免瞬时连接太多）
+    // 并发测速 (最多同时 6 个, 避免瞬时连接太多)
+    // 跟 Selene 不同: 我们不等所有源都完, 每个源完成立即更新 UI
+    // (testSourcesWithCallback 自带 5s 超时, 单源最多 5s)
     const maxConcurrent = 6;
+    final m3u8 = M3U8Service();
     for (var i = 0; i < pending.length; i += maxConcurrent) {
       final batch = pending.skip(i).take(maxConcurrent);
       await Future.wait(batch.map((item) async {
-        final ms = await _pingSource(item.source.episodes.first);
+        final speed = await _testSourceSpeed(m3u8, item.source);
         if (!mounted) return;
-        _pingState[item.source.source] = _stateFromMs(ms);
+        _sourceSpeeds[item.source.source] = speed;
+        _pingState[item.source.source] = _stateFromSpeed(speed);
         if (mounted) setState(() {});
       }));
     }
@@ -947,13 +954,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     // 自动选最快源 (除非用户已经主动选过)
     if (_autoSelectedSource == null && _sourceResults.isNotEmpty) {
-      int bestMs = 1 << 30;
+      _SourceSpeedInfo? bestSpeed;
       String? bestSource;
       for (final s in _sourceResults) {
-        final ms =
-            _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
-        if (ms != null && ms < bestMs) {
-          bestMs = ms;
+        final sp = _sourceSpeeds[s.source];
+        if (sp == null) continue;
+        if (bestSpeed == null || sp.score < bestSpeed.score) {
+          bestSpeed = sp;
           bestSource = s.source;
         }
       }
@@ -966,58 +973,100 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    // 按速度从快到慢重排源列表（已测速成功的排前面；测失败的放最后）
+    // 按综合分从高到低重排源列表
     _sortSourcesBySpeed();
   }
 
-  /// 按测速速度从快到慢排序源列表
-  void _sortSourcesBySpeed() {
-    int scoreOf(SearchResult s) {
-      if (s.episodes.isEmpty) return 1 << 30;
-      final ms = _pingCache[s.episodes.first];
-      if (ms == null) return 1 << 30;
-      return ms;
+  /// 测单个源: 走 M3U8Service 完整测速, 失败 fallback 到 HEAD ping
+  Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
+    if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
+    final url = UserDataService.buildProxiedUrl(s.episodes.first, forceM3u8: true);
+    try {
+      // v1.0.45: 优化后单源测速 0.5~1.5s, 给 4s 超时足够
+      final result = await m3u8.getStreamInfo(url).timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => <String, dynamic>{
+          'resolution': {'width': 0, 'height': 0},
+          'downloadSpeed': 0.0,
+          'latency': 0,
+          'success': false,
+          'error': 'timeout',
+        },
+      );
+      if (result['success'] == true) {
+        final res = (result['resolution'] as Map).cast<String, int>();
+        final h = res['height'] ?? 0;
+        return _SourceSpeedInfo(
+          resolution: _formatResolution(h),
+          loadSpeedKBps: (result['downloadSpeed'] as num).toDouble(),
+          pingMs: (result['latency'] as num).toInt(),
+          success: true,
+        );
+      }
+    } catch (_) {}
+    // fallback: HEAD ping (1.5s)
+    return await _fallbackHeadPing(url);
+  }
+
+  String _formatResolution(int h) {
+    if (h <= 0) return '';
+    if (h >= 2160) return '4K';
+    return '${h}p';
+  }
+
+  Future<_SourceSpeedInfo> _fallbackHeadPing(String url) async {
+    if (_pingCache.containsKey(url)) {
+      final ms = _pingCache[url]!;
+      return _SourceSpeedInfo(
+        resolution: '', loadSpeedKBps: 0, pingMs: ms,
+        success: ms < 3000,
+      );
     }
-
-    setState(() {
-      _sourceResults.sort((a, b) => scoreOf(a).compareTo(scoreOf(b)));
-      // _selectedSource 是 SearchResult 引用，sort 后引用仍然指向同一对象，不需要调整
-    });
-  }
-
-  PingState _stateFromMs(int ms) {
-    if (ms >= 3000) return PingState.unavailable;
-    if (ms < 500) return PingState.fast;
-    if (ms < 1500) return PingState.medium;
-    return PingState.slow;
-  }
-
-  Future<int> _pingSource(String url) async {
-    if (_pingCache.containsKey(url)) return _pingCache[url]!;
     final start = DateTime.now();
     final httpClient = http.Client();
     try {
-      // 测速时也走 CF Worker 加速（开关+域名就生效）
-      // 这样测出来的延迟更接近用户实际播放时的延迟
-      final pingUrl = UserDataService.buildProxiedUrl(url, forceM3u8: true);
-      final req = http.Request('HEAD', Uri.parse(pingUrl))
+      final req = http.Request('HEAD', Uri.parse(url))
         ..followRedirects = true
         ..maxRedirects = 2;
-      final response =
-          await httpClient.send(req).timeout(const Duration(milliseconds: 1500));
-      // 测首字节即可，不等响应体流
-      response.stream.drain().catchError((_) {});
+      await httpClient.send(req).timeout(const Duration(milliseconds: 1500));
     } catch (_) {
-      // 超时或失败统一记为 3000ms
       _pingCache[url] = 3000;
-      httpClient.close();
-      return 3000;
+      return _SourceSpeedInfo(resolution: '', loadSpeedKBps: 0, pingMs: 3000, success: false);
     }
     final ms = DateTime.now().difference(start).inMilliseconds;
     _pingCache[url] = ms;
-    httpClient.close();
-    return ms;
+    return _SourceSpeedInfo(
+      resolution: '', loadSpeedKBps: 0, pingMs: ms,
+      success: ms < 3000,
+    );
   }
+
+  PingState _stateFromSpeed(_SourceSpeedInfo s) {
+    if (!s.success) return PingState.unavailable;
+    // 速度 > 500KB/s 且 ping < 1000ms = fast
+    // 速度 < 100KB/s 或 ping > 2000ms = slow
+    if (s.loadSpeedKBps >= 500 && s.pingMs < 1000) return PingState.fast;
+    if (s.loadSpeedKBps >= 200 && s.pingMs < 2000) return PingState.medium;
+    return PingState.slow;
+  }
+
+  /// 按测速综合分从高到低排序源列表
+  void _sortSourcesBySpeed() {
+    setState(() {
+      _sourceResults.sort((a, b) {
+        final sa = _sourceSpeeds[a.source];
+        final sb = _sourceSpeeds[b.source];
+        if (sa == null && sb == null) return 0;
+        if (sa == null) return 1; // 未测的排后面
+        if (sb == null) return -1;
+        return sa.score.compareTo(sb.score);
+      });
+    });
+  }
+
+  // v1.0.45: 删了 v1.0.40 之前的 _pingSource (简单 HEAD ping) 和 _stateFromMs,
+  // 改用 M3U8Service 测速 + _stateFromSpeed. 老方法没人调, 留在这里只是 dead code.
+  // 如需 HEAD ping fallback, 看 _fallbackHeadPing.
 
   /// position stream 触发的检查: 距离结尾 < 1.5s 时尝试自动切下一集
   void _maybeAutoPlayNext() {
@@ -1401,6 +1450,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final selected = _selectedSource?.source == s.source;
     final state = _pingState[s.source] ?? PingState.idle;
     final ms = _pingCache[s.episodes.isNotEmpty ? s.episodes.first : ''];
+    // v1.0.45: 取完整测速信息 (分辨率 + 速度 + ping)
+    final speed = _sourceSpeeds[s.source];
     return InkWell(
       onTap: () {
         // 切源后只更新选中状态,不自动播放 (由用户点"播放"按钮或集数触发)
@@ -1455,8 +1506,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ],
               ),
             ),
-            // 测速文字
-            _buildPingLabel(state, ms),
+            // v1.0.45: 显示完整测速信息 (分辨率 + 速度 + ping)
+            _buildSpeedLabel(state, speed, ms),
           ],
         ),
       ),
@@ -1491,7 +1542,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildPingLabel(PingState state, int? ms) {
+  /// v1.0.45: 显示完整测速结果
+  ///   - 测试中: "测速中"
+  ///   - idle: "待测"
+  ///   - 失败: "不可用"
+  ///   - 成功: "720p · 1.2MB/s · 85ms" (直链没分辨率时省略)
+  Widget _buildSpeedLabel(PingState state, _SourceSpeedInfo? speed, int? ms) {
     String text;
     Color color;
     if (state == PingState.testing) {
@@ -1500,11 +1556,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (state == PingState.idle) {
       text = '待测';
       color = const Color(0xFF9CA3AF);
-    } else if (state == PingState.unavailable) {
-      text = '不可用';
-      color = const Color(0xFFEF4444);
+    } else if (state == PingState.unavailable || speed == null || !speed.success) {
+      // 测失败时如果还有旧 ms (来自 fallback HEAD ping), 显示 ms
+      text = (ms != null && ms < 3000) ? '${ms}ms' : '不可用';
+      color = (ms != null && ms < 3000) ? const Color(0xFFEF4444) : const Color(0xFF9CA3AF);
     } else {
-      text = '${ms}ms';
+      // 成功: 拼 "分辨率 · 速度 · ping" (缺哪个就省哪个)
+      final parts = <String>[];
+      if (speed.resolution.isNotEmpty) parts.add(speed.resolution);
+      final speedStr = speed.formatLoadSpeed();
+      if (speedStr.isNotEmpty) parts.add(speedStr);
+      if (speed.pingMs > 0) parts.add('${speed.pingMs}ms');
+      text = parts.isEmpty ? (ms != null ? '${ms}ms' : 'OK') : parts.join(' · ');
       color = _stateToColor(state);
     }
     return Container(

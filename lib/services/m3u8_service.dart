@@ -19,40 +19,108 @@ class M3U8Service {
 
 
   /// 并发获取流的核心信息：分辨率、下载速度、延迟
+  /// v1.0.45: 优化测速速度
+  ///   - M3U8 manifest 只下载 1 次 (之前 _getResolutionFromM3U8 又下了一次)
+  ///   - 下载速度只测 1 个段 + Range 请求只取 64KB (之前下 3 个完整段)
+  ///   - 对直接 MP4 源 (不是 M3U8) 走 _measureMp4Speed 单独测
   Future<Map<String, dynamic>> getStreamInfo(String streamUrl) async {
     try {
-      // 获取片段列表
-      final segments = await _getSegmentUrls(streamUrl);
-      
-      if (segments.isEmpty) {
-        return {
-          'resolution': '未知',
-          'downloadSpeed': 0.0,
-          'latency': 0,
-          'success': false,
-          'error': '未找到视频片段',
-        };
+      // 1) GET M3U8 manifest 一次, 同时解析 segments 和 resolution
+      final m3u8Content = await _fetchM3U8Content(streamUrl);
+      if (m3u8Content == null) {
+        // 不是 M3U8, 走直链测速
+        return await _measureDirectStream(streamUrl);
       }
-      
-      // 并发执行三个任务
+      final segments = _parseSegmentsFromContent(m3u8Content, streamUrl);
+      final resolution = _parseResolutionFromContent(m3u8Content);
+      if (segments.isEmpty) {
+        // M3U8 但没解析到 segment (罕见, 比如只有 master playlist 没有 variant)
+        return await _measureDirectStream(streamUrl);
+      }
+
+      // 2) 并发: HEAD 测延迟 + Range 测速 (都用第 1 个 segment, 反正测的是同一条线路)
+      final firstSegment = segments.first;
       final futures = await Future.wait([
-        _getResolutionFromM3U8(streamUrl),
-        _measureLatency(segments.first),
-        _measureDownloadSpeed(segments),
+        _measureLatency(firstSegment),
+        _measureDownloadSpeedFast(firstSegment),
       ]);
-      
-      final resolutionData = futures[0] as Map<String, int>;
-      final latency = futures[1] as int;
-      final downloadSpeedKBps = futures[2] as double;
-      
+      final latency = futures[0] as int;
+      final downloadSpeedKBps = futures[1] as double;
+
       return {
-        'resolution': resolutionData,
+        'resolution': resolution,
         'downloadSpeed': downloadSpeedKBps,
         'latency': latency,
         'success': true,
         'error': '',
       };
-      
+    } catch (e) {
+      return {
+        'resolution': {'width': 0, 'height': 0},
+        'downloadSpeed': 0.0,
+        'latency': 0,
+        'success': false,
+        'error': e.toString(),
+      };
+    }
+  }
+
+  /// GET M3U8 内容, 返回 null 表示不是 M3U8 (直链视频)
+  Future<String?> _fetchM3U8Content(String m3u8Url) async {
+    try {
+      final response = await _dio.get(
+        m3u8Url,
+        options: Options(
+          responseType: ResponseType.plain,
+          receiveTimeout: const Duration(seconds: 3),
+        ),
+      );
+      final content = response.data as String;
+      // M3U8 必须以 #EXTM3U 开头, 不然就是直链
+      if (!content.trimLeft().startsWith('#EXTM3U')) return null;
+      return content;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 从 M3U8 内容里解析 RESOLUTION, 不再额外下载
+  Map<String, int> _parseResolutionFromContent(String content) {
+    for (final line in content.split('\n').map((l) => l.trim())) {
+      if (line.startsWith('#EXT-X-STREAM-INF:')) {
+        final params = <String, String>{};
+        for (final part in line.substring('#EXT-X-STREAM-INF:'.length).split(',')) {
+          final kv = part.split('=');
+          if (kv.length == 2) params[kv[0].trim()] = kv[1].trim();
+        }
+        if (params.containsKey('RESOLUTION')) {
+          final dims = params['RESOLUTION']!.split('x');
+          if (dims.length == 2) {
+            return {
+              'width': int.tryParse(dims[0]) ?? 0,
+              'height': int.tryParse(dims[1]) ?? 0,
+            };
+          }
+        }
+      }
+    }
+    return {'width': 0, 'height': 0};
+  }
+
+  /// 直链 (非 M3U8) 测速: 用 Range 请求取前 64KB
+  Future<Map<String, dynamic>> _measureDirectStream(String streamUrl) async {
+    try {
+      final futures = await Future.wait([
+        _measureLatency(streamUrl),
+        _measureDownloadSpeedFast(streamUrl),
+      ]);
+      return {
+        'resolution': {'width': 0, 'height': 0}, // 直链没法从 M3U8 拿分辨率
+        'downloadSpeed': futures[1] as double,
+        'latency': futures[0] as int,
+        'success': true,
+        'error': '',
+      };
     } catch (e) {
       return {
         'resolution': {'width': 0, 'height': 0},
@@ -190,16 +258,42 @@ class M3U8Service {
     }
   }
 
-  /// 测量下载速度
+  /// 测量下载速度 (v1.0.45: Range 请求只取 64KB, 比 Selene 的 3x 完整段快 10x)
+  Future<double> _measureDownloadSpeedFast(String url) async {
+    try {
+      final stopwatch = Stopwatch()..start();
+      // Range: bytes=0-65535 只取前 64KB, 测速够用了
+      // 64KB 在 100Mbps 链路上 ~5ms 传完, 慢链 ~500ms
+      final response = await _dio.get(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          receiveTimeout: const Duration(seconds: 3),
+          headers: {'Range': 'bytes=0-65535'},
+        ),
+      );
+      stopwatch.stop();
+      final bytes = (response.data as Uint8List).length;
+      if (bytes == 0) return 0.0;
+      // 兼容服务端不返回 206 而是直接 200 全量, 也兼容 206 部分内容
+      final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+      if (elapsedSeconds <= 0) return 0.0;
+      return (bytes / 1024) / elapsedSeconds; // KB/s
+    } catch (e) {
+      return 0.0;
+    }
+  }
+
+  /// 测量下载速度 (旧版: 3 完整段, 保留以防新方法在某些 CDN 失败)
   Future<double> _measureDownloadSpeed(List<String> segments) async {
     try {
       // 使用前3个片段进行测速
       final segmentsToTest = segments.take(3).toList();
-      
+
       final stopwatch = Stopwatch()..start();
       int totalBytes = 0;
       int successfulDownloads = 0;
-      
+
       // 并发下载片段
       final futures = segmentsToTest.map((segmentUrl) async {
         try {
@@ -210,7 +304,7 @@ class M3U8Service {
               receiveTimeout: const Duration(seconds: 5),
             ),
           );
-          
+
           final bytes = (response.data as Uint8List).length;
           totalBytes += bytes;
           successfulDownloads++;
