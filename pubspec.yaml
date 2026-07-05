@@ -1,7 +1,7 @@
 name: luna_tv
 description: "LunaTV-inspired Flutter client"
 publish_to: 'none'
-version: 1.0.42+1
+version: 1.0.43+1
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -27,8 +27,8 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^1.2.1
   media_kit_libs_video: ^1.0.7
-  screen_brightness: ^0.2.2
-  volume_controller: ^2.0.0
+  screen_brightness: ^2.1.0
+  volume_controller: ^3.0.0
   # macos_window_utils: ^1.0.4
   # bitsdojo_window: ^0.1.5
   # bs58check: ^1.0.0

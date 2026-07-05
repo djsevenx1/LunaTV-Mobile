@@ -88,6 +88,28 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.43': `## 更新日志
+
+            ### 🐛 修复
+
+            - **编译报错 (v1.0.41 漏修的真根因)**
+              - 现象: v1.0.42 push 触发 CI 构建, 同样会 retry 3 次都失败
+              - 真实错误: \`Member not found: 'instance'\` 在 9 个调用点都报
+                - [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) line 139/143/625/655
+                - [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) line 110/111/116/160/292/327
+              - 根因 (我之前完全搞错了): pubspec 写 \`screen_brightness: ^0.2.2\` / \`volume_controller: ^2.0.0\`,
+                我以为 ^2 就是 v2 API 引入 .instance, **实际**:
+                - \`volume_controller\` 的 \`.instance\` API 是 v3.x (3.6.0 最新) 才有, v2.0.x 仍是 v1 老 API
+                - \`screen_brightness\` 的 \`.instance\` API 是 v2.x (2.1.11 最新) 才有, v0.2.x 是 0.x 老 API
+                - caret range \`^0.2.2\` / \`^2.0.0\` 锁的还是各自老版本 (0.2.2+1 / 2.0.8)
+              - 修复 (本版本): [pubspec.yaml](file:///workspace/pubspec.yaml) 把 \`screen_brightness: ^0.2.2\` → \`^2.1.0\`,
+                \`volume_controller: ^2.0.0\` → \`^3.0.0\`, 让 pub get 解析到真正有 \`.instance\` 的版本
+              - [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 和
+                [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart) 里的
+                \`.instance.setVolume(...)\` / \`.instance.application\` / \`.instance.setApplicationScreenBrightness(...)\`
+                调用本身写的就是 v3/v2 API, 不用再改
+
+            ---`,
               'v1.0.42': `## 更新日志
 
             ### 🐛 修复

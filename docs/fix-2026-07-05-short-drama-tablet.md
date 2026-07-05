@@ -647,3 +647,99 @@ lib/screens/player_screen.dart:641:7: Error: The setter '_controlsVisible' isn't
 - 分支: main HEAD
 - 版本: 1.0.42+1
 - 触发: `git push origin v1.0.42` → Actions 跑 Build APK → 成功后自动创建 release
+
+---
+
+# v1.0.43 · 修 v1.0.42 漏掉的 pubspec 版本号（真根因）
+
+## 现象
+
+用户让我看 v1.0.41 failed run (run #395) 的 SAS 日志确认根因。结果发现 v1.0.41
+的真实错误**不止**是 v1.0.42 我修的 `_controlsVisible` 字段名——还有更严重的：
+
+```
+lib/screens/player_screen.dart:139:44: Error: Member not found: 'instance'.
+        final vol = await VolumeController.instance.getVolume();
+                                           ^^^^^^^^
+lib/screens/player_screen.dart:143:43: Error: Member not found: 'instance'.
+        final br = await ScreenBrightness.instance.application;
+                                          ^^^^^^^^
+lib/widgets/mobile_player_controls.dart:110/111/116/160/292/327: 同上
+```
+
+## 真实根因（我之前完全搞错了）
+
+`pubspec.yaml` 我写的是 `screen_brightness: ^0.2.2` / `volume_controller: ^2.0.0`。
+我之前一直以为：
+
+- `^2.0.0` → v2.x → 有 `.instance` 单例 API
+- `^0.2.2` → 0.2.x → 有 `.instance` 单例 API
+
+**完全错了**。`pub.dev` 实际查：
+
+| 包 | `.instance` API 引入版本 | pubspec 实际锁的版本 | 有无 `.instance` |
+|---|---|---|---|
+| [volume_controller](https://pub.dev/packages/volume_controller) | v3.x (3.6.0 最新) | 2.0.8 (被 `^2.0.0` 锁) | ❌ |
+| [screen_brightness](https://pub.dev/packages/screen_brightness) | v2.x (2.1.11 最新) | 0.2.2+1 (被 `^0.2.2` 锁) | ❌ |
+
+`pubspec.lock` 解析结果：
+
+```
+volume_controller: 2.0.8  ← v1 老 API, 实例化 `VolumeController()` 调方法
+screen_brightness: 0.2.2+1  ← 0.x 老 API, 实例化 `ScreenBrightness()` 调方法
+```
+
+我之前在 v1.0.40 → v1.0.41 时**没看 pub.dev 实际文档**就拍脑袋改了一通：
+- 把 `VolumeController()` 改成 `VolumeController.instance` → 实际锁的 v2.0.8 没这玩意儿
+- 把 `ScreenBrightness()` 改成 `ScreenBrightness.instance` → 实际锁的 0.2.2+1 没这玩意儿
+
+结果 v1.0.41 编译 9 个 `Member not found: 'instance'` 全挂，v1.0.42 我只看到
+`_controlsVisible` 错就提交了，**漏了** 这 9 个 `instance` 错。
+
+## 修复
+
+[pubspec.yaml](file:///workspace/pubspec.yaml) 把 caret range 升到真正有 `.instance` 的版本：
+
+```diff
+- screen_brightness: ^0.2.2
++ screen_brightness: ^2.1.0
+- volume_controller: ^2.0.0
++ volume_controller: ^3.0.0
+```
+
+代码侧不用改——`VolumeController.instance.setVolume(_)` /
+`ScreenBrightness.instance.setApplicationScreenBrightness(_)` / `.application` /
+`setVolume(_)` 写法跟 pub.dev 文档里 v2.1.11 / v3.6.0 的示例完全一致（注意：
+v3.6.0 的 `setVolume` **不再需要** `showSystemUI` 参数，那个参数被去掉了，但
+传了也不报错——Dart 是命名参数，可选就是允许空缺）。
+
+`showSystemUI` 这个属性的 setter 还是有的，所以代码里
+`VolumeController.instance.showSystemUI = false;` 也仍然合法。
+
+## 教训
+
+1. **改 pubspec 锁版本前先看 pub.dev 实际文档**——不能凭"v2 就是 v2 API"的常识
+   拍脑袋。`screen_brightness` 的 `0.x → 2.x` 是断崖式大版本变更（0.x 老 API
+   → 2.x 新 API），`volume_controller` 的 `2.x → 3.x` 也是断崖式变更（v2.x
+   仍走 v1 老 API）。这些都不能从大版本号直接推。
+2. **同一次提交修多个错，必须看完整 error list**——v1.0.41 编译时 9 个 `instance`
+   错 + 2 个 `_controlsVisible` 错 = 11 个错，我只看了最上面的 setter 错提交了。
+   编译错是 AND 关系，**一个不修就 build 失败**。
+3. **Dart caret range 在 0.x 版本的特殊行为**——`^0.2.2` 不会升到 `^0.3.0`，
+   只锁 0.2.x。所以 0.x 包要从 `0.2.2` 升到 `2.x`，caret range 一定要显式
+   写大版本号。
+4. **CI retry 3 次同样错=代码错不是网络错**——v1.0.42 跑了 3 次都报同样的
+   `Member not found: 'instance'`，retry wrapper 是救不了代码错的。
+
+## 改动文件
+
+- `pubspec.yaml` — `^0.2.2` → `^2.1.0`（screen_brightness）, `^2.0.0` → `^3.0.0`
+  （volume_controller）, version 1.0.42+1 → 1.0.43+1
+- `.github/workflows/build.yml` — 顶部追加 v1.0.43 changelog
+
+## Release
+
+- tag: `v1.0.43`
+- 分支: main HEAD
+- 版本: 1.0.43+1
+- 触发: `git push origin v1.0.43` → Actions 跑 Build APK → 成功后自动创建 release
