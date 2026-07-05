@@ -36,6 +36,12 @@ class HistoryGrid extends StatefulWidget {
 class _HistoryGridState extends State<HistoryGrid>
     with TickerProviderStateMixin {
   List<PlayRecord> _playRecords = [];
+  // v1.0.48: 按"影片"去重后的记录 (同名同电影多源合并成一条)
+  // 原始 _playRecords 保留所有, 供 removeHistoryFromUI 用 (source, id) 删
+  List<PlayRecord> _dedupedRecords = [];
+  // key 是 searchTitle (或 title 兜底), value 是该影片对应的全部源记录
+  // 按 saveTime 降序, 第一条是主代表 (用户最近看的那个源)
+  final Map<String, List<PlayRecord>> _recordSourceMap = {};
   bool _isLoading = true;
   String? _errorMessage;
   final PageCacheService _cacheService = PageCacheService();
@@ -103,8 +109,14 @@ class _HistoryGridState extends State<HistoryGrid>
       if (!mounted) return;
       if (cachedRecordsResult.success && cachedRecordsResult.data != null) {
         final cachedRecords = cachedRecordsResult.data!;
+        // v1.0.48: 同步去重结果
+        final dedup = _dedupeByMovie(cachedRecords);
         setState(() {
           _playRecords = cachedRecords;
+          _dedupedRecords = dedup.$1;
+          _recordSourceMap
+            ..clear()
+            ..addAll(dedup.$2);
         });
       }
     } catch (e) {
@@ -119,6 +131,16 @@ class _HistoryGridState extends State<HistoryGrid>
     setState(() {
       _playRecords
           .removeWhere((record) => record.source == source && record.id == id);
+      // v1.0.48: 同步从 _recordSourceMap 移除, 然后整组重算
+      _recordSourceMap.forEach((key, list) {
+        list.removeWhere((r) => r.source == source && r.id == id);
+      });
+      _recordSourceMap.removeWhere((_, list) => list.isEmpty);
+      // 重建 _dedupedRecords: 每组取 saveTime 最新
+      _dedupedRecords = _recordSourceMap.values
+          .map((list) => (list..sort((a, b) => b.saveTime.compareTo(a.saveTime))).first)
+          .toList()
+        ..sort((a, b) => b.saveTime.compareTo(a.saveTime));
     });
   }
 
@@ -130,8 +152,14 @@ class _HistoryGridState extends State<HistoryGrid>
       if (!mounted) return;
 
       if (result.success && result.data != null) {
+        // v1.0.48: 按影片合并, 同一电影多源只显示一条
+        final dedup = _dedupeByMovie(result.data!);
         setState(() {
           _playRecords = result.data!;
+          _dedupedRecords = dedup.$1;
+          _recordSourceMap
+            ..clear()
+            ..addAll(dedup.$2);
         });
       } else {
         throw Exception(result.errorMessage ?? '获取播放记录失败');
@@ -139,6 +167,36 @@ class _HistoryGridState extends State<HistoryGrid>
     } catch (e) {
       throw Exception('获取播放记录失败: $e');
     }
+  }
+
+  /// v1.0.48: 按"影片"分组合并
+  ///   - key 优先用 searchTitle, 为空用 title
+  ///   - 同一 key 多条记录: 取 saveTime 最新那条当代表, 全部塞 _recordSourceMap
+  ///   - 返回 (合并后列表, 影片→所有源记录的 map)
+  (List<PlayRecord>, Map<String, List<PlayRecord>>) _dedupeByMovie(
+      List<PlayRecord> records) {
+    final grouped = <String, List<PlayRecord>>{};
+    for (final r in records) {
+      final key =
+          (r.searchTitle.isNotEmpty ? r.searchTitle : r.title).trim();
+      if (key.isEmpty) {
+        // 没 title 的当独立条目, 避免把一堆空 key 都合到一起
+        grouped['__no_title_${r.source}_${r.id}'] = [r];
+        continue;
+      }
+      grouped.putIfAbsent(key, () => []).add(r);
+    }
+    final out = <PlayRecord>[];
+    final map = <String, List<PlayRecord>>{};
+    grouped.forEach((key, list) {
+      // 按 saveTime 降序, 最新在前面
+      list.sort((a, b) => b.saveTime.compareTo(a.saveTime));
+      out.add(list.first);
+      map[key] = list;
+    });
+    // 整个列表也按 saveTime 降序, 跟原来 "最近观看排前面" 的行为一致
+    out.sort((a, b) => b.saveTime.compareTo(a.saveTime));
+    return (out, map);
   }
 
   @override
@@ -151,7 +209,8 @@ class _HistoryGridState extends State<HistoryGrid>
       return _buildErrorState();
     }
 
-    if (_playRecords.isEmpty) {
+    // v1.0.48: 用去重后的列表判断空状态, 避免原列表还有但合并后空了
+    if (_dedupedRecords.isEmpty) {
       return _buildEmptyState();
     }
 
@@ -348,9 +407,10 @@ class _HistoryGridState extends State<HistoryGrid>
               crossAxisSpacing: spacing,
               mainAxisSpacing: isTablet ? 0 : 16,
             ),
-            itemCount: _playRecords.length,
+            // v1.0.48: 用去重后的列表, 同一电影多源只显示一张卡片
+            itemCount: _dedupedRecords.length,
             itemBuilder: (context, index) {
-              final playRecord = _playRecords[index];
+              final playRecord = _dedupedRecords[index];
 
               return VideoCard(
                 videoInfo: VideoInfo.fromPlayRecord(playRecord),
