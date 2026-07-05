@@ -1315,25 +1315,24 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 测单个源: 走 M3U8Service 完整测速, 失败 fallback 到 HEAD ping
+  ///
+  /// v1.0.68: 测速改回测**原始 URL**, 跟 CF 加速开关解耦.
+  ///
+  /// 之前 (v1.0.67) 测速走 worker 代理 URL (`buildProxiedUrl`):
+  ///   - 流程: client → worker → upstream 拉 m3u8 manifest + 测 .ts 段延迟 + 测 .ts 段下载速度
+  ///   - 一次测速要过 3~4 次 worker 转发, 外层 4s timeout 经常不够
+  ///   - 超时 → fallback HEAD ping → 只剩 ms, KB/s 拿不到 (用户截图就只看到 ms)
+  ///   - 而且 worker 挂了所有源都 unavailable, 没法选源
+  ///
+  /// 测速的本质是"挑源": 源 A 比源 B 快, 走不走 worker 都不变. CF 加速是
+  /// "代理层优化", 对所有源一视同仁, 不该耦合到测速流程.
+  ///   - 测速永远走原始 URL → 快、准, KB/s 能算出来, 跟 CF 开关无关
+  ///   - CF 加速是播放时的事: 真播 m3u8 + .ts 段时走 worker, 拿到的是
+  ///     worker 边缘缓存 / 跨地区加速 的好处
+  ///   - worker 配错不影响选源 (选源测的是源本身), 配错时播放才会暴露问题
   Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
     if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
-    final orig = s.episodes.first;
-    // v1.0.67: 不回退到原始 URL.
-    //
-    // 上一版 (v1.0.66) 试过 proxied 失败就回退原始 URL, 结果是"开不开 CF
-    // 测速结果一样" → 因为 proxied 失败 → 回退 orig → 等于没测 CF, 跟 CF off
-    // 走 orig 是同一个结果, 用户根本看不到 CF 加速有没有生效.
-    //
-    // 修法: CF 开关就是测速开关.
-    //   - CF on  → buildProxiedUrl 按 .m3u8 后缀选端点 → 测 worker URL,
-    //              worker 失败 = unavailable, 用户能立刻看到 CF 配错了
-    //              (比如 worker 只配了 /m3u8 端点, 测直链就一片红)
-    //   - CF off → 直接测原 URL, 跟 v1.0.45 之前行为一致
-    //
-    // 同时把 forceM3u8: true 去掉 (这个从 v1.0.66 就修了, 但用户之前没注意到):
-    // 之前所有源都被硬塞到 worker /m3u8, 直链 MP4 必然 worker 失败.
-    final url = UserDataService.buildProxiedUrl(orig);
-    return _testOneUrl(m3u8, url);
+    return _testOneUrl(m3u8, s.episodes.first);
   }
 
   /// v1.0.66: 单 URL 测速, 内部走 m3u8.getStreamInfo + HEAD fallback, 都套 4s 超时

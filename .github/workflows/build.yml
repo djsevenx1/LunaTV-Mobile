@@ -88,6 +88,39 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.68': `## 更新日志
+
+            ### 🐛 修复
+
+            - **开了 CF 加速后选源页只剩 ms, 不显示下载速度 ([player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: 启用 CF Worker 加速后, 选源页只看到 "263ms" "280ms" 这种
+                ping 数字, 看不到 KB/s 下载速度 (v1.0.45 加的 "720p · 1.2MB/s · 85ms"
+                显示格式被退化成只剩 ms)
+              - 根因:
+                1. v1.0.66 修"开 CF 全红"时把测速改成 \`buildProxiedUrl\` 走 worker
+                2. v1.0.67 用户反馈"开不开 CF 一样", 改成**只测 worker URL**
+                3. \`getStreamInfo\` 完整测速要过 3\~4 次 worker 转发
+                   (拉 m3u8 manifest + 测 .ts 段延迟 + 测 .ts 段下载速度)
+                4. 一次测速外层 4s timeout 经常不够 → 触发 fallback \`_fallbackHeadPing\`
+                5. fallback 只 HEAD 测一次 ms, **没有 downloadSpeed** → \`formatLoadSpeed()\`
+                   返回空 → 拼起来只剩 "Xms"
+              - 修法 ([player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart)):
+                1. **测速改回测原始 URL**, 跟 CF 加速开关解耦
+                2. 测速本质是"挑源": 源 A 比源 B 快, 走不走 worker 都不变,
+                   测原始 URL 才是源本身的物理速度
+                3. CF 加速是"代理层优化", 对所有源一视同仁, 不该耦合到测速流程
+                4. 测速走原始 URL 后 \`getStreamInfo\` 一次跑完 (3\~4 次直连请求, 没 worker
+                   中转), 4s timeout 完全够, KB/s 能算出来
+                5. CF 加速的"加速效果"体现在**播放时**: 播 m3u8 + .ts 段走 worker
+                   (worker 边缘缓存 + 跨地区分发), 那个走 \`buildProxiedUrl\` 的链路没动
+                6. worker 配错也不会影响选源 (选源测的是源本身), 配错时播放才会暴露问题
+              - 验证:
+                1. 装 v1.0.68 → 选源页打开
+                2. 每个源都显示 "720p · 1.2MB/s · 85ms" 这种完整格式 (v1.0.45 引入)
+                3. 跟开不开 CF 加速开关无关, 显示的都是源本身的物理速度
+                4. 真播的时候 (走 \`buildProxiedUrl\` 链路) 加速效果保留, 跟之前一样快
+
+            ---`,
               'v1.0.67': `## 更新日志
 
             ### 🐛 修复
