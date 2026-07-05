@@ -157,7 +157,7 @@ class _HeroBannerState extends State<HeroBanner> {
                         },
                         itemBuilder: (context, index) {
                           return _buildBannerItem(
-                              widget.items[index], isDarkMode, _bannerWidth);
+                              widget.items[index], isDarkMode, bannerWidth);
                         },
                       ),
 
