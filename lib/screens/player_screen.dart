@@ -345,7 +345,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
-  /// 根据当前位置更新跳过按钮的显示状态
+  /// 根据当前位置更新跳过按钮的显示状态 + v1.0.57: 自动 seek 跳片头/片尾
+  ///
+  /// 之前是显示"跳过片头"按钮让用户手动点 seek
+  /// v1.0.57 改成自动 seek, 用户不需要点任何按钮
+  /// 用户拖动进度条时不自动跳 (避免抢用户操作), 靠 _scrubbingValue 守门
+  ///
+  /// 触发条件 (跟之前按钮显示条件一致, 用户已经在设置里配了
+  /// _skipIntroEnd / _skipOutroStart > 0 才生效):
+  /// - shouldShowIntro: posSec < _skipIntroEnd && posSec > 1
+  ///   → 自动 seek 到 _skipIntroEnd (跳过片头)
+  /// - shouldShowOutro: (durSec - posSec) < _skipOutroStart && (durSec - posSec) > 1
+  ///   → 自动 seek 到 durSec - _skipOutroStart (跳过片尾)
   void _updateSkipButtonVisibility() {
     final posSec = _currentPosition.inSeconds;
     final durSec = _currentDuration.inSeconds;
@@ -355,6 +366,20 @@ class _PlayerScreenState extends State<PlayerScreen>
         posSec > 0 &&
         (durSec - posSec) < _skipOutroStart &&
         (durSec - posSec) > 1;
+
+    // v1.0.57: 自动 seek 跳片头/片尾
+    // _scrubbingValue != null 表示用户在拖动进度条, 不抢用户操作
+    if (_scrubbingValue == null) {
+      if (shouldShowIntro) {
+        _player.seek(Duration(seconds: _skipIntroEnd));
+        return; // 本次只跳一个, 跳完下一次 _updateSkipButtonVisibility 重新判断
+      }
+      if (shouldShowOutro && durSec > 0) {
+        _player.seek(Duration(seconds: durSec - _skipOutroStart));
+        return;
+      }
+    }
+
     if (shouldShowIntro != _showSkipIntro ||
         shouldShowOutro != _showSkipOutro) {
       setState(() {
@@ -363,21 +388,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
     }
   }
-
-  /// 跳过片头
-  void _skipIntro() {
-    if (_skipIntroEnd > 0) {
-      _player.seek(Duration(seconds: _skipIntroEnd));
-    }
-  }
-
-  /// 跳过片尾
-  void _skipOutro() {
-    final durSec = _currentDuration.inSeconds;
-    if (durSec > 0 && _skipOutroStart > 0) {
-      _player.seek(Duration(seconds: durSec - _skipOutroStart));
-    }
-  }
+  // v1.0.57: _skipIntro / _skipOutro 函数删了, 自动 seek 逻辑在
+  // _updateSkipButtonVisibility 里, 不需要外部入口
 
   /// 打开跳过片头片尾设置弹窗
   Future<void> _showSkipSettingsDialog() async {
@@ -2660,64 +2672,14 @@ class _PlayerScreenState extends State<PlayerScreen>
         _buildLunaTopBar(),
         // 底部毛玻璃控制栏 (横屏改短)
         _buildLunaBottomBar(),
-        // 跳过片头按钮(右下角浮层)
-        if (_showSkipIntro && _isControlsVisible)
-          Positioned(
-            right: 16,
-            bottom: 100,
-            child: _skipButton('跳过片头', kLunaTheme, _skipIntro),
-          ),
-        // 跳过片尾按钮(右下角浮层)
-        if (_showSkipOutro && _isControlsVisible)
-          Positioned(
-            right: 16,
-            bottom: 100,
-            child: _skipButton(
-                '跳过片尾', const Color(0xFF3B82F6), _skipOutro),
-          ),
-        // 中央双圆快进/快退 (放在最上层, 避免被顶部栏/底部栏/跳过按钮遮挡)
+        // v1.0.57: 跳过片头/片尾改成自动 seek, 不再需要右下角浮层按钮
+        // 之前是 _showSkipIntro/_showSkipOutro 控制的浮层按钮, 用户点
+        // 触发 _skipIntro/_skipOutro
+        // 现在 _updateSkipButtonVisibility 自动 seek 跳, 按钮删了
+        // 用户如果想看片头/片尾, 在设置里把 _skipIntroEnd/_skipOutroStart 改 0
+        // 中央双圆快进/快退 (放在最上层, 避免被顶部栏/底部栏遮挡)
         _buildSideSeekButtons(),
       ],
-    );
-  }
-
-  /// 跳过片头/片尾的浮层按钮
-  Widget _skipButton(String label, Color color, VoidCallback onTap) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.92),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.fast_forward, color: Colors.white, size: 18),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 

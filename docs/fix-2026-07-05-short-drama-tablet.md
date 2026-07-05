@@ -1426,3 +1426,80 @@ v1.0.56 修了**未来**的切集保存, 但**已存在的云端脏数据**
 - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - _playEpisode 切集保存挪到 setState 之前
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.55+1 → 1.0.56+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.56 changelog
+
+---
+
+# v1.0.57 · 片头片尾自动切换 (不再需要手动点)
+
+## 现象
+
+用户反馈:
+
+> 片头片位要自动切换不要手动点
+
+之前: 视频播到片头/片尾时, 右下角浮层显示"跳过片头" / "跳过片尾" 按钮,
+用户要手动点一下按钮才会 seek 跳过去。
+
+现在: 配置 \_skipIntroEnd / \_skipOutroStart > 0 时, **自动 seek** 到
+片头结束/片尾开始, 不再需要手动点。
+
+## 修法
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart)
+`_updateSkipButtonVisibility` 里把"显示按钮"改成"自动 seek":
+
+```dart
+// v1.0.57 修法:
+if (_scrubbingValue == null) {
+  if (shouldShowIntro) {
+    _player.seek(Duration(seconds: _skipIntroEnd));
+    return;
+  }
+  if (shouldShowOutro && durSec > 0) {
+    _player.seek(Duration(seconds: durSec - _skipOutroStart));
+    return;
+  }
+}
+```
+
+触发条件跟之前按钮显示条件完全一致 (posSec < _skipIntroEnd && posSec > 1
+等), 用户已经在设置里配了 \_skipIntroEnd / \_skipOutroStart > 0 才生效
+(配 0 = 不跳片头/片尾, 看成完整版)。
+
+## 关键设计
+
+1. **用户拖动进度条时不自动跳**, 靠 `_scrubbingValue != null` 守门
+   - 用户故意拖回片头/片尾看时不被抢操作
+   - 拖动松手后 \_scrubbingValue 变 null, 下次 \_updateSkipButtonVisibility
+     可能再次触发 (这是符合用户"自动跳"期望的)
+2. **不会反复 seek**: seek 完 pos 跳到 \_skipIntroEnd / durSec - \_skipOutroStart,
+   下次 \_updateSkipButtonVisibility 算出 shouldShow=false, 不再触发
+3. **dead code 删了**:
+   - 右下角浮层按钮 (Positioned + \_skipButton)
+   - \_skipIntro / \_skipOutro 函数 (自动 seek 写在
+     \_updateSkipButtonVisibility 里, 不需要外部入口)
+4. **配置保留**: \_skipIntroEnd / \_skipOutroStart 仍存在, 用户在设置
+   弹窗里可以改
+
+## 触发链 (片头场景)
+
+1. 打开第1集, video open 后 pos=0, 1, 2...
+2. posSec=2 时 shouldShowIntro=true, \_scrubbingValue=null
+3. 自动 `_player.seek(90s)` 跳到片头结束位置
+4. 下次 `_updateSkipButtonVisibility` 算出 shouldShowIntro=false
+   (posSec=90 > _skipIntroEnd=90 守门不过), 不再触发
+5. 视频从 90s 开始播
+
+## 触发链 (片尾场景)
+
+1. 视频播到剩 25s 时, shouldShowOutro=true
+2. 自动 `_player.seek(durSec - _skipOutroStart)` 跳到片尾开始位置
+   (假设 _skipOutroStart=30, dur=1800, seek 到 1770)
+3. 视频从 1770 开始播, 到 1800 触发 v1.0.55 修的
+   `_autoPlayNextEpisode` (pos >= dur - 1.5s), 切下一集 ✓
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - _updateSkipButtonVisibility 改成自动 seek, 删按钮 UI 和 dead code
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.56+1 → 1.0.57+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.57 changelog
