@@ -251,11 +251,11 @@ class _HeroBannerState extends State<HeroBanner> {
             builder: (context, snapshot) {
               final imageUrl = snapshot.data ?? item.imageUrl;
               final headers = getImageRequestHeaders(imageUrl, item.source);
-              // 按 banner 实际显示尺寸 (build 时记录的 _bannerWidth) × devicePixelRatio 解码,
+              // 按 banner 实际显示尺寸 (build 时计算的 bannerWidth) × devicePixelRatio 解码,
               // 平板上 banner 跨满屏,源图被放大到 2~3 倍很常见,
               // 必须用 FilterQuality.high 做高质量重采样,否则马赛克很明显
               final dpr = MediaQuery.of(context).devicePixelRatio;
-              final bannerPx = (_bannerWidth * dpr).round();
+              final bannerPx = (bannerWidth * dpr).round();
               return CachedNetworkImage(
                 imageUrl: imageUrl,
                 fit: BoxFit.cover,
