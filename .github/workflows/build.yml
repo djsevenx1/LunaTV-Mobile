@@ -88,6 +88,34 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.48': `## 更新日志
+
+            ### 🐛 修复
+
+            - **编译报错 (v1.0.45 引入, v1.0.48 修)**
+              - 现象: v1.0.45 push 触发 CI 构建, Dart 编译挂
+              - 真实错误: [m3u8_service.dart](file:///workspace/lib/services/m3u8_service.dart) \`import 'package:dio/dio.dart'\`,
+                但 [pubspec.yaml](file:///workspace/pubspec.yaml) 和 [pubspec.lock](file:///workspace/pubspec.lock) 里都没有 \`dio\` 依赖
+              - 根因: v1.0.45 接 Selene 测速时用 dio 替代了之前的简单 HTTP 请求, 但漏把 dio 加到 pubspec
+              - 修复 (本版本): [pubspec.yaml](file:///workspace/pubspec.yaml) 追加 \`dio: ^5.7.0\`, 走 pub get 自动锁到 5.7.x
+
+            ### 🎨 体验改进
+
+            - **首页幻灯片高度 (平板模式加高)**
+              - 现象: v1.0.40 把 banner 从 42~45vh 缩到 28~32vh 是为了控清晰度
+                (源图 600×900 被强拉到 banner 宽度的放大倍率从 1~2x 变 3~6x, 平板看着糊)
+              - 现在 v1.0.39 已经把豆瓣图从 \`l_ratio_poster\` 升到 \`raw\` (1080×1620 起),
+                1~2x 放大不糊, 高度限制可以松
+              - 修复 (本版本): [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) 平板档加高
+                - <640 (手机): 28vh (不变)
+                - 640~768 (sm): 30vh (不变)
+                - 768~1024 (md, 平板竖): 32vh → **40vh**
+                - ≥1024 (lg, 平板横/PC): 32vh → **45vh**
+                - clamp 上限 360 → 520 配合加高
+              - 效果: 平板上 banner 看着更舒展, 海报不被压扁
+
+            ---`,
+
               'v1.0.47': `## 更新日志
 
             ### 🐛 修复
