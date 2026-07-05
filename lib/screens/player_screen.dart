@@ -6,8 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 
-import '../services/log_service.dart';
-import 'debug_log_screen.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
@@ -513,9 +511,43 @@ class _PlayerScreenState extends State<PlayerScreen>
                       onChanged: (v) => setDialogState(() => autoOutro = v),
                     ),
                     const Divider(color: Colors.white24, height: 24),
-                    Text(
-                      '片头结束时间: ${intro > 0 ? _formatSkipTime(intro) : "未设置"}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    // v1.0.64: slider 旁加 "使用当前时间" 按钮, 一键取当前播放
+                    // 位置作为片头结束/片尾提前秒数. 流程: 暂停在边界 → 开弹窗 →
+                    // 点按钮. 弹窗显示当前秒数方便核对.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '片头结束时间: ${intro > 0 ? _formatSkipTime(intro) : "未设置"}',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 14),
+                          ),
+                        ),
+                        Text(
+                          '当前 ${_formatSkipTime(_currentPosition.inSeconds)}',
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 11),
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 0),
+                            minimumSize: const Size(0, 28),
+                            tapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: const Color(0xFF22C55E),
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              intro =
+                                  _currentPosition.inSeconds.clamp(0, 300);
+                            });
+                          },
+                          child: const Text('使用当前时间',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
                     ),
                     Slider(
                       value: intro.toDouble(),
@@ -528,25 +560,60 @@ class _PlayerScreenState extends State<PlayerScreen>
                           setDialogState(() => intro = v.round()),
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      '片尾提前时间: ${outro > 0 ? _formatSkipTime(outro) : "未设置"}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '片尾提前时间: ${outro > 0 ? _formatSkipTime(outro) : "未设置"}',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 14),
+                          ),
+                        ),
+                        Text(
+                          '当前剩 ${_formatSkipTime(_currentDuration.inSeconds - _currentPosition.inSeconds)}',
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 11),
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 0),
+                            minimumSize: const Size(0, 28),
+                            tapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: const Color(0xFF3B82F6),
+                          ),
+                          onPressed: () {
+                            setDialogState(() {
+                              // 片尾提前 = 距结尾还剩多少秒
+                              final remain = _currentDuration.inSeconds -
+                                  _currentPosition.inSeconds;
+                              outro = remain.clamp(0, 300);
+                            });
+                          },
+                          child: const Text('使用当前时间',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
                     ),
                     Slider(
                       value: outro.toDouble(),
                       min: 0,
                       max: 300,
                       divisions: 300,
-                      activeColor: const Color(0xFF22C55E),
+                      activeColor: const Color(0xFF3B82F6),
                       label: outro > 0 ? _formatSkipTime(outro) : '关闭',
                       onChanged: (v) =>
                           setDialogState(() => outro = v.round()),
                     ),
                     // v1.0.63: 60s=1分钟, 提示文案同步用分钟单位
+                    // v1.0.64: 补一行"如何用使用当前时间按钮"的提示
                     const SizedBox(height: 8),
                     const Text(
                       '提示: 有的源没有片头/片尾, 建议先关掉自动, 看到按钮再点, 确认有片头再开自动\n'
-                      '单位: 60 秒 = 1 分钟 (0~5 分钟可调)',
+                      '单位: 60 秒 = 1 分钟 (0~5 分钟可调)\n'
+                      '用法: 暂停在片头结束 / 片尾开始位置 → 开此弹窗 → 点"使用当前时间"',
                       style: TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                   ],
@@ -973,17 +1040,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
 
     final key = '${source.source}+${source.id}';
-    // v1.0.62 调试日志
-    LogService.instance.info('Save', '_saveCurrentProgress '
-        'force=$force, key=$key, playTime=$playTime, '
-        '_currentPosition=$_currentPosition, '
-        '_firstRecordSaved=$_firstRecordSaved, '
-        '_lastSavedKey=$_lastSavedKey, '
-        'state.playing=${_player.state.playing}, '
-        'state.position=${_player.state.position}');
     // 没播放过(skip) || 同一集还没开始播且已存过(避免启动时连发两条空)
     if (!force && _lastSavedKey == key && playTime == 0 && _firstRecordSaved) {
-      LogService.instance.info('Save', '  ↩ early return (playTime=0 已存过)');
       return;
     }
 
@@ -1061,13 +1119,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   } else if (widget.videoInfo.playTime > 0) {
     _pendingResumeAt = Duration(milliseconds: widget.videoInfo.playTime);
   }
-  LogService.instance.info('Player', '_loadSources resume: '
-      'videoInfo.title="${widget.videoInfo.title}", '
-      'videoInfo.source="${widget.videoInfo.source}", '
-      'videoInfo.index=${widget.videoInfo.index}, '
-      'videoInfo.playTime=${widget.videoInfo.playTime}ms, '
-      '_pendingResumeAt=$_pendingResumeAt, '
-      'resume(from cloud)=$resume');
 
     try {
       final results = await ApiService.fetchSourcesData(title);
@@ -1407,19 +1458,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       _phase = 'playing';
     });
 
-    // v1.0.62 调试日志: 记录 _playEpisode 入口的关键参数
-    LogService.instance.info('Player', '▶ _playEpisode($index) start, '
-        'resumeAt=$resumeAt, _currentEpisodeIndex=$_currentEpisodeIndex, '
-        '_pendingResumeAt=$_pendingResumeAt, '
-        'url=${url.length > 60 ? "${url.substring(0, 60)}..." : url}');
     try {
       await _player.stop();
-      LogService.instance.info('Player', '  ✓ _player.stop() done');
       await _player.open(Media(url));
-      LogService.instance.info('Player', '  ✓ _player.open() done, '
-          'state.playing=${_player.state.playing}, '
-          'state.buffering=${_player.state.buffering}, '
-          'state.position=${_player.state.position}');
       // 云记忆恢复
       //
       // v1.0.61 fix: v1.0.60 等了 position stream, 但根因是 player 在
@@ -1440,52 +1481,24 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 1. 显式 play 强制进入 playing 状态
         try {
           await _player.play();
-          LogService.instance.info('Player', '  ✓ _player.play() done, '
-              'state.playing=${_player.state.playing}');
-        } catch (e) {
-          LogService.instance.warn('Player', '  ✗ _player.play() failed: $e');
-        }
+        } catch (_) {}
         // 2. 等 buffering 完成
-        LogService.instance.info('Player',
-            '  ⏳ _waitForBufferingComplete start, '
-            'state.buffering=${_player.state.buffering}');
         await _waitForBufferingComplete(timeout: const Duration(seconds: 5));
-        LogService.instance.info('Player',
-            '  ✓ _waitForBufferingComplete done, '
-            'state.buffering=${_player.state.buffering}, '
-            'state.playing=${_player.state.playing}, '
-            'state.position=${_player.state.position}');
         // 3. seek
         try {
           await _player.seek(resumeAt);
-          LogService.instance.info('Player',
-              '  ✓ _player.seek($resumeAt) done, '
-              'state.position=${_player.state.position}');
-        } catch (e) {
-          LogService.instance.warn('Player', '  ✗ _player.seek failed: $e');
-        }
+        } catch (_) {}
         // 4. 验证: 用 position stream 检查 position 是否到 resumeAt 附近,
         // 250ms 内没到就重试一次
         await Future.delayed(const Duration(milliseconds: 250));
         final ok = await _verifySeekByStream(resumeAt);
-        LogService.instance.info('Player',
-            '  ${ok ? "✓" : "✗"} _verifySeekByStream result=$ok, '
-            'state.position=${_player.state.position}');
         if (!ok) {
           try {
             await _player.seek(resumeAt);
-            LogService.instance.info('Player',
-                '  ↻ retry _player.seek($resumeAt), '
-                'state.position=${_player.state.position}');
-          } catch (e) {
-            LogService.instance.warn('Player', '  ✗ retry seek failed: $e');
-          }
+          } catch (_) {}
           // 再验证一次
           await Future.delayed(const Duration(milliseconds: 250));
-          final ok2 = await _verifySeekByStream(resumeAt);
-          LogService.instance.info('Player',
-              '  ${ok2 ? "✓" : "✗"} retry verify result=$ok2, '
-              'state.position=${_player.state.position}');
+          await _verifySeekByStream(resumeAt);
         }
       }
       if (!mounted) return;
@@ -1783,26 +1796,15 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                GestureDetector(
-                  // v1.0.62 调试入口: 长按视频标题打开调试日志
-                  onLongPress: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const DebugLogScreen(),
-                      ),
-                    );
-                  },
-                  child: Text(
-                    widget.videoInfo.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : Colors.black,
-                      height: 1.3,
-                    ),
+                Text(
+                  widget.videoInfo.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : Colors.black,
+                    height: 1.3,
                   ),
                 ),
                 const SizedBox(height: 8),

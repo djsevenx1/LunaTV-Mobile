@@ -88,6 +88,39 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.64': `## 更新日志
+
+            ### 🛠️ 清理
+
+            - **移除调试日志界面 (v1.0.62 临时加的, 修好进度条记忆后用不上)**
+              - 删除 [log_service.dart](file:///workspace/lib/services/log_service.dart) (500 条循环缓冲 LogService)
+              - 删除 [debug_log_screen.dart](file:///workspace/lib/screens/debug_log_screen.dart) (实时日志查看 UI)
+              - 移除 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 里
+                的所有 \`LogService.instance.*\` 调用
+              - 移除"长按视频标题打开调试日志"入口 (连同 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart)
+                里的 GestureDetector + 标题长按)
+              - 移除 [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 顶部
+                的 \`import '../services/log_service.dart'\` 和
+                \`import 'debug_log_screen.dart';\`
+
+            ### 💄 优化
+
+            - **跳过片头/片尾弹窗加"使用当前时间"按钮 ([player_screen.dart#_showSkipSettingsDialog](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: 之前只能拖 slider 设值, 不精确, 用户要算"片头到几分几秒结束"
+                然后拖到对应位置, 体验差
+              - v1.0.64 改:
+                1. 每个 slider 上方一行, 左边是 label "片头结束时间: X" / "片尾提前时间: X",
+                   右边小灰字 "当前 X 分 Y 秒" / "当前剩 X 分 Y 秒" 提示当前播放位置
+                2. 最右边一个绿色 / 蓝色 "使用当前时间" 按钮
+                   - 片头按钮: 把 \`_skipIntroEnd\` 设为 \`_currentPosition.inSeconds\` (clamp 0\~300)
+                   - 片尾按钮: 把 \`_skipOutroStart\` 设为 \`duration - currentPosition\` (clamp 0\~300),
+                     即"距结尾还剩多少秒"作为提前时间
+                3. 提示文案补一行"用法: 暂停在片头结束 / 片尾开始位置 → 开此弹窗 → 点使用当前时间"
+                4. 流程: 暂停视频在片头 / 片尾边界 → 开弹窗 → 点按钮 → 保存
+                5. 弹窗是 modal 不会自动续播, 打开时 player.state.position 已稳定,
+                   不会因为用户在弹窗里操作导致位置漂移
+
+            ---`,
               'v1.0.63': `## 更新日志
 
             ### 🐛 修复
