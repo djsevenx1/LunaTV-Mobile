@@ -388,44 +388,60 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 const Divider(color: Colors.white24, height: 1),
                 const SizedBox(height: 12),
                 Flexible(
-                  child: GridView.builder(
-                    shrinkWrap: true,
-                    itemCount: source.episodes.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 5,
-                      childAspectRatio: 1.4,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemBuilder: (ctx, index) {
-                      final isCurrent = index == _currentEpisodeIndex;
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _playEpisode(index);
-                        },
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: isCurrent
-                                ? const Color(0xFF22C55E)
-                                : const Color(0xFF374151),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '${index + 1}',
-                            style: TextStyle(
-                              color: isCurrent
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontSize: 14,
-                              fontWeight: isCurrent
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                            ),
-                          ),
+                  child: LayoutBuilder(
+                    builder: (ctx, constraints) {
+                      // 底部抽屉选集: 跟 detail 选集同样的列数策略, 平板上避免卡片过大
+                      final w = constraints.maxWidth;
+                      int crossAxisCount;
+                      if (w < 500) {
+                        crossAxisCount = 5;
+                      } else if (w < 800) {
+                        crossAxisCount = 8;
+                      } else if (w < 1100) {
+                        crossAxisCount = 10;
+                      } else {
+                        crossAxisCount = 12;
+                      }
+                      return GridView.builder(
+                        shrinkWrap: true,
+                        itemCount: source.episodes.length,
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          childAspectRatio: 1.2,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
                         ),
+                        itemBuilder: (ctx, index) {
+                          final isCurrent = index == _currentEpisodeIndex;
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _playEpisode(index);
+                            },
+                            child: Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isCurrent
+                                    ? const Color(0xFF22C55E)
+                                    : const Color(0xFF374151),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${index + 1}',
+                                style: TextStyle(
+                                  color: isCurrent
+                                      ? Colors.white
+                                      : Colors.white70,
+                                  fontSize: 14,
+                                  fontWeight: isCurrent
+                                      ? FontWeight.w700
+                                      : FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       );
                     },
                   ),
@@ -1421,77 +1437,105 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             )
           else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: EdgeInsets.zero,
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 6,
-                childAspectRatio: 1.2,
-                mainAxisSpacing: 6,
-                crossAxisSpacing: 6,
-              ),
-              itemCount: source.episodes.length,
-              itemBuilder: (context, index) {
-                final isCurrent = index == _currentEpisodeIndex;
-                final title = index < source.episodesTitles.length
-                    ? source.episodesTitles[index]
-                    : '${index + 1}';
-                return InkWell(
-                  onTap: () {
-                    // 点击集数直接开始播放
-                    if (index != _currentEpisodeIndex || _phase != 'playing') {
-                      _playEpisode(index);
-                    } else {
-                      setState(() {
-                        _currentEpisodeIndex = index;
-                      });
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: isCurrent
-                          ? const LinearGradient(
-                              colors: [
-                                Color(0xFF22C55E),
-                                Color(0xFF10B981)
-                              ],
-                            )
-                          : null,
-                      color: !isCurrent
-                          ? (isDark
-                              ? Colors.white.withOpacity(0.06)
-                              : Colors.black.withOpacity(0.04))
-                          : null,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                // 平板上宽度很大, 写死 6 列会让每张卡片巨大、文字居中显空,
+                // 按宽度动态算列数: 手机 6 列(卡片~50dp), 平板 8~12 列
+                final width = constraints.maxWidth;
+                int crossAxisCount;
+                if (width < 600) {
+                  crossAxisCount = 6; // 手机
+                } else if (width < 900) {
+                  crossAxisCount = 8; // 小平板
+                } else if (width < 1200) {
+                  crossAxisCount = 10; // 中平板
+                } else {
+                  crossAxisCount = 12; // 大平板/PC
+                }
+                // 卡片宽度 = (width - spacing*(cols-1)) / cols
+                const spacing = 6.0;
+                final cardW =
+                    (width - spacing * (crossAxisCount - 1)) / crossAxisCount;
+                // 卡片高度按宽度等比例: 宽 < 80dp 的按 1.2 比例(略宽), 否则接近方形
+                final childAspectRatio = cardW < 80 ? 1.2 : 1.0;
+                // 字号也按卡片宽度微调: 小卡片 11, 大卡片 12
+                final fontSize = cardW < 80 ? 11.0 : 12.0;
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
+                  gridDelegate:
+                      SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    childAspectRatio: childAspectRatio,
+                    mainAxisSpacing: spacing,
+                    crossAxisSpacing: spacing,
+                  ),
+                  itemCount: source.episodes.length,
+                  itemBuilder: (context, index) {
+                    final isCurrent = index == _currentEpisodeIndex;
+                    final title = index < source.episodesTitles.length
+                        ? source.episodesTitles[index]
+                        : '${index + 1}';
+                    return InkWell(
+                      onTap: () {
+                        // 点击集数直接开始播放
+                        if (index != _currentEpisodeIndex ||
+                            _phase != 'playing') {
+                          _playEpisode(index);
+                        } else {
+                          setState(() {
+                            _currentEpisodeIndex = index;
+                          });
+                        }
+                      },
                       borderRadius: BorderRadius.circular(6),
-                      border: !isCurrent
-                          ? Border.all(
-                              color: isDark
-                                  ? Colors.white.withOpacity(0.08)
-                                  : Colors.black.withOpacity(0.06),
-                            )
-                          : null,
-                    ),
-                    alignment: Alignment.center,
-                    child: Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Text(
-                        title,
-                        maxLines: 2,
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: isCurrent
-                              ? Colors.white
-                              : (isDark ? Colors.white70 : Colors.black87),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: isCurrent
+                              ? const LinearGradient(
+                                  colors: [
+                                    Color(0xFF22C55E),
+                                    Color(0xFF10B981)
+                                  ],
+                                )
+                              : null,
+                          color: !isCurrent
+                              ? (isDark
+                                  ? Colors.white.withOpacity(0.06)
+                                  : Colors.black.withOpacity(0.04))
+                              : null,
+                          borderRadius: BorderRadius.circular(6),
+                          border: !isCurrent
+                              ? Border.all(
+                                  color: isDark
+                                      ? Colors.white.withOpacity(0.08)
+                                      : Colors.black.withOpacity(0.06),
+                                )
+                              : null,
+                        ),
+                        alignment: Alignment.center,
+                        child: Padding(
+                          padding: const EdgeInsets.all(2),
+                          child: Text(
+                            title,
+                            maxLines: 2,
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: fontSize,
+                              fontWeight: FontWeight.w600,
+                              color: isCurrent
+                                  ? Colors.white
+                                  : (isDark
+                                      ? Colors.white70
+                                      : Colors.black87),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 );
               },
             ),

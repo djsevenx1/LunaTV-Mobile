@@ -79,6 +79,31 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.38': `## 更新日志
+
+            ### 🐛 修复
+
+            - **平板选集卡片过大**
+              - 现象: iPad 上「选集」区每张卡片宽度约 200dp、文字 11px 居中显空, 看着像 12 个大格子稀疏排开
+                - [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) \`_buildEpisodeSection\` 写死 \`crossAxisCount: 6\`, 平板 1300+ 宽度下每张卡片巨大
+                - 底部抽屉选集同样写死 \`crossAxisCount: 5, childAspectRatio: 1.4\`, 平板打开也是几个大块
+              - 修复: 套 [LayoutBuilder](file:///workspace/lib/screens/player_screen.dart), 按宽度动态算列数
+                - 详情选集: <600 6 列 / <900 8 列 / <1200 10 列 / ≥1200 12 列
+                - 卡片宽 < 80dp 时 \`childAspectRatio\` 1.2 + 字号 11; 否则 1.0 + 字号 12
+                - 底部抽屉选集: <500 5 列 / <800 8 列 / <1100 10 列 / ≥1100 12 列
+              - 结果: 平板选集变成 12 列紧凑方形, 一次能看 24 集, 不再是几个大空格
+
+            ### 🎨 体验改进
+
+            - **首页轮播图海报清晰度**
+              - 现象: iPad 上一打开首屏 hero banner 海报明显发糊, 字体边缘能看出马赛克
+              - 原因: [hero_banner.dart](file:///workspace/lib/widgets/hero_banner.dart) [CachedNetworkImage](file:///workspace/lib/widgets/hero_banner.dart) 用默认 \`FilterQuality.medium\`, 源图被放大到 2~3 倍时重采样质量不够
+              - 修复:
+                - 加 \`filterQuality: FilterQuality.high\` (高质量重采样)
+                - 加 \`gaplessPlayback: true\` (切图时无白闪)
+                - 把 \`memCacheWidth\` 改成 banner 实际显示宽度 (减掉左右 12 边距), 跟之前用整屏宽略有差异, 解码更精准
+
+            ---`,
               'v1.0.37': `## 更新日志
 
             ### 🎨 体验改进
