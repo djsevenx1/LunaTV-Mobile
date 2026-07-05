@@ -613,6 +613,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _volumeHideTimer?.cancel();
     _hideControlsTimer?.cancel();
     _dragStartVolume = _currentVolume;
+    _totalDragVolumeDelta = 0; // v1.0.49: 重置累计 delta
     setState(() {
       _isControlsVisible = true;
       _showVolumeIndicator = true;
@@ -620,12 +621,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _onVolumeSwipeUpdate(DragUpdateDetails details) {
+    // v1.0.49: 同亮度手势, 用累计 delta + 1.0 灵敏度
+    // 旧版用单帧 delta + 固定基线, 慢滑会"抖" (每帧 dy 小, 音量来回跳)
+    _totalDragVolumeDelta += -details.delta.dy; // 上滑增音量
     final screenHeight = MediaQuery.of(context).size.height;
-    // 上滑增加音量 (dy 为负 = 上滑), 整屏 1:1 映射
-    final delta = -(details.delta.dy / screenHeight) * 2.0;
+    final normalized = (_totalDragVolumeDelta / screenHeight) * 1.0;
     setState(() {
-      _currentVolume = ((_dragStartVolume ?? _currentVolume) + delta)
-          .clamp(0.0, 1.0);
+      _currentVolume =
+          (_dragStartVolume! + normalized).clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
     // v1.0.44: v0.2.2 / 2.0.8 API 是 VolumeController() 实例, setVolume 不带 showSystemUI 参数
