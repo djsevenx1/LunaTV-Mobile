@@ -168,8 +168,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
     // 监听播放位置和总时长，用于跳过片头片尾 / 自动播下一集
     _positionSub = _player.streams.position.listen((pos) {
+      if (!mounted) return;
       if (_scrubbingValue == null) {
         _currentPosition = pos;
+        // v1.0.52: 实时刷新时间文字 + 进度条
+        // 之前只更新 _currentPosition 但不 setState, 底部栏的
+        // "${pos} / ${dur}" 时间文字 + 进度条 thumb 永远停在打开时那一帧,
+        // 只有 _updateSkipButtonVisibility 命中 visibility 变化时才会 setState
+        // (而且只切 skip 按钮, 不会重算时间文字)
+        if (_isControlsVisible) {
+          setState(() {});
+        }
         _updateSkipButtonVisibility();
         // 自动播下一集: 距离结尾 < 1.5s 且还没自动切过
         _maybeAutoPlayNext();

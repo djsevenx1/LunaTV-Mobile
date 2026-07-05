@@ -1007,3 +1007,85 @@ void _onVolumeSwipeUpdate(DragUpdateDetails details) {
 - 分支: main HEAD
 - 版本: 1.0.45+1
 - 触发: `git push origin v1.0.45` → Actions 跑 Build APK → 成功后自动创建 release
+
+---
+
+# v1.0.52 · 主播放器底部时间/进度条不实时跳动
+
+## 现象
+
+用户安装 v1.0.51 后反馈:
+
+> 还有播放控件时间不会实时跳动
+
+具体表现:
+- 视频在播, 底部控制栏的时间文字 (如 "01:23 / 45:00") 一直停在打开时那一帧
+- 进度条 thumb 不移动
+- 时间秒数不跳
+- 拖动快进/快退 → 跳转新位置后能更新一次, 然后又卡住
+- 唯一会动的: skip intro / outro 浮窗出现/消失那一瞬
+
+## 排查
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart#L170) 的
+position 流监听器:
+
+```dart
+_positionSub = _player.streams.position.listen((pos) {
+  if (_scrubbingValue == null) {
+    _currentPosition = pos;
+    _updateSkipButtonVisibility();
+    _maybeAutoPlayNext();
+  }
+});
+```
+
+只更新 `_currentPosition` 字段, **不调用 setState**, 所以 UI 不会 rebuild。
+
+`_updateSkipButtonVisibility()` 内部有 setState 但有守门:
+
+```dart
+if (shouldShowIntro != _showSkipIntro ||
+    shouldShowOutro != _showSkipOutro) {
+  setState(() { ... });
+}
+```
+
+大部分情况下 skip 按钮 visibility 没变化, 不触发 rebuild, 时间文字
+和进度条就停在那。
+
+对比 [mobile_player_controls.dart](file:///workspace/lib/widgets/mobile_player_controls.dart#L138-L143)
+和 [pc_player_controls.dart](file:///workspace/lib/widgets/pc_player_controls.dart#L160-L164):
+
+```dart
+// mobile / pc controls 都用这模板
+widget.player.stream.position.listen((_) {
+  if (mounted && _controlsVisible && !_isSeekingViaSwipe) {
+    setState(() {});
+  }
+});
+```
+
+直接在 position 流里 setState, UI 实时刷新。
+
+`_buildLunaBottomBar` / `_buildLunaProgressBar` 都用 `_currentPosition` 算
+时间文字和进度条 widthFactor, 没有 setState 触发 rebuild, 永远显示打开
+那一帧的值。
+
+## 修复
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart#L170) 监听器
+加 `if (_isControlsVisible) setState(() {})`, 跟 mobile / pc controls
+同模板:
+
+- 控件可见时: setState 触发 rebuild, 时间和进度条实时更新
+- 控件隐藏时: 不 setState (没东西要刷新, 避免浪费)
+- 拖动进度条时: `_scrubbingValue != null` 跳过 setState, 不会跟用户拖动抢值
+
+media_kit position 流 ~4Hz (每 250ms 一次), setState 这个频率完全可接受。
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - position 流监听器加 setState
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.51+1 → 1.0.52+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.52 changelog
