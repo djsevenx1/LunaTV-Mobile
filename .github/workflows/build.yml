@@ -88,6 +88,45 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.59': `## 更新日志
+
+            ### 🐛 修复
+
+            - **首页"继续观看"卡片进度条记忆失效, 永远从 0 开始**
+              - 现象: v1.0.56 修了存路径 (saved before setState) 后, 用户看 12 min
+                退出, 再次从首页"继续观看"卡片点进去, 视频还是从 0 开始,
+                没有 resume 到 12 min. 但从"播放历史"页面点进去是正常的.
+              - 根因 ([continue_watching_section.dart](file:///workspace/lib/widgets/continue_watching_section.dart)):
+                - 缓存层是对的: \`_saveCurrentProgress\` 写盘 → \`_addPlayRecordToCache\`
+                  同步更新内存缓存 → \`PageCacheService\` 里 play_records 的
+                  最新 playTime 是正确的
+                - \`ContinueWatchingSection.refreshPlayRecords()\` (从播放页
+                  返回时被 \_refreshOnResume 调用) 只 setState 了
+                  \`_playRecords = cachedRecords\`, 忘了同步 \`_dedupedRecords\`
+                  和 \`_recordSourceMap\`
+                - 卡片 itemBuilder 读的是 \`_dedupedRecords[index]\`, 这个
+                  还是 \_loadPlayRecords (initState 一次性调用) 第一次拉的
+                  旧数据, 旧 playTime = 0
+                - 用户点卡片 → \`widget.videoInfo.playTime = 0\` →
+                  \`\_pendingResumeAt = null\` → \_playEpisode 走"非 resume"
+                  分支, 立即从 0 开始
+                - "播放历史"页面 (HistoryGrid) 没这个问题, 因为它的
+                  \_refreshPlayRecords 正确同步了 \_dedupedRecords (line 113-119)
+              - 修法:
+                - \`refreshPlayRecords()\` 改成跟 HistoryGrid 同模板:
+                  \`final dedup = \_dedupeByMovie(cachedRecords);\`
+                  → setState 同时更新 \_playRecords, \_dedupedRecords, \_recordSourceMap
+              - 验证流程:
+                1. 开 App → 首页有"继续观看"卡片 (旧数据)
+                2. 卡片点进去 → 视频从 0 开始 (旧 bug)
+                3. 看到 12 min, 返回首页 → 卡片"继续观看"显示 12:00
+                   (修法后: 卡片刷新显示 12:00; 之前: 卡片还显示 0:00)
+                4. 再点卡片 → video 跳到 12:00 ✓
+              - 不影响: \`favorites_grid.dart\` 也用类似模式, 但它用
+                \`_favoriteToPlayRecord\` 在 \_playRecords 里按 source+id
+                查找, \_playRecords 在 refresh 里被更新过, 没问题, 不改
+
+            ---`,
               'v1.0.58': `## 更新日志
 
             ### ✨ 改进

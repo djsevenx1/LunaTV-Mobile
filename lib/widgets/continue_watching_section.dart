@@ -841,7 +841,14 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
     );
   }
 
-  /// 刷新播放记录列表（供外部调用）
+  /// 刷新播放记录 (从播放页返回时被 _refreshOnResume 调用)
+  ///
+  /// v1.0.59 fix: 之前只更新 _playRecords, 忘了同步 _dedupedRecords 和
+  /// _recordSourceMap, 导致首页"继续观看"卡片一直显示旧 playTime (来自
+  /// _loadPlayRecords 第一次拉的数据), 用户从卡片点进去时
+  /// widget.videoInfo.playTime 是旧值, _pendingResumeAt 设不进去,
+  /// 进度条记忆失效 (resume 永远从 0 开始).
+  /// 跟 history_grid.dart:104-125 _refreshPlayRecords 同模板修复.
   Future<void> refreshPlayRecords() async {
     if (!mounted) return;
 
@@ -851,8 +858,14 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
         if (!mounted) return;
         if (cachedRecordsResult.success && cachedRecordsResult.data != null) {
           final cachedRecords = cachedRecordsResult.data!;
+          // 同步去重结果, 让卡片显示最新 playTime
+          final dedup = _dedupeByMovie(cachedRecords);
           setState(() {
             _playRecords = cachedRecords;
+            _dedupedRecords = dedup.$1;
+            _recordSourceMap
+              ..clear()
+              ..addAll(dedup.$2);
           });
 
           // 预加载新图片

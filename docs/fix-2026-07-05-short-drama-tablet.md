@@ -1551,3 +1551,140 @@ v1.0.57 强制自动 seek 跳片头/片尾, 但**有的源没片头** (intro 长
 - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - 加自动/手动开关字段 + 改 \_updateSkipButtonVisibility + 恢复按钮 UI + 设置弹窗加 Switch
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.57+1 → 1.0.58+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.58 changelog
+
+---
+
+# v1.0.59 · 首页"继续观看"卡片进度条记忆失效 (refreshPlayRecords 漏更新 \_dedupedRecords)
+
+## 现象
+
+用户装 v1.0.58 后反馈:
+
+> 现在存没有问题了 但是读不到进度条记忆位置
+
+具体: v1.0.56 修好"切集保存 index 错配"后, 存路径已经完全 OK — 用户看
+12 min, 缓存和云端都有 `{index: 2, playTime: 12min}` 正确数据。但从首页
+"继续观看"卡片点进去, 视频**还是从 0 开始**, 没 resume 到 12 min。
+
+诡异的是, 从"播放历史"页面点进去是正常的 — 进度条记忆有效。
+
+## 排查
+
+存路径是对的 (v1.0.56 验证过), 缓存层也是对的 (\_addPlayRecordToCache
+同步更新 \_cache['play_records']), 播放器读 \_pendingResumeAt 的逻辑也是对的
+(\_loadSources 从 widget.videoInfo.playTime 读, \_playEpisode seek)。
+
+### 读路径分两条
+
+1. **首页"继续观看"卡片** → [ContinueWatchingSection](file:///workspace/lib/widgets/continue_watching_section.dart) 渲染, 点卡片 → [home_screen.dart:704](file:///workspace/lib/screens/home_screen.dart#L704) `_onVideoTap(playRecord)` → `PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord))`
+2. **"播放历史"页面** → [HistoryGrid](file:///workspace/lib/widgets/history_grid.dart) 渲染, 点卡片 → [history_screen.dart:21](file:///workspace/lib/screens/history_screen.dart#L21) `_onVideoTap(playRecord)` → 同一个 PlayerScreen
+
+两条路径**都**用 `VideoInfo.fromPlayRecord(playRecord)` 把 playRecord
+传进 PlayerScreen, `widget.videoInfo.playTime` 应该一致。但首页读不到,
+历史读得到, 差别在 `playRecord` 的来源。
+
+### 关键差别: 卡片渲染用的是哪个列表
+
+`ContinueWatchingSection` 和 `HistoryGrid` 都有两个列表:
+
+- `_playRecords` — 原始全量记录 (后端返回的)
+- `_dedupedRecords` — 按"影片"分组, 每组取 saveTime 最新那条当代表
+  (同一电影多源合并成一条卡片, 这是 v1.0.48 引入的)
+
+**卡片 itemBuilder 读的是 `_dedupedRecords[index]`**, 不是 `_playRecords`。
+
+### ContinueWatchingSection.refreshPlayRecords 漏更新 \_dedupedRecords
+
+```dart
+// 之前 v1.0.58 的代码 (bug):
+Future<void> refreshPlayRecords() async {
+  ...
+  final cachedRecords = cachedRecordsResult.data!;
+  setState(() {
+    _playRecords = cachedRecords;   // ← 只更新了这个
+    // _dedupedRecords 没更新 !!!
+  });
+}
+```
+
+用户从播放页返回时, [home_screen.dart:865](file:///workspace/lib/screens/home_screen.dart#L865)
+`_refreshOnResume` 调 `ContinueWatchingSection.refreshPlayRecords()`。这
+函数只 setState 了 `_playRecords`, **`_dedupedRecords` 还是
+`_loadPlayRecords` (initState 一次性调用) 第一次拉的旧数据**。
+
+`HistoryGrid` 没这个问题 — [history_grid.dart:104-125](file:///workspace/lib/widgets/history_grid.dart#L104-L125) `_refreshPlayRecords` 正确
+同步了 `_dedupedRecords` 和 `_recordSourceMap`:
+
+```dart
+final dedup = _dedupeByMovie(cachedRecords);
+setState(() {
+  _playRecords = cachedRecords;
+  _dedupedRecords = dedup.$1;          // ← 跟 HistoryGrid 一样
+  _recordSourceMap..clear()..addAll(dedup.$2);
+});
+```
+
+### 触发链
+
+1. 开 App → 首页"继续观看"卡片从 \_loadPlayRecords 拉数据, 假设
+   playTime=0 (没看过, 或看过但卡片不显示时长)
+2. 用户点卡片 → `widget.videoInfo.playTime = 0` → `_pendingResumeAt = null`
+   → 视频从 0 开始 (符合预期, 第一次看)
+3. 用户看 12 min, v1.0.56 修的保存路径正确存 `{index: 2, playTime: 12min}`
+4. 用户返回首页 → `ContinueWatchingSection.refreshPlayRecords()` 跑
+   → `_playRecords` 更新成最新 (含 12min), **但 `_dedupedRecords` 不动**
+5. 卡片 itemBuilder 读 `_dedupedRecords[index]`, 还是旧的 playTime=0
+6. 用户再点同一张卡片 → `widget.videoInfo.playTime = 0` →
+   `_pendingResumeAt = null` → **视频还是从 0 开始** (bug)
+
+而"播放历史"页面:
+1. 用户进历史页 → `HistoryGrid.initState` → `_loadData` →
+   `_loadPlayRecords` → 拉数据, `_playRecords` 和 `_dedupedRecords`
+   都更新 ✓
+2. 返回到首页 → `HistoryGrid.refreshHistory()` 调 `_refreshPlayRecords`
+   → 这次**正确**同步了 `_dedupedRecords` ✓
+3. 卡片显示正确 playTime ✓
+4. 点卡片 → resume 正确 ✓
+
+## 修复
+
+[ContinueWatchingSection.refreshPlayRecords](file:///workspace/lib/widgets/continue_watching_section.dart#L853-L879) 改成跟 `HistoryGrid._refreshPlayRecords` 完全同模板:
+
+```dart
+final dedup = _dedupeByMovie(cachedRecords);
+setState(() {
+  _playRecords = cachedRecords;
+  _dedupedRecords = dedup.$1;
+  _recordSourceMap
+    ..clear()
+    ..addAll(dedup.$2);
+});
+```
+
+一行加 3 个字段同步, 跟 HistoryGrid 完全对齐。
+
+## 不影响其他
+
+- **FavoritesGrid** ([favorites_grid.dart](file:///workspace/lib/widgets/favorites_grid.dart)) 也用类似模式, 但它
+  用 `_favoriteToPlayRecord` 在 `_playRecords` 里按 source+id 查找
+  (line 240-242), `_playRecords` 在 refresh 里被更新过, 没问题, 不改
+- **HistoryGrid** 已经正确, 不动
+
+## 教训
+
+1. **卡片显示数据要跟存储数据同步** — 任何"原始列表 + 派生展示列表"的
+   设计, refresh 时**必须同步两个列表**, 不能只 setState 一个
+2. **同模式代码要 grep 找全** — `grep "_playRecords = cachedRecords"`
+   列出所有 setState 点, 逐个检查是否漏了对应的派生字段 (\_dedupedRecords /
+   \_recordSourceMap)
+3. **多个列表要 grep `_dedupedRecords` 设置点**, 跟 HistoryGrid 对照,
+   看哪些 widget 漏了
+4. **复制粘贴时容易漏** — `HistoryGrid._refreshPlayRecords` 有 dedup
+   同步, 写 `ContinueWatchingSection.refreshPlayRecords` 时大概率是复制
+   改的, 复制时漏了 setState 里的几行
+
+## 改动文件
+
+- [lib/widgets/continue_watching_section.dart](file:///workspace/lib/widgets/continue_watching_section.dart) - refreshPlayRecords 加 \_dedupeByMovie 同步 \_dedupedRecords
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.58+1 → 1.0.59+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.59 changelog
