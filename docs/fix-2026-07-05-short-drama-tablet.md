@@ -372,7 +372,7 @@ CachedNetworkImage(
 `bannerWidth` 作为参数从 `build()` 传到 `_buildBannerItem`（build 里
 LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
 
-## 构建失败反复记录（3 次才过）
+## 构建失败反复记录（5 次才过）
 
 第一次 push: `Set release body` (step 13) 失败
   → build.yml changelog 模板字符串里有未转义反引号
@@ -388,22 +388,50 @@ LayoutBuilder 之外计算的局部变量 `screenWidth - 24`）。
     还在传已删除的 `_bannerWidth` state 字段
   → 改成局部变量 `bannerWidth`
 
-第四次才过。
+第四次 push: 还是 step 10 失败（**这次根本不是 Dart 问题**）
+  → 看 GitHub Actions 日志, 真实错误是:
+    ```
+    > Could not resolve org.eclipse.ee4j:project:1.0.5
+      > Could not GET '...aliyun.com/repository/google/.../project-1.0.5.pom'.
+        > Received status code 502 from server: Bad Gateway
+    > Repository maven is disabled due to earlier error below
+    > There are 64 more failures with identical causes
+    ```
+  → 跟 v1.0.35 的 502 是同一个问题, 但 v1.0.35 的修复没生效
+  → **根因: Gradle 行为是单个 repository 失败后整批 disable, 不是该 URL 跳过。**
+    v1.0.35 的修复"Aliyun 在前 + google()/mavenCentral() 在后"看着有兜底,
+    但 Aliyun 502 后 Gradle 把整个 Aliyun 镜像 disable,
+    后续 google()/mavenCentral() 不会被尝试, fail-over 失效
+
+第五次 push (这次): 修复
+  → 把 [android/build.gradle.kts](file:///workspace/android/build.gradle.kts) 和
+    [android/settings.gradle.kts](file:///workspace/android/settings.gradle.kts)
+    里 `google()` 放到第一位, Aliyun 镜像往后挪
+  → 效果: Android 核心包走 Google 直接通道, Aliyun 502 只丢个别
+    非 Android 核心 artifact, 不再卡死整个构建
 
 ## 教训
 
-1. **Dart refactor 改 state 字段名时，所有引用要一次全改**——
+1. **Gradle fail-over 不像看上去那样工作** — 多个 repo 并列时,
+   Gradle 在某个 repo 失败后会**整批 disable 它**, 不会继续尝试后续的 repo。
+   所以"镜像在前 + 兜底在后"在 Gradle 这里**不是真的 fail-over**。
+   真要兜底, 必须把稳定源 (google() / mavenCentral()) 放前面。
+2. **Dart refactor 改 state 字段名时，所有引用要一次全改**——
    这次我从 state 字段 `_bannerWidth` 改成 `build()` 里的局部变量
-   `bannerWidth`，函数签名也改了，但 PageView 的 itemBuilder 里
-   调用没改到，导致编译失败 2 次。改完应该 grep 一遍所有引用。
-2. **build.yml changelog 里的 markdown 反引号必须转义**——
-   JS 模板字符串里 `\` \`` 是单字符转义，`_\`x\`_` 才会被当成 markdown
+   `bannerWidth`, 函数签名也改了, 但 PageView 的 itemBuilder 里
+   调用没改到, 导致编译失败 2 次。改完应该 grep 一遍所有引用。
+3. **build.yml changelog 里的 markdown 反引号必须转义**——
+   JS 模板字符串里 `\` \`` 是单字符转义, `_\`x\`_` 才会被当成 markdown
    反引号而不是 JS 字符串结束符。后续加新 changelog 段要小心。
+4. **502 是网络问题, 不可预测** — 同一份代码连续 2 次构建可能 1 次过 1 次挂。
+   所以 Gradle 镜像策略必须能容忍 502, 不能假设"挂了就 retry"。
 
 ## 改动文件
 
 - `lib/screens/player_screen.dart` — 两个选集网格套 LayoutBuilder
 - `lib/widgets/hero_banner.dart` — filterQuality.high / memCacheWidth 重算
+- `android/build.gradle.kts` — google() 提前到第一位
+- `android/settings.gradle.kts` — google() 提前到第一位
 - `pubspec.yaml` — version 1.0.37+1 → 1.0.38+1
 - `.github/workflows/build.yml` — 追加 v1.0.37/v1.0.38 changelog
 
