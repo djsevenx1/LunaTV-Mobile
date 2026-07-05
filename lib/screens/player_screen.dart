@@ -143,6 +143,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     // v1.0.50: 监听 AppLifecycleState, 进后台 (home 键) 时立即保存一次,
     // 避免 10s progressTimer 还没触发就被上滑/杀进程, 进度丢
     WidgetsBinding.instance.addObserver(this);
+    // v1.0.54: 关闭系统音量弹窗, 自己接管音量 UI (右侧指示器)
+    // volume_controller 2.0.2+ Android / 2.0.6+ iOS 都支持 showSystemUI 静态字段
+    // 默认 true, 每次 setVolume 都会弹系统音量窗口遮挡视频
+    // mobile_player_controls.dart:110 同模板, 但 player_screen 是另一个 widget
+    // 自己的 _onVolumeSwipeUpdate → setVolume 路径没人设过这个字段, 所以会弹
+    VolumeController().showSystemUI = false;
     // v1.0.41: 读系统初始亮度/音量, 进入播放器时同步到 UI
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
@@ -236,6 +242,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
+    // v1.0.54: 还原 volume_controller 的 showSystemUI 标志
+    // initState 设了 false 屏蔽系统音量弹窗, dispose 要还原成 true
+    // 跟 mobile_player_controls.dart:160 同模板, 否则其他场景 (detail 页面
+    // 之类) 再调 setVolume 也不会弹系统 UI
+    VolumeController().showSystemUI = true;
     super.dispose();
   }
 
@@ -704,7 +715,9 @@ class _PlayerScreenState extends State<PlayerScreen>
           (_dragStartVolume! + normalized).clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
-    // v1.0.44: v0.2.2 / 2.0.8 API 是 VolumeController() 实例, setVolume 不带 showSystemUI 参数
+    // v1.0.44: v0.2.2 / 2.0.8 API 是 VolumeController() 实例
+    // v1.0.54: 走全局 showSystemUI=false (initState 开关), 不走方法参数,
+    // 因为滑动频繁调 setVolume, 每次传参也累赘
     VolumeController().setVolume(_currentVolume);
   }
 

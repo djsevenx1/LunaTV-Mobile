@@ -88,6 +88,32 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.54': `## 更新日志
+
+            ### 🐛 修复
+
+            - **滑动调节音量时系统音量窗口弹出遮挡视频**
+              - 现象: 播放页右半屏上下滑动调音量, Android 系统音量条 (屏幕侧边 / 中间的
+                系统 UI 音量框) 弹出, 遮挡视频画面
+              - 根因 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - \`_onVolumeSwipeUpdate\` 调 \`VolumeController().setVolume(_currentVolume)\`
+                - \`VolumeController().showSystemUI\` 是单例静态字段, 默认 \`true\`,
+                  每次 setVolume 都会让系统弹音量窗口
+                - \`mobile_player_controls.dart:110\` 自己 \`initState\` 设了 \`showSystemUI=false\`,
+                  \`dispose\` 还原 \`true\`, 所以**另一个 widget** 里的音量 UI 不弹
+                - 但 \`player_screen.dart\` 用了**自己的** GestureDetector (line 2593)
+                  + 自己的 \`_onVolumeSwipeUpdate\` 调 setVolume, 没人设过这个字段 → 弹
+                - 代码注释写错了: "setVolume 不带 showSystemUI 参数",
+                  **实际 2.0.2+ 就支持 \`showSystemUI\` 全局静态字段** (Android 2.0.2 / iOS 2.0.6)
+              - 修复:
+                - \`player_screen.initState\` 加 \`VolumeController().showSystemUI = false;\`
+                - \`player_screen.dispose\` 加 \`VolumeController().showSystemUI = true;\`
+                - 跟 \`mobile_player_controls.dart:110 / :160\` **完全同模板**
+                - 物理音量键 (手机侧边按键) **不受影响** — 那是 Android 系统层面行为,
+                  不走 volume_controller API, 永远会弹系统 UI
+                - 不用升级 volume_controller, 2.0.8 已经支持
+
+            ---`,
               'v1.0.53': `## 更新日志
 
             ### 🐛 修复

@@ -1180,3 +1180,51 @@ v1.0.50 / v1.0.50.1 / v1.0.49 修了多个覆盖路径:
 - [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - didChangeAppLifecycleState 加 phase 守门
 - [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.52+1 → 1.0.53+1
 - [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.53 changelog
+
+---
+
+# v1.0.54 · 屏蔽滑动调音量时的系统音量弹窗
+
+## 现象
+
+用户反馈:
+
+> 滑动调节音量是能不能屏蔽系统音量窗口
+
+播放页右半屏上下滑动调音量, Android 系统音量条 / 系统音量框弹出, 遮挡视频画面。
+
+## 排查
+
+`VolumeController().showSystemUI` 是单例静态字段, 默认 `true`, 每次 `setVolume`
+都会让系统弹音量窗口。
+
+- 2.0.2+ Android / 2.0.6+ iOS 都支持这个字段
+- \`mobile_player_controls.dart:110\` 自己在 \`initState\` 设 \`false\`, \`dispose\` 还原 \`true\`,
+  所以**另一个 widget** 里的音量 UI 不弹
+- 但 \`player_screen.dart\` 用了**自己的** GestureDetector (line 2593) + 自己的
+  \`_onVolumeSwipeUpdate\` 调 setVolume, **没人设过这个字段** → 弹
+- 代码注释写错了: "setVolume 不带 showSystemUI 参数", 实际 2.0.2+ 就支持
+
+## 修复
+
+[player_screen.dart](file:///workspace/lib/screens/player_screen.dart) initState /
+dispose 各加一行, 跟 \`mobile_player_controls.dart:110 / :160\` 完全同模板:
+
+```dart
+// initState
+VolumeController().showSystemUI = false;
+
+// dispose
+VolumeController().showSystemUI = true;
+```
+
+物理音量键 (手机侧边按键) **不受影响** — 那是 Android 系统层面行为, 不走
+volume_controller API, 永远会弹系统 UI。
+
+不用升级 volume_controller, 2.0.8 已经支持。
+
+## 改动文件
+
+- [lib/screens/player_screen.dart](file:///workspace/lib/screens/player_screen.dart) - initState/dispose 加 showSystemUI 开关
+- [pubspec.yaml](file:///workspace/pubspec.yaml) - 1.0.53+1 → 1.0.54+1
+- [.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml) - 顶部追加 v1.0.54 changelog
