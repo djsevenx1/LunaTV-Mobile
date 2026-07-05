@@ -145,20 +145,32 @@ jobs:
 
             ### 🎨 视觉微调
 
-            - **中央 ±60s / 播放按钮底色跟亮度音量浮窗统一**
-              - 现象: 中央三个圆按钮 (播放/暂停 + ±60) 之前用 \`kLunaFloatBtnBg\` (白色 15% 透明),
+            - **中央 ±6s / 播放按钮底色跟亮度音量浮窗统一**
+              - 现象: 中央三个圆按钮 (播放/暂停 + ±6) 之前用 \`kLunaFloatBtnBg\` (白色 15% 透明),
                 跟左右调出来的亮度/音量浮窗 (\`Colors.black.withOpacity(0.7)\`) 风格不一致
               - 修复 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
                 - \`_buildSeekCircleButton\` 背景 \`kLunaFloatBtnBg\` → \`Colors.black.withOpacity(0.7)\`
                 - 文字/图标保持白色不变
               - 效果: 一眼能看出是浮层风格, 跟调亮度音量浮窗配色一致
 
-            - **中央 ±60s 按钮往中间挪一点**
-              - 现象: 之前 \`sideOffset\` 是 60/80 (竖屏/全屏), ±60 按钮离屏幕边有点远,
+            - **中央 ±6s 按钮往中间挪一点**
+              - 现象: 之前 \`sideOffset\` 是 60/80 (竖屏/全屏), ±6 按钮离屏幕边有点远,
                 看着分散
               - 修复 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
                 - \`sideOffset\` 60/80 → 40/60 (竖屏/全屏, 都缩 20px)
                 - 按钮中心到中央播放按钮距离: 88/112px → 68/92px
+
+            - **中央 ± 按钮步长从 60 秒改成 6 秒 (60 秒一次跳太多)**
+              - 现象: 中央左右两个圆按钮原本是 ±60s, 点一下跳一分钟,
+                跳过剧情/广告太粗, 经常错过要看的画面
+              - 修复 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart)):
+                - \`_seekBySeconds(-60, '快退60s')\` → \`_seekBySeconds(-6, '快退6s')\`
+                - \`_seekBySeconds(60, '快进60s')\` → \`_seekBySeconds(6, '快进6s')\`
+                - 按钮 label \`-60\` / \`+60\` → \`-6\` / \`+6\`
+                - 注释里的描述也跟着改成 "6s"
+              - 提示文字: 浮窗里短暂显示的 "快进6s" / "快退6s" 同步
+              - 水平拖动 seek 还是按"半屏 = 60s"原速, 没动 (用户没要求改)
+              - 废弃的 \`_buildSeekIcon\` 备用组件也同步改 \`+6\` / \`-6`
 
             ---`,
               'v1.0.48': `## 更新日志

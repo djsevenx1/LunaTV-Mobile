@@ -111,7 +111,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // 全屏状态
   bool _isFullscreen = false;
 
-  // 快进/快退提示文字 (点击后短暂显示, 如 "快进60s")
+  // 快进/快退提示文字 (点击后短暂显示, 如 "快进6s")
   String? _seekHintText;
   Timer? _seekHintTimer;
 
@@ -1967,7 +1967,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// 中央控制区: 左右快退/快进60s 按钮 + 中间播放/暂停
+  /// 中央控制区: 左右快退/快进6s 按钮 + 中间播放/暂停
   /// 跟控件一起显隐, 点击后短暂显示提示文字
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
@@ -1978,7 +1978,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 左: 快退60s 按钮(文字 -60)
+          // 左: 快退6s 按钮(文字 -6) (v1.0.49: 60 → 6, 60秒跳过太多)
           Positioned(
             left: sideOffset,
             top: 0,
@@ -1986,12 +1986,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Center(
               child: _buildSeekCircleButton(
                 size: size,
-                onTap: () => _seekBySeconds(-60, '快退60s'),
-                child: const _SeekLabel(label: '-60'),
+                onTap: () => _seekBySeconds(-6, '快退6s'),
+                child: const _SeekLabel(label: '-6'),
               ),
             ),
           ),
-          // 右: 快进60s 按钮(文字 +60)
+          // 右: 快进6s 按钮(文字 +6) (v1.0.49: 60 → 6, 60秒跳过太多)
           Positioned(
             right: sideOffset,
             top: 0,
@@ -1999,8 +1999,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Center(
               child: _buildSeekCircleButton(
                 size: size,
-                onTap: () => _seekBySeconds(60, '快进60s'),
-                child: const _SeekLabel(label: '+60'),
+                onTap: () => _seekBySeconds(6, '快进6s'),
+                child: const _SeekLabel(label: '+6'),
               ),
             ),
           ),
@@ -2102,7 +2102,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 圆弧箭头图标 (已废弃, 快进/快退按钮改用 _SeekLabel 文字)
   // ignore: unused_element
   Widget _buildSeekIcon({required bool forward}) {
-    return _SeekLabel(label: forward ? '+60' : '-60');
+    return _SeekLabel(label: forward ? '+6' : '-6');
   }
 
   /// 圆形小按钮 (40x40, LunaTV Web 控制按钮)
@@ -2704,7 +2704,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-/// 快进/快退 60s 按钮的文字标签 (替代原先的自绘圆弧箭头, 视觉更直接)
+/// 快进/快退 6s 按钮的文字标签 (替代原先的自绘圆弧箭头, 视觉更直接)
 class _SeekLabel extends StatelessWidget {
   final String label;
   const _SeekLabel({required this.label});
@@ -2714,8 +2714,8 @@ class _SeekLabel extends StatelessWidget {
     return Center(
       child: Text(
         label,
-        style: TextStyle(
-          color: color,
+        style: const TextStyle(
+          color: Colors.white,
           fontSize: 18,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
