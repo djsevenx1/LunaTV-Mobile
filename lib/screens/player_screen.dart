@@ -11,6 +11,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/m3u8_service.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -2636,3 +2637,53 @@ class _SeekLabel extends StatelessWidget {
 }
 
 enum PingState { idle, testing, fast, medium, slow, unavailable }
+
+/// 源测速结果 (v1.0.45: 用 M3U8Service 测完整信息, 不再只 HEAD ping)
+class _SourceSpeedInfo {
+  final String resolution; // e.g. "720p" / "1080p" / "4K", 空 = 未知
+  final double loadSpeedKBps; // 下载速度 KB/s
+  final int pingMs; // 延迟 ms
+  final bool success; // false = 测失败, 排到最后
+  const _SourceSpeedInfo({
+    required this.resolution,
+    required this.loadSpeedKBps,
+    required this.pingMs,
+    required this.success,
+  });
+  static _SourceSpeedInfo unavailable() =>
+      const _SourceSpeedInfo(resolution: '', loadSpeedKBps: 0, pingMs: 3000, success: false);
+
+  /// 格式化下载速度 (KB/s → MB/s, 自动单位)
+  String formatLoadSpeed() {
+    if (loadSpeedKBps <= 0) return '';
+    if (loadSpeedKBps >= 1024) {
+      return '${(loadSpeedKBps / 1024).toStringAsFixed(1)}MB/s';
+    }
+    return '${loadSpeedKBps.toStringAsFixed(0)}KB/s';
+  }
+
+  /// 综合评分 (越小越好, 用作排序 key)
+  /// 分辨率权重: 4K=2.0, 1080p=1.5, 720p=1.0, 标清=0.7
+  /// 分数 = -(有效速度 * 分辨率权重) + ping
+  ///   → 速度越快分数越低, 延迟越低分数越低, 排序时排前面
+  ///   → 失败的给最大分数排最后
+  int get score {
+    if (!success) return 1 << 30;
+    double resWeight;
+    if (resolution.isEmpty) {
+      resWeight = 1.0;
+    } else {
+      final p = int.tryParse(resolution.replaceAll('p', '').replaceAll('K', '000')) ?? 720;
+      if (p >= 2160) {
+        resWeight = 2.0;
+      } else if (p >= 1080) {
+        resWeight = 1.5;
+      } else if (p >= 720) {
+        resWeight = 1.0;
+      } else {
+        resWeight = 0.7;
+      }
+    }
+    return -(loadSpeedKBps * resWeight).round() + pingMs;
+  }
+}
