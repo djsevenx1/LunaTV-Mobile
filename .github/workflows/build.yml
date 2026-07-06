@@ -9,11 +9,13 @@ on:
 permissions:
   contents: write
 
-# v2.0.0: 同时编译 4 个平台 (android / ios / windows / macos), 不加 Linux
-# 5 个 matrix include, runs-on 分别走 ubuntu / macos / windows runner
-# 只把 Android APK 上传到 GitHub Release, 其余平台走 actions/upload-artifact 下载
-# iOS / macOS 走 --no-codesign 模式 (无 Apple Developer 证书, 装 iPhone / 装 mac
-# 需用户用 Xcode 自签 / AltStore 签名, build 出的 Runner.app 本身可以跑)
+# v2.0.1: 只编译 2 个平台 (android / ios), v2.0.0 加的 windows / macos
+# 编译报错 (猜测: desktop 端 plugin 兼容 / cmake / gtk / xcode 签名问题),
+# 撤回到只跑 android + ios.
+# matrix 拆 2 个 include, runs-on 分别走 ubuntu / macos runner
+# 只把 Android APK 上传到 GitHub Release, iOS 走 actions/upload-artifact 下载
+# iOS 走 --no-codesign 模式 (无 Apple Developer 证书, 装 iPhone 需用户用
+# Xcode 自签 / AltStore 签名, build 出的 Runner.app 本身可以跑)
 jobs:
   build:
     name: ${{ matrix.platform }}
@@ -34,18 +36,6 @@ jobs:
             build_command: flutter build ios --release --no-codesign
             artifact_name: ios-runner-no-codesign
             artifact_path: build/ios/iphoneos/Runner.app
-          - platform: windows
-            os: windows-latest
-            setup_android: 'false'
-            build_command: flutter build windows --release
-            artifact_name: windows-runner
-            artifact_path: build/windows/runner/Release/runner.exe
-          - platform: macos
-            os: macos-latest
-            setup_android: 'false'
-            build_command: flutter build macos --release
-            artifact_name: macos-runner-app
-            artifact_path: build/macos/Build/Products/Release/Runner.app
 
     steps:
       - uses: actions/checkout@v4
@@ -133,42 +123,31 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v2.0.0': `## 更新日志
+              'v2.0.1': `## 更新日志
 
-            ### 🚀 多平台编译
+            ### 🚀 多平台编译 (v2.0.0 缩减版)
 
-            - **v2.0.0 同时编译 4 个平台 ([.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml))**
-              - **Android APK** (ubuntu-latest, 已有, 主线)
+            - **v2.0.1 只编译 2 个平台 (android / ios), v2.0.0 加的 windows / macos 撤回**
+              - **v2.0.0 试加 4 平台编译, windows / macos 编译报错** (猜测: desktop 端
+                plugin 兼容 / cmake / gtk / xcode 签名问题, 待用户报具体错), 撤回到
+                只跑 android + ios
+              - **Android APK** (ubuntu-latest, 主线)
                 - 仍走 \`flutter build apk --release\`
                 - 仍上 GitHub Release (用户从 release 页面下载)
-              - **iOS** (macos-latest, **新增**)
+              - **iOS** (macos-latest, 新增)
                 - 走 \`flutter build ios --release --no-codesign\`
                 - **无 Apple Developer 证书**: 装 iPhone 需用户用 Xcode 自签
                   / AltStore 签名, build 出的 \`Runner.app\` 本身可以跑
                 - 上传 artifact (zip), 不上 release
-              - **Windows** (windows-latest, **新增**)
-                - 走 \`flutter build windows --release\`
-                - 产出 \`runner.exe\` + DLL + 资源, 上传 artifact
-              - **macOS** (macos-latest, **新增**)
-                - 走 \`flutter build macos --release\`
-                - 产出 \`Runner.app\`, 默认未签名, 上传 artifact
-                - 装 mac 需用户用 Xcode 自签 / codesign --deep
-              - **不加 Linux**: 用户决定 (PC 只 win + mac)
+              - **不加 Windows / macOS / Linux**: v2.0.0 试加都失败, 暂停桌面端编译
               - CI 改造:
-                - 单 job 改 matrix, 4 个平台**并行**编译 (4 倍 CI 时间, 但并发)
+                - matrix 拆 2 个 include, 2 个平台**并行**编译
                 - 共享 setup steps (checkout / flutter / pub get / version sync),
                   Android 专属 steps 用 \`if: matrix.setup_android == 'true'\` 守门
-                - iOS / Windows / macOS 跳过 Android SDK / Java / NDK 安装
-                - 镜像重试 (\`nick-fields/retry\`) 仍生效, 5 个平台都走
+                - iOS 跳过 Android SDK / Java / NDK 安装
+                - 镜像重试 (\`nick-fields/retry\`) 仍生效, 2 个平台都走
               - Release body (changelog) 仍只在 Android job 写, 保持原样
-                (iOS / Windows / macOS 用户从 artifact 下载, 不会看 release body)
-              - 限制说明:
-                - 部分移动端 plugin 在 desktop 上**可能不可用** (e.g. \`volume_controller\`
-                  桌面端无系统音量条, \`screen_brightness\` 桌面端没意义)
-                - 第一次跑 build 可能会暴露 plugin 兼容问题, 后续按需加 desktop
-                  stub 或 platform 条件编译
-                - 桌面端 UI 是 LunaTV Web 风格手机布局, 不会有专门的桌面布局适配,
-                  体验跟 iPad 接近, 不会特别优化
+                (iOS 用户从 artifact 下载, 不会看 release body)
 
             ---`,
               'v1.0.77': `## 更新日志
