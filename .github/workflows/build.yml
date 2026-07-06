@@ -88,6 +88,65 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.77': `## 更新日志
+
+            ### 🐛 修复
+
+            - **v1.0.76 还是不能跳过广告, 28min 还是跳 0 播广告 ([player_screen.dart#streams.duration](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: 用户装 v1.0.76 后反馈"还是不行, 用的就是 76 版本", 28min 切到
+                广告子 m3u8 还是会跳到 0 重头播广告, episode 锁后停在 0 重头, 没用
+              - 真正的根因 ([player_screen.dart#_updateSkipButtonVisibility](file:///workspace/lib/screens/player_screen.dart)):
+                1. 视频源 m3u8 在广告位置用 \`EXT-X-DISCONTINUITY\` 切到**广告子 m3u8**
+                   (HLS 切流, 跨 playlist 切换)
+                2. 切流时 libmpv 重新加载 playlist, **streams.duration 瞬间从 45min
+                   变成 30s** (主片总时长 → 广告段时长)
+                3. 切流时 position 也从 28min 跳到 0 (新流的起点)
+                4. **跳过片头/片尾逻辑** (\`_updateSkipButtonVisibility\`) 在 0~3 秒时
+                   触发 \`posSec(3) < _skipIntroEnd(90)\` → 误判成"还在片头"
+                5. v1.0.76 加的 episode 锁只防 seek recovery 死循环, **不防跳片头误触发**
+                6. 自动跳片头 seek 到 90s → 90s 超出广告流 duration 30s → libmpv
+                   错乱 → 切回主 m3u8 时位置漂了 → 回到 28min 附近重新加载 →
+                   看起来"0 重播"
+              - v1.0.75/v1.0.76 修法为什么没用:
+                - v1.0.75 position jump recovery: 把用户 seek 回广告位置 (反方向)
+                - v1.0.76 episode 锁: 第二次 reload 不再 seek, 视频停在 0 重头
+                - 两者都没解决"广告流播的过程里, 跳过片头误触发"这个核心问题
+              - v1.0.77 修法 (**新方向, 不修 recovery, 修广告检测**):
+                1. **duration 跳变检测** ([player_screen.dart#streams.duration](file:///workspace/lib/screens/player_screen.dart)):
+                   - 监听 \`streams.duration\`, 算"上一帧 dur - 当前 dur"
+                   - 突然变小超过 60s → 识别成"切到广告流"
+                     (主片 45min → 广告 30s, 差 2670s, 远超阈值)
+                   - 立刻 \`_player.seek(_lastKnownPosition)\` 跳回主片 28min
+                   - **广告根本不播**, 用户无感
+                2. **为什么用 duration 不用 position 跳变**:
+                   - 用户拖进度条会改 position, 但 duration 不受影响
+                   - 用 duration 不会误判用户操作 (用户拖回前面不会触发"切广告")
+                3. **60s 阈值**: 不会把正常小段切换 (e.g. 切到 1min 片头曲) 误判成广告
+                4. **不会死循环**:
+                   - seek 回去后主片重新加载, duration 又发 2700s
+                   - 此时 \`wasDur(30) < dur(2700)\`, 是"变大" → 不触发
+                   - 主片 28min 位置不再触发切流 (用户已经看过去广告位)
+                5. **撤回 v1.0.75/v1.0.76 反方向 recovery**:
+                   - 删 position stream 里 \`if (wasPos >= 30s && pos < 5s ...)\` 那段 if
+                   - 删 \`_lastRecoverySeekAt\` 字段, 删 \`_recoverySeekedThisEpisode\` 注释
+                   - position stream 只保留"记录 \`_lastKnownPosition\`" 供 duration 检测用
+                6. **\_updateSkipButtonVisibility 加 durSec 守门** (双层保险):
+                   - \`shouldShowIntro\` 加 \`durSec > _skipIntroEnd\` 守门
+                   - \`shouldShowOutro\` 加 \`durSec > 60\` 守门
+                   - 防止: duration stream 跳变检测触发 seek 之前, position stream
+                     先收到 \`pos=0\` 触发这里自动 seek 到 90s, 90s 超出广告流
+                     duration 30s 跟 v1.0.76 报告的死循环同模式
+                   - 守门后: 广告流 durSec=30 < 90 不会触发, 不会 seek 错乱
+              - 验证:
+                1. 装 v1.0.77 → 播放已知带广告的源 (用户报告的 28min 广告位置)
+                2. 到广告位置 → 立刻跳回 28min, **看不到广告** (duration 跳变检测触发)
+                3. 继续播 28min 之后 → 正常看正片, 不再"重头 0 重播"
+                4. 用户手动拖进度条到 5min → 不触发 (拖进度条不影响 duration)
+                5. 切下一集 → \`_lastKnownPosition\` / \`_lastDurationForAdDetect\`
+                   清零, 新一集重新检测 (新一集 first duration frame 是新一集总
+                   时长, 不触发, 不会误判)
+
+            ---`,
               'v1.0.76': `## 更新日志
 
             ### 🐛 修复
