@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Multi-Platform
 
 on:
   push:
@@ -9,21 +9,58 @@ on:
 permissions:
   contents: write
 
+# v2.0.0: 同时编译 4 个平台 (android / ios / windows / macos), 不加 Linux
+# 5 个 matrix include, runs-on 分别走 ubuntu / macos / windows runner
+# 只把 Android APK 上传到 GitHub Release, 其余平台走 actions/upload-artifact 下载
+# iOS / macOS 走 --no-codesign 模式 (无 Apple Developer 证书, 装 iPhone / 装 mac
+# 需用户用 Xcode 自签 / AltStore 签名, build 出的 Runner.app 本身可以跑)
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-latest
+            setup_android: 'true'
+            build_command: flutter build apk --release
+            artifact_name: app-release-apk
+            artifact_path: build/app/outputs/flutter-apk/app-release.apk
+          - platform: ios
+            os: macos-latest
+            setup_android: 'false'
+            build_command: flutter build ios --release --no-codesign
+            artifact_name: ios-runner-no-codesign
+            artifact_path: build/ios/iphoneos/Runner.app
+          - platform: windows
+            os: windows-latest
+            setup_android: 'false'
+            build_command: flutter build windows --release
+            artifact_name: windows-runner
+            artifact_path: build/windows/runner/Release/runner.exe
+          - platform: macos
+            os: macos-latest
+            setup_android: 'false'
+            build_command: flutter build macos --release
+            artifact_name: macos-runner-app
+            artifact_path: build/macos/Build/Products/Release/Runner.app
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
+        if: matrix.setup_android == 'true'
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - uses: android-actions/setup-android@v3
+        if: matrix.setup_android == 'true'
 
       - name: Install Android SDK
+        if: matrix.setup_android == 'true'
         run: |
           sdkmanager "platforms;android-36"
           sdkmanager "build-tools;34.0.0"
@@ -31,6 +68,7 @@ jobs:
           sdkmanager "ndk;29.0.14033849"
 
       - name: Accept Android SDK licenses
+        if: matrix.setup_android == 'true'
         run: yes | sdkmanager --licenses > /dev/null
 
       - uses: subosito/flutter-action@v2
@@ -42,6 +80,7 @@ jobs:
       # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
       - name: Sync version from git tag
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         run: |
           TAG=${GITHUB_REF#refs/tags/v}
           if [[ "$TAG" == *"+"* ]]; then
@@ -57,22 +96,28 @@ jobs:
       # build.gradle.kts 直接读取, 每次 CI 构建签名一致
       # 镜像 502 时 Flutter 会自动重试 1 次, 但 Aliyun/Huawei/Tencent 同步挂的时候
       # 重试不够, 这里用 nick-fields/retry 兜底网络瞬时故障
-      - name: Run flutter build apk --release
+      - name: Run ${{ matrix.build_command }}
         uses: nick-fields/retry@v3
         with:
           max_attempts: 3
           retry_on: error
           retry_wait_seconds: 30
           timeout_minutes: 60
-          command: flutter build apk --release
+          command: ${{ matrix.build_command }}
 
+      # 上传 artifact (每个平台独立 artifact, 名字带 platform 后缀, 不冲突)
       - uses: actions/upload-artifact@v4
         with:
-          name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+          if-no-files-found: warn
+          retention-days: 14
 
+      # 只在 Android 平台 + tag 触发时, 创建 GitHub Release 上传 APK
+      # iOS / Windows / macOS 走 artifact 下载, 不上 release (因为没签名,
+      # 上 release 用户下载了也装不上, 走 artifact 用户自己签名后能跑)
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'android'
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
@@ -81,13 +126,51 @@ jobs:
       # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
       # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
       - name: Set release body
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'android'
         uses: actions/github-script@v6
         with:
           script: |
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.0': `## 更新日志
+
+            ### 🚀 多平台编译
+
+            - **v2.0.0 同时编译 4 个平台 ([.github/workflows/build.yml](file:///workspace/.github/workflows/build.yml))**
+              - **Android APK** (ubuntu-latest, 已有, 主线)
+                - 仍走 \`flutter build apk --release\`
+                - 仍上 GitHub Release (用户从 release 页面下载)
+              - **iOS** (macos-latest, **新增**)
+                - 走 \`flutter build ios --release --no-codesign\`
+                - **无 Apple Developer 证书**: 装 iPhone 需用户用 Xcode 自签
+                  / AltStore 签名, build 出的 \`Runner.app\` 本身可以跑
+                - 上传 artifact (zip), 不上 release
+              - **Windows** (windows-latest, **新增**)
+                - 走 \`flutter build windows --release\`
+                - 产出 \`runner.exe\` + DLL + 资源, 上传 artifact
+              - **macOS** (macos-latest, **新增**)
+                - 走 \`flutter build macos --release\`
+                - 产出 \`Runner.app\`, 默认未签名, 上传 artifact
+                - 装 mac 需用户用 Xcode 自签 / codesign --deep
+              - **不加 Linux**: 用户决定 (PC 只 win + mac)
+              - CI 改造:
+                - 单 job 改 matrix, 4 个平台**并行**编译 (4 倍 CI 时间, 但并发)
+                - 共享 setup steps (checkout / flutter / pub get / version sync),
+                  Android 专属 steps 用 \`if: matrix.setup_android == 'true'\` 守门
+                - iOS / Windows / macOS 跳过 Android SDK / Java / NDK 安装
+                - 镜像重试 (\`nick-fields/retry\`) 仍生效, 5 个平台都走
+              - Release body (changelog) 仍只在 Android job 写, 保持原样
+                (iOS / Windows / macOS 用户从 artifact 下载, 不会看 release body)
+              - 限制说明:
+                - 部分移动端 plugin 在 desktop 上**可能不可用** (e.g. \`volume_controller\`
+                  桌面端无系统音量条, \`screen_brightness\` 桌面端没意义)
+                - 第一次跑 build 可能会暴露 plugin 兼容问题, 后续按需加 desktop
+                  stub 或 platform 条件编译
+                - 桌面端 UI 是 LunaTV Web 风格手机布局, 不会有专门的桌面布局适配,
+                  体验跟 iPad 接近, 不会特别优化
+
+            ---`,
               'v1.0.77': `## 更新日志
 
             ### 🐛 修复
