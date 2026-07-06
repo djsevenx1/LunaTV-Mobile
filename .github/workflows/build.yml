@@ -40,10 +40,15 @@ jobs:
       - run: flutter pub get
 
       # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
+      # v1.0.71 fix: 之前 ${GITHUB_REF#refs/tags/v} 拿到的 TAG 还带 'v' 前缀 (e.g. "v1.0.70"),
+      # else 分支直接 sed 写进 pubspec → "version: v1.0.70+1" → Dart pubspec 不认 'v' 前缀
+      # 编译挂 (Error on line 4: Bad state: Cannot parse version "v1.0.70+1" at character 0)
+      # 修法: 在 if/else 之前先剥 'v' 前缀, VERSION 才是纯 "1.0.70"
       - name: Sync version from git tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          TAG=${GITHUB_REF#refs/tags/v}
+          TAG=${GITHUB_REF#refs/tags/}
+          TAG=${TAG#v}  # 剥 'v' 前缀, TAG 变 "1.0.70"
           if [[ "$TAG" == *"+"* ]]; then
             VERSION=${TAG%+*}
             BUILD=${TAG#*+}
@@ -88,34 +93,48 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v1.0.70': `## 更新日志
+              'v1.0.71': `## 更新日志
 
             ### 🐛 修复
 
-            - **v1.0.69 编译报错: dynamic 不能赋给 int/double 形参 ([player_screen.dart#_fallbackLightSpeed](file:///workspace/lib/screens/player_screen.dart))**
-              - 现象: v1.0.69 push 后 CI Build APK #485 失败, \`Run flutter build apk --release\` 步骤 8m 报红
-              - 真实错误: \`_fallbackLightSpeed\` 里 \`Future.wait([Future<int>, Future<double>])\` 返回 \`List<dynamic>\`, \`results[0]\` 是 dynamic, 直接赋给 \`_SourceSpeedInfo(pingMs: ms)\` 的 \`int\` 形参编译挂:
-                \`\`\`
-                Error: The argument type 'dynamic' can't be assigned to the parameter type 'int'.
-                \`\`\`
-              - 根因: 跟 v1.0.45 引入 \`getStreamInfo\` 时同样的问题, 当时用 \`(result['latency'] as num).toInt()\` 显式转换, 我 v1.0.69 写 fallback 时漏了
-              - 修复 ([player_screen.dart#_fallbackLightSpeed](file:///workspace/lib/screens/player_screen.dart)):
-                \`\`\`dart
-                final ms = (results[0] as num).toInt();
-                final kbps = (results[1] as num).toDouble();
-                \`\`\`
-                跟 v1.0.45 套路完全一致, 显式转型避开 dynamic→int/double 编译错
-              - 验证: 装 v1.0.70 → CI Build APK 应通过, 选源页 CF 加速时显示 \`Xms · YMB/s\`, CF off 走原 URL
-              - 行为跟 v1.0.69 设计一致, **只是修了编译错**, 没改其他逻辑
+            - **v1.0.70 tag 触发的 build 失败: pubspec 多了 'v' 前缀**
+              - 现象: v1.0.70 push 触发 tag build (#487), 6m 11s 报红. **但同 commit push 触发的 main build (#486) success**
+                - main build 走 \`flutter pub get\` 直接读 pubspec.yaml 里的 \`version: 1.0.70+1\`, OK
+                - tag build 先跑 \`Sync version from git tag\` 步骤, 把 \`$GITHUB_REF#refs/tags/v\` (= "v1.0.70") 直接 sed 进 pubspec
+                  → \`version: v1.0.70+1\` → Dart 解析报 "Bad state: Cannot parse version 'v1.0.70+1'"
+              - 真实错误 (从 CI log): \`Error on line 4, column 11 of pubspec.yaml: Bad state: Cannot parse version "v1.0.70+1" at character 0\`
+              - 根因 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
+                - \`${GITHUB_REF#refs/tags/v}\` 拿到的 TAG **还带 'v' 前缀** (e.g. "v1.0.70")
+                - else 分支直接 \`sed -i "s/^version: .*/version: $TAG+1/"\`
+                - 写出来就是 \`version: v1.0.70+1\`, 多了 'v' 前缀
+                - Dart pubspec 的 version 字段格式是 X.Y.Z+BUILD, **不接受 v 前缀**
+              - 修复 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
+                - 在 if/else 之前先 \`TAG=${TAG#v}\` 剥 'v' 前缀
+                - 改完: TAG = "1.0.70", else 分支 sed 写 \`version: 1.0.70+1\`, 合法
+              - 验证: 装 v1.0.71 → CI Build APK #489 应通过, release 出来带 APK
+              - 行为跟 v1.0.70 一致 (代码没动, 只修了 CI tag sync 步骤)
+
+            ---`,
+              'v1.0.70': `## 更新日志
+
+            ### ⚠️ 此版本 build 失败, 请装 v1.0.71
+
+            - v1.0.70 push 触发 tag build (#487) 失败, 但 main build (#486) 成功
+            - 真实错误: \`Sync version from git tag\` 步骤把 "v1.0.70" sed 进 pubspec,
+              变成 \`version: v1.0.70+1\` 多 'v' 前缀, Dart 不认, build step 报红
+            - 后续 release step 因为 build 失败被 skipped, **v1.0.70 release 没附 APK**
+            - 修复在 v1.0.71 一次 commit 上, 跟 v1.0.70 是同一份代码 + 修 CI tag sync
+            - 不要装这个 release (空 release, 无 APK)
 
             ---`,
               'v1.0.69': `## 更新日志
 
-            ### ⚠️ 此版本 build 失败, 请装 v1.0.70
+            ### ⚠️ 此版本 build 失败, 请装 v1.0.71 (v1.0.70 也是空 build)
 
             - v1.0.69 push 后 CI Build APK #485 失败 (编译错, 详见 v1.0.70 changelog)
-            - 修复在 v1.0.70 一次 commit 上, 跟 v1.0.69 是同一份代码 + 修编译错
-            - 不要装这个 release, GitHub 上也没自动生成 release apk
+            - v1.0.70 修了编译错, 但 tag sync 步骤又有 'v' 前缀 bug, 又 build 失败
+            - 修复在 v1.0.71 一次 commit 上, 跟 v1.0.69 是同一份代码 + 修编译错 + 修 CI
+            - 不要装这两个 release
 
             ---`,
               'v1.0.68': `## 更新日志
