@@ -23,26 +23,41 @@ class M3U8Service {
   ///   - M3U8 manifest 只下载 1 次 (之前 _getResolutionFromM3U8 又下了一次)
   ///   - 下载速度只测 1 个段 + Range 请求只取 64KB (之前下 3 个完整段)
   ///   - 对直接 MP4 源 (不是 M3U8) 走 _measureMp4Speed 单独测
-  Future<Map<String, dynamic>> getStreamInfo(String streamUrl) async {
+  /// v1.0.74: 测速时支持 URL 包装 + 原始 base URL
+  ///   - [originalUrl]: 解析 m3u8 segment 相对路径用的 base
+  ///     (测 worker URL 时必须传原始 m3u8 URL, 不传会用 worker URL 解析, segment 全错)
+  ///   - [urlWrapper]: 测速时包装 segment URL 的回调
+  ///     (传 `(url) => buildProxiedUrl(url)` 可让 segment 测速也走 worker)
+  Future<Map<String, dynamic>> getStreamInfo(
+    String streamUrl, {
+    String? originalUrl,
+    String Function(String)? urlWrapper,
+  }) async {
     try {
       // 1) GET M3U8 manifest 一次, 同时解析 segments 和 resolution
+      //    streamUrl 可能是 worker URL, 但 manifest 内容来自 upstream (worker 透传),
+      //    里面 segment 路径是 upstream 相对路径, 必须用 originalUrl (upstream base) 解析
       final m3u8Content = await _fetchM3U8Content(streamUrl);
       if (m3u8Content == null) {
         // 不是 M3U8, 走直链测速
-        return await _measureDirectStream(streamUrl);
+        return await _measureDirectStream(streamUrl, urlWrapper: urlWrapper);
       }
-      final segments = _parseSegmentsFromContent(m3u8Content, streamUrl);
+      final baseForSegments = originalUrl ?? streamUrl;
+      final segments = _parseSegmentsFromContent(m3u8Content, baseForSegments);
       final resolution = _parseResolutionFromContent(m3u8Content);
       if (segments.isEmpty) {
         // M3U8 但没解析到 segment (罕见, 比如只有 master playlist 没有 variant)
-        return await _measureDirectStream(streamUrl);
+        return await _measureDirectStream(streamUrl, urlWrapper: urlWrapper);
       }
 
       // 2) 并发: HEAD 测延迟 + Range 测速 (都用第 1 个 segment, 反正测的是同一条线路)
+      //    segments[0] 是 absolute URL (用 originalUrl 解析), 用 urlWrapper 包装
+      //    → 走 worker 测速, 反映真实 worker 加速效果
       final firstSegment = segments.first;
+      final testUrl = urlWrapper != null ? urlWrapper(firstSegment) : firstSegment;
       final futures = await Future.wait([
-        _measureLatency(firstSegment),
-        _measureDownloadSpeedFast(firstSegment),
+        _measureLatency(testUrl),
+        _measureDownloadSpeedFast(testUrl),
       ]);
       final latency = futures[0] as int;
       final downloadSpeedKBps = futures[1] as double;
@@ -108,11 +123,17 @@ class M3U8Service {
   }
 
   /// 直链 (非 M3U8) 测速: 用 Range 请求取前 64KB
-  Future<Map<String, dynamic>> _measureDirectStream(String streamUrl) async {
+  /// v1.0.74: 支持 urlWrapper 包装测速 URL (走 worker 测速)
+  Future<Map<String, dynamic>> _measureDirectStream(
+    String streamUrl, {
+    String Function(String)? urlWrapper,
+  }) async {
     try {
+      // 测速 URL: 直链的话, urlWrapper 包一次 (走 worker)
+      final testUrl = urlWrapper != null ? urlWrapper(streamUrl) : streamUrl;
       final futures = await Future.wait([
-        _measureLatency(streamUrl),
-        _measureDownloadSpeedFast(streamUrl),
+        _measureLatency(testUrl),
+        _measureDownloadSpeedFast(testUrl),
       ]);
       return {
         'resolution': {'width': 0, 'height': 0}, // 直链没法从 M3U8 拿分辨率

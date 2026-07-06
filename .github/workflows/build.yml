@@ -93,6 +93,48 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.74': `## 更新日志
+
+            ### 🐛 修复
+
+            - **开 CF 加速时选源页又只剩 ms 没下载速度 (v1.0.69 引入, v1.0.74 修)**
+              - 现象: 启用 CF Worker 加速后, 选源页只看到 "Xms" ping 数字,
+                看不到 KB/s 下载速度 (v1.0.45 引入的 "720p · 1.2MB/s · 85ms"
+                完整显示格式被退化成只剩 ms)
+              - 根因 ([m3u8_service.dart#_resolveUrl](file:///workspace/lib/services/m3u8_service.dart)):
+                - v1.0.69 测速改走 \`buildProxiedUrl\` → 拿到 worker URL
+                  (\`https://<worker>/m3u8?url=<encoded>\`)
+                - \`getStreamInfo\` 内部 \`_fetchM3U8Content\` GET worker URL,
+                  worker 透传 upstream m3u8 文本 ✓ (latency 拿到)
+                - 然后 \`_parseSegmentsFromContent\` 解析 segment 时, \`_resolveUrl\`
+                  用 **base URL = worker URL** 解析 m3u8 里的相对 segment
+                  → segment 拼成 \`https://<worker>/seg001.ts\` 或
+                  \`https://<worker>/m3u8/seg001.ts\` (worker 路径根本不存在)
+                - 测速时 GET 错地址 → 404 → \`_measureDownloadSpeedFast\` catch 静默吞
+                  → return 0.0
+                - \`getStreamInfo\` 拿到 \`{downloadSpeed: 0, success: true}\`,
+                  UI 走 success 分支, 但 \`formatLoadSpeed()\` 在 KB/s <= 0 时返回空
+                  → 拼出来只剩 "Xms"
+              - 修复:
+                - [m3u8_service.dart#getStreamInfo](file:///workspace/lib/services/m3u8_service.dart) 加两个可选参数:
+                  - \`originalUrl\`: 解析 segment 相对路径用的 base
+                    (测 worker URL 时传原始 m3u8 URL, 让 segment 用 upstream host 解析)
+                  - \`urlWrapper\`: 测速时包装 segment URL 的回调
+                    (传 \`(url) => buildProxiedUrl(url)\` 让 segment 测速也走 worker)
+                - [player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart) 调用时:
+                  - url 仍走 \`buildProxiedUrl\` (跟 CF 开关走, v1.0.69 思路保留)
+                  - 同时把 originalUrl 传给 m3u8_service, 配 urlWrapper
+                - 配套: [_testOneUrl] 的 fallback 改用 originalUrl (原始 m3u8 URL)
+                  测, 避免 worker 配错时 fallback 也撞 worker 限制拿到 0
+                  (跟 v1.0.66 修法精神一致: 兜底显示源真实速度, 不至于 0 让用户以为源挂了)
+              - 验证:
+                1. 装 v1.0.74 → 开 CF 加速 → 选源页打开
+                2. 每个源显示完整 "720p · 1.2MB/s · 85ms" 格式 (v1.0.45 引入)
+                3. KB/s 是 worker 加速后的段速度 (跟用户真实播放体验一致)
+                4. 关 CF 加速: 行为不变, 走原始 URL 测速
+                5. CF 配错场景: fallback 用原始 URL 测, 至少能给个源真实速度
+
+            ---`,
               'v1.0.73': `## 更新日志
 
             ### 🐛 修复

@@ -1335,18 +1335,45 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///      loadSpeedKBps 永远 0 → UI 只显示 ms 看不到 KB/s (用户上条反馈的现象)
   ///      现在改成 \`_fallbackLightSpeed\`: HEAD 测 ms + Range 测 KB/s 并发,
   ///      即使 getStreamInfo 全失败 fallback 也能给出完整测速结果
+  ///
+  /// v1.0.74 修法: 解决 CF 测速时 segment URL 解析错位 + segment 测速不走 worker
+  ///   - 根因: v1.0.69 测 worker URL 时, [M3U8Service.getStreamInfo] 内部
+  ///     \`_resolveUrl\` 用 worker URL 作 base 解析 m3u8 里的相对 segment
+  ///     → segment 拼成 \`https://<worker>/seg.ts\` (worker 不认识) → 404
+  ///     → KB/s 永远 0, UI 只显示 "Xms" (用户 v1.0.73 反馈的现象)
+  ///   - 修法: 调用 [M3U8Service.getStreamInfo] 时
+  ///     1. 传 \`originalUrl\`: 原始 m3u8 URL, 让它用 upstream base 解析 segment
+  ///     2. 传 \`urlWrapper\`: 测速时把 segment URL 也走 worker 包装
+  ///        → segment 走 worker / 端点, 真实测 worker 加速后的段速度
   Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
     if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
-    final url = UserDataService.buildProxiedUrl(s.episodes.first);
-    return _testOneUrl(m3u8, url);
+    final originalUrl = s.episodes.first;
+    // v1.0.74: 测速 URL 跟 CF 开关走 (跟 v1.0.69 一致), 但传 originalUrl 给
+    // m3u8_service 让它解析 segment 时用 upstream base, 并传 urlWrapper 让
+    // segment 测速也走 worker. 修 v1.0.69 引入的 segment 解析错位 bug.
+    final url = UserDataService.buildProxiedUrl(originalUrl);
+    return _testOneUrl(m3u8, url, originalUrl: originalUrl);
   }
 
   /// 单 URL 测速, 内部走 m3u8.getStreamInfo + 轻量 fallback (HEAD+Range), 8s 超时
-  Future<_SourceSpeedInfo> _testOneUrl(M3U8Service m3u8, String url) async {
+  ///
+  /// v1.0.74 新增 \`originalUrl\`: 测 worker URL 时传原始 m3u8 URL,
+  /// m3u8_service 解析 segment 时用 upstream base 避免 segment URL 错位
+  Future<_SourceSpeedInfo> _testOneUrl(
+    M3U8Service m3u8,
+    String url, {
+    String? originalUrl,
+  }) async {
     try {
       // v1.0.69: 4s → 8s. worker 代理下 getStreamInfo 要过 3~4 次转发,
       // 直连 0.5~1.5s 够, worker 转发单次 1~3s 不等, 8s 留足余量.
-      final result = await m3u8.getStreamInfo(url).timeout(
+      // v1.0.74: 传 originalUrl + urlWrapper, 让 m3u8_service 解析 segment
+      // 时用 upstream base, 测速时走 worker 包装.
+      final result = await m3u8.getStreamInfo(
+        url,
+        originalUrl: originalUrl,
+        urlWrapper: (segUrl) => UserDataService.buildProxiedUrl(segUrl),
+      ).timeout(
         const Duration(seconds: 8),
         onTimeout: () => <String, dynamic>{
           'resolution': {'width': 0, 'height': 0},
@@ -1367,8 +1394,12 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
     } catch (_) {}
-    // fallback: HEAD + Range 并发轻量测速 (3s), KB/s + ms 都能拿到
-    return await _fallbackLightSpeed(url);
+    // v1.0.74 fallback: 优先用 originalUrl (原始 m3u8 URL) 测, 避免 worker
+    // 配错时 fallback 也撞 worker 限制拿到 0. 跟 v1.0.66 修法精神一致:
+    // CF 配对时 fallback 不用 (getStreamInfo 已经拿到真 KB/s), CF 配错时
+    // fallback 测原始 URL 至少能给个真实数字, 不至于显示 0 让用户以为是源挂了.
+    final fallbackUrl = originalUrl ?? url;
+    return await _fallbackLightSpeed(fallbackUrl);
   }
 
   String _formatResolution(int h) {
@@ -1391,6 +1422,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///     跟 [m3u8_service.dart] 的 \`_measureDownloadSpeedFast\` 同思路
   ///   - 两者都 1.5s 超时, 失败分别返回 3000ms / 0KB/s
   ///   - 用一个共享 http.Client, 测完 finally 关闭避免泄漏
+  ///
+  /// v1.0.74: 调 [_testOneUrl] 时传的 url 改成 originalUrl (上游 m3u8 URL),
+  /// 这样 worker 配错时 fallback 测的是源真实速度, 不是 worker 限制撞墙.
   Future<_SourceSpeedInfo> _fallbackLightSpeed(String url) async {
     final httpClient = http.Client();
     try {
