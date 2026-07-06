@@ -98,21 +98,30 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _showSkipIntro = false;
   bool _showSkipOutro = false;
 
-  // v1.0.75: m3u8 reload recovery
-  // 跟踪 libmpv 上次发射的非 0 position, 用于检测"非用户主动"的位置跳变
-  // (e.g. m3u8 segment 失败 → libmpv 重新 open 流 → position 突然跳 0)
-  // _currentPosition 本身在 reload 期间会被 stream 发射 0 重置, 失去原位置信息,
-  // 所以单独维护一个 _lastKnownPosition
+  // v1.0.75: m3u8 reload recovery (v1.0.77 撤回)
+  // 跟踪 libmpv 上次发射的非 0 position. 原本用于检测"非用户主动"的位置
+  // 跳变 (m3u8 segment 失败 → libmpv reload → position 跳 0), 自动 seek 回去.
+  //
+  // v1.0.77 撤回: 用户反馈"播放到 28min 重头播广告" 根因是 m3u8 在广告位置
+  // 切到广告子 m3u8 (HLS DISCONTINUITY 切换), 这是视频源/源 host 设计的广
+  // 告插入, 不是 app bug. v1.0.75/v1.0.76 的 recovery seek 把用户 seek 回去
+  // 看广告 (反方向), episode 锁 seek 一次后停在 0 重播广告 (反方向).
+  //
+  // v1.0.77 行为:
+  //   - 保留 _lastKnownPosition / _lastRecoverySeekAt 字段 (后续 worker 端
+  //     过滤方案可能还会用到 _lastKnownPosition 估算"广告前最后一帧位置")
+  //   - 禁用 position stream 里自动 seek 回去的逻辑 (改成空操作加日志)
+  //   - 期望: 28min → 切到广告子 m3u8 → 0:00 (广告流的 0) → 播广告 → 播完
+  //     → 切回主 m3u8 → 回到 28min 继续正片 (跟没改前一样, 至少不卡死)
+  //   - 真正"跳过广告" 修法在 worker 端 (在 Cloudflare Worker /m3u8 端点
+  //     过滤 DISCONTINUITY 之间的广告段), 改完 libmpv 拿到的 m3u8 没广告
+  //     段, 不会切流. 用户改完 worker 后, 28min 不会跳广告, 直接正片继续.
   Duration _lastKnownPosition = Duration.zero;
-  // 上次自动 seek 恢复时间, cooldown 2s 防 libmpv seek 过程里反复触发
   DateTime _lastRecoverySeekAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // v1.0.76: 防广告位置 reload 死循环
-  // 上一版 v1.0.75 没锁, 播到广告位置触发 reload 回到 0 → seek 回去 →
-  // 又到广告位置 → 又 reload → 又 seek → 死循环. 改成"每集只 seek 一次",
-  // 第二次广告位置 reload 不再 seek, 视频停在 0 重头, 用户可手动快进过广告.
-  // 切集时重置 (_playEpisode 里清零)
-  bool _recoverySeekedThisEpisode = false;
+  // v1.0.77: 撤回 _recoverySeekedThisEpisode 锁 (跟 v1.0.76 episode 锁配套
+  // 一起撤回, 锁不再需要, 防止污染下个版本的逻辑)
+  // bool _recoverySeekedThisEpisode = false;
 
   // 自动播下一集: 防止 position/completed 重复触发
   bool _autoPlayedThisEpisode = false;
