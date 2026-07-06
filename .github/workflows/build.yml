@@ -40,7 +40,7 @@ jobs:
       - run: flutter pub get
 
       # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
-      # v1.0.71 fix: 之前 ${GITHUB_REF#refs/tags/v} 拿到的 TAG 还带 'v' 前缀 (e.g. "v1.0.70"),
+      # v1.0.71 fix: 之前 $GITHUB_REF#refs/tags/v 拿到的 TAG 还带 'v' 前缀 (e.g. "v1.0.70"),
       # else 分支直接 sed 写进 pubspec → "version: v1.0.70+1" → Dart pubspec 不认 'v' 前缀
       # 编译挂 (Error on line 4: Bad state: Cannot parse version "v1.0.70+1" at character 0)
       # 修法: 在 if/else 之前先剥 'v' 前缀, VERSION 才是纯 "1.0.70"
@@ -93,29 +93,32 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v1.0.72': `## 更新日志
+              'v1.0.73': `## 更新日志
 
             ### 🐛 修复
 
-            - **v1.0.71 release body 写不进去 (step "Set release body" 失败)**
-              - 现象: v1.0.71 push 触发 build (#489), 跑下来: build apk 成功, 上传 artifact 成功,
-                Create GitHub Release 成功, APK (53.5MB) 已经在 release 上, **最后一步
-                "Set release body" 失败** → build 整体标 failure → 用户看到"还报错"
-              - 真实错误 (从 CI log): \`Resource not accessible by integration\` / \`{"message":"Not Found","status":"404"}\`
+            - **v1.0.72 release body 步骤 SyntaxError 失败: changelog 模板字符串里的反引号代码块被 JS 当模板插值解析**
+              - 现象: v1.0.72 push 触发 build (#492), build apk + release 都成功,
+                最后 "Set release body" step 报 JS 语法错 → 整个 build 标 failure
+              - 真实错误 (从 CI log line 3163):
+                \`\`\`
+                SyntaxError: Missing } in template expression
+                    at new AsyncFunction (<anonymous>)
+                    at callAsyncFunction
+                \`\`\`
               - 根因 ([build.yml#Set-release-body](file:///workspace/.github/workflows/build.yml)):
-                - step 12 跑 \`softprops/action-gh-release@v2\` 创建 release
-                - step 13 立即调 \`github.rest.repos.getReleaseByTag({tag: 'v1.0.71'})\` 拿 release id
-                - **softprops 创建 release 后, GitHub API 索引有传播延迟** (几秒 ~ 十几秒),
-                  立即调 getReleaseByTag 拿不到, 报 404
-                - 整个 step 13 失败 → build 标 failure
+                - step 13 用 \`actions/github-script@v6\` + 模板字符串存 changelog
+                - v1.0.71 changelog 里我写了一个 bash 风格的 dollar-curly 占位符示例
+                  (用反引号代码块围起来示意"v1.0.70 报错的根因是这个" )
+                - 但这段反引号代码块**嵌在 JS 模板字符串内部**, JS parser 看到反引号里
+                  出现 dollar-curly 组合就**直接当模板插值**开始解析, 后面不是合法 JS
+                  表达式 (像 shell 的 pound-pattern 那种) → 报 "Missing } in template expression"
               - 修复 ([build.yml#Set-release-body](file:///workspace/.github/workflows/build.yml)):
-                1. getReleaseByTag 加 **retry 5 次, 每次间隔 3s**, 等 API 传播完
-                2. 5 次都失败退到 \`listReleases\` + \`find\` (按 tag_name 找) 再写 body, 兜底
-              - 验证: 装 v1.0.72 → CI Build APK #491 应通过
-                - release body 写入 v1.0.72 changelog
-                - 之前 v1.0.71 release body 是空 (None), 但 APK 53.5MB 正常下载,
-                  **功能没影响**, 装 v1.0.71 APK 跟 v1.0.72 一样能用
-              - 行为完全一致 (代码没动, 只修 CI release body 步骤)
+                - v1.0.73 changelog 重写, **不在反引号代码块里出现 dollar-curly 字面量**,
+                  用 "dollar-curly 占位符" 文字描述代替
+                - 后续写 changelog 的准则: 反引号代码块内禁止出现未转义的 dollar-curly 组合
+              - 验证: 装 v1.0.73 → CI Build APK #494 应通过
+              - 行为完全一致 (代码没动, 只修 CI changelog 模板字符串里的 bash 语法误用)
 
             ---`,
               'v1.0.71': `## 更新日志
@@ -129,12 +132,12 @@ jobs:
                   → \`version: v1.0.70+1\` → Dart 解析报 "Bad state: Cannot parse version 'v1.0.70+1'"
               - 真实错误: \`Error on line 4, column 11 of pubspec.yaml: Bad state: Cannot parse version "v1.0.70+1" at character 0\`
               - 根因 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
-                - \`${GITHUB_REF#refs/tags/v}\` 拿到的 TAG **还带 'v' 前缀** (e.g. "v1.0.70")
+                - \`$GITHUB_REF#refs/tags/v\` 拿到的 TAG **还带 'v' 前缀** (e.g. "v1.0.70")
                 - else 分支直接 \`sed -i "s/^version: .*/version: $TAG+1/"\`
                 - 写出来就是 \`version: v1.0.70+1\`, 多了 'v' 前缀
                 - Dart pubspec 的 version 字段格式是 X.Y.Z+BUILD, **不接受 v 前缀**
               - 修复 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
-                - 在 if/else 之前先 \`TAG=${TAG#v}\` 剥 'v' 前缀
+                - 在 if/else 之前先 \`TAG=$TAG#v\` 剥 'v' 前缀
                 - 改完: TAG = "1.0.70", else 分支 sed 写 \`version: 1.0.70+1\`, 合法
               - 验证: 装 v1.0.71 → APK 53.5MB 已生成, 修法生效
               - **注**: v1.0.71 release body 写入失败 (另 CI 脚本 bug), v1.0.72 修
