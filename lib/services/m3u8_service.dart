@@ -167,22 +167,107 @@ class M3U8Service {
   }
 
   /// 从M3U8内容中解析片段URL
+  /// v1.0.76: 跳过明显广告段 (URL host 跟 baseUrl 不同 + 含广告关键词)
+  ///
+  /// 用户反馈"播放到广告位置会重头播放" — 根因是视频源 m3u8 在广告位置插入
+  /// 跨域广告 m3u8 segment, 加载失败 (跨域 / CORS / worker 转发不了) →
+  /// libmpv HLS demuxer 触发内部 reload → state.position 跳 0.
+  /// v1.0.75 position jump recovery 在这种场景下会死循环 (广告位置 → 0 →
+  /// seek 回去 → 又到广告位置 → 又 0 → ...), 改成"每集只 seek 一次" 兜底
+  /// (在 player_screen.dart 加 _recoverySeekedThisEpisode 锁).
+  ///
+  /// 本函数这边也加一个轻量过滤: 解析时跳过明显广告 segment, 测速选第一个
+  /// 非广告段测. 这不影响实际播放 (播放还是 libmpv 主导), 但能让测速不被
+  /// 广告段失败干扰 (之前 v1.0.74 修的 segment URL 解析错位类似, 都是
+  /// 测速链路被广告段污染).
   List<String> _parseSegmentsFromContent(String content, String baseUrl) {
     final lines = content.split('\n').map((line) => line.trim()).toList();
     final segments = <String>[];
-    
+
+    // v1.0.76: 提取 baseUrl 的 host, 跨域 = 可能是广告段
+    String? baseHost;
+    try {
+      baseHost = Uri.parse(baseUrl).host.toLowerCase();
+    } catch (_) {}
+
     for (final line in lines) {
       // 跳过注释和空行
       if (line.startsWith('#') || line.isEmpty) {
         continue;
       }
-      
-      // 这应该是一个片段URL
+
       final absoluteUrl = _resolveUrl(line, baseUrl);
+
+      // v1.0.76: 跳过明显广告段
+      if (_looksLikeAdSegment(absoluteUrl, baseHost)) {
+        continue;
+      }
+
       segments.add(absoluteUrl);
     }
-    
+
     return segments;
+  }
+
+  /// v1.0.76: 判断一个 segment URL 是不是"明显广告段"
+  ///
+  /// 启发式规则 (按可靠性排序):
+  ///   1. URL 含广告关键词: \`/ad/\`, \`/ads/\`, \`/advert/\`, \`doubleclick\`,
+  ///      \`googlevideo\` (部分广告走 googlevideo CDN), \`imasdk\`, \`adnxs\`
+  ///   2. URL host 跟 baseUrl host 不一致 (跨域)
+  ///      - 主 m3u8 在 \`cdn.example.com\`, 广告 m3u8 在 \`ads.example.org\`
+  ///      - 例外: 同一域名的不同子域不算跨域 (\`a.cdn.com\` vs \`b.cdn.com\`
+  ///        都属于 \`cdn.com\`)
+  ///   3. URL path 含 \`/ad/\` 形式 (\`/ad/seg.ts\`, \`/ads/seg.ts\`)
+  ///
+  /// 注意: 这只是**轻量启发式**, 不会漏掉所有广告也不会误伤所有正片.
+  /// 真要彻底跳过广告需要在 worker 端改 m3u8 内容 (识别 EXT-X-DISCONTINUITY
+  /// 标签 + 重写 playlist), 不是 app 层能 100% 解决的事.
+  /// 这里只解决"测速被广告段污染" 的次要问题, 主要问题 (v1.0.76 加的 episode
+  /// 锁防死循环) 在 player_screen.dart.
+  static const List<String> _adKeywords = [
+    '/ad/',
+    '/ads/',
+    '/advert/',
+    'doubleclick',
+    'googlevideo',
+    'imasdk',
+    'adnxs',
+    'admarvel',
+    'pubmatic',
+  ];
+
+  bool _looksLikeAdSegment(String url, String? baseHost) {
+    final lower = url.toLowerCase();
+
+    // 规则 1: URL 关键词匹配
+    for (final kw in _adKeywords) {
+      if (lower.contains(kw)) return true;
+    }
+
+    // 规则 2: 跨域 (跟 baseUrl host 不同)
+    if (baseHost != null && baseHost.isNotEmpty) {
+      try {
+        final segHost = Uri.parse(url).host.toLowerCase();
+        if (segHost.isNotEmpty && segHost != baseHost) {
+          // 例外: 同一二级域名 (e.g. a.cdn.example.com vs b.cdn.example.com
+          // 都属于 cdn.example.com, 不算广告)
+          final baseParts = baseHost.split('.');
+          final segParts = segHost.split('.');
+          if (baseParts.length >= 2 && segParts.length >= 2) {
+            final baseApex = baseParts.sublist(baseParts.length - 2).join('.');
+            final segApex = segParts.sublist(segParts.length - 2).join('.');
+            if (baseApex != segApex) {
+              return true; // 二级域名不同, 算跨域广告
+            }
+          } else {
+            return true; // host 解析不出来, 当跨域处理
+          }
+        }
+      } catch (_) {}
+    }
+
+    return false;
   }
 
   /// 解析相对 URL 为绝对 URL

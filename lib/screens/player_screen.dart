@@ -107,6 +107,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 上次自动 seek 恢复时间, cooldown 2s 防 libmpv seek 过程里反复触发
   DateTime _lastRecoverySeekAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // v1.0.76: 防广告位置 reload 死循环
+  // 上一版 v1.0.75 没锁, 播到广告位置触发 reload 回到 0 → seek 回去 →
+  // 又到广告位置 → 又 reload → 又 seek → 死循环. 改成"每集只 seek 一次",
+  // 第二次广告位置 reload 不再 seek, 视频停在 0 重头, 用户可手动快进过广告.
+  // 切集时重置 (_playEpisode 里清零)
+  bool _recoverySeekedThisEpisode = false;
+
   // 自动播下一集: 防止 position/completed 重复触发
   bool _autoPlayedThisEpisode = false;
 
@@ -199,6 +206,14 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 表现: 用户看到 0:00 又从头开始, 进度条瞬间归零, 之前看的位置丢失,
         // 必须手动拖回 (用户最近反馈"播放到一定时候会重新播放" 就是这个).
         //
+        // v1.0.76 增补: 防广告位置 reload 死循环
+        // 实际根因其实是广告段: 视频源 m3u8 在广告位置插入广告 m3u8 segment
+        // (跨域 / 跨 endpoint), 加载失败 → libmpv reload → pos 0.
+        // v1.0.75 seek 回去 → 又到广告位置 → 又重 0 → 又 seek → 死循环.
+        // 修法: 加 _recoverySeekedThisEpisode 锁, **每集只 seek 一次**.
+        // 第二次广告位置 reload 不再 seek, 视频停在 0 重头 (用户可手动快进).
+        // 切集时清零, 下一集再允许一次 seek recovery.
+        //
         // 触发条件 (守门):
         //   1. _scrubbingValue == null — 用户没在拖进度条 (已有守门)
         //   2. wasPos >= 30s — 已经播了至少 30 秒, 不是刚 open 那一刻
@@ -207,12 +222,15 @@ class _PlayerScreenState extends State<PlayerScreen>
         //   4. cooldown 2s — 防止 libmpv seek 过程中反复触发 (e.g. 恢复 seek
         //      完前, position stream 又发 0, 反复 seek 同一个点)
         //   5. _isPlaying == true — 必须正在播, pause 期间不触发
+        //   6. !_recoverySeekedThisEpisode — 这集还没 recovery 过, 避免死循环
         if (wasPos >= const Duration(seconds: 30) &&
             pos < const Duration(seconds: 5) &&
             _isPlaying &&
+            !_recoverySeekedThisEpisode &&
             DateTime.now().difference(_lastRecoverySeekAt) >
                 const Duration(seconds: 2)) {
           _lastRecoverySeekAt = DateTime.now();
+          _recoverySeekedThisEpisode = true; // 锁住, 这集不再触发
           // 自动 seek 回 wasPos (上次的非 0 位置)
           _player.seek(wasPos);
           // 顺便修 _currentPosition 兜底, 避免 UI 在 seek 完成前显示 0
@@ -1621,6 +1639,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 上一集的最后一帧 → 1s 内新一集 pos=1s, _lastKnownPosition=上一集最后一帧,
     // 不会触发 recovery seek 误判. 但保险起见显式清零)
     _lastKnownPosition = Duration.zero;
+    // v1.0.76: 切集时清零 _recoverySeekedThisEpisode 锁, 下一集允许一次
+    // reload recovery seek. (v1.0.75 没这个锁, 切集时也无所谓, 但 v1.0.76
+    // 加锁后必须切集清零, 否则新一集打开后永远无法触发 recovery)
+    _recoverySeekedThisEpisode = false;
 
     // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
     // 仅在用户主动开新集时且和云记忆吻合的那次才用

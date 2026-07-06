@@ -88,44 +88,60 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v1.0.75': `## 更新日志
+              'v1.0.76': `## 更新日志
 
             ### 🐛 修复
 
-            - **播放到一定时候会突然回到 0:00 重新播放 (libmpv m3u8 reload)**
-              - 现象: 播放途中, 进度条瞬间归零, 时间码显示 0:00, 视频从开头重新开始,
-                之前看到的位置丢失, 必须手动拖进度条回去. 跟"开 CF 看不到下载速度"
-                同期出现, 但跟 CF 开关无强相关 (libmpv / m3u8 HLS demuxer 自身行为).
-              - 根因 ([player_screen.dart#streams.position](file:///workspace/lib/screens/player_screen.dart#L190)):
-                - m3u8 HLS 媒体流 (e.g. CF worker 转发的 m3u8) 在某些场景下,
-                  libmpv 内部 HLS demuxer 遇到 segment 加载失败 / 超时 / playlist 刷新
-                  → 自动重新 open 整个 manifest 流
-                - 重新 open 完, state.position 跳回 0, streams.position 立刻发射 0
-                - 之前 _currentPosition 已经被 stream 重置, UI 立即显示 "0:00 / 30:00"
-                - video 从 0 重新开始播放, 进度条归零, 之前看的位置全部丢失
-                - 用户被迫手动拖进度条跳回原位置 (用户最近反馈"重播后得手动快进")
-              - 修法: position jump recovery
-                - [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 新增 \`_lastKnownPosition\`
-                  跟踪 libmpv 上次发射的非 0 position. _currentPosition 本身在 reload
-                  期间被 stream 发射 0 重置, 单独维护一个兜底.
-                - streams.position 监听里检测"非用户主动"的位置跳变:
-                  上一帧 wasPos >= 30s + 这一帧 pos < 5s + _isPlaying + cooldown 2s
-                  → 自动 \`_player.seek(wasPos)\` 跳回原位置
-                - 4 个守门条件避免误判:
-                  1. \`_scrubbingValue == null\` — 用户没在拖进度条
-                  2. \`wasPos >= 30s\` — 已经播了至少 30 秒 (刚 open 那一刻不触发)
-                  3. \`pos < 5s\` — 跳到接近 0 的位置 (不是普通前进/后退)
-                  4. cooldown 2s — 防止 libmpv seek 过程中反复触发
-                - 配套: [_saveCurrentProgress](file:///workspace/lib/screens/player_screen.dart#L1075) 加
-                  \`_lastKnownPosition\` 兜底, 避免 reload 期间 10s 定时器把云端进度覆盖成 0
-                - 配套: [_playEpisode](file:///workspace/lib/screens/player_screen.dart#L1520) 切集时重置
-                  \`_lastKnownPosition = 0\`, 避免上一集的位置被新一集沿用
+            - **v1.0.75 引入广告场景下死循环 (v1.0.76 加 episode 锁 + 测速跳过广告段)**
+              - 现象: 用户装 v1.0.75 后反馈"播放到广告位置就重头播放了, 看了 2 集都是".
+                跟之前"播放到一定时候会重新播放" 听起来一样, 但实际根因不同.
+              - 真正的根因 ([player_screen.dart#streams.position](file:///workspace/lib/screens/player_screen.dart)):
+                - 视频源 m3u8 在**广告位置**插入了一段跨域 / 跨 endpoint 的广告 m3u8
+                  segment (e.g. 主 m3u8 在 \`cdn.video.com\`, 广告 m3u8 在 \`ads.video.com\`)
+                - 广告 segment 加载失败 (CORS / worker 转发不了 / 跨域 timeout) →
+                  libmpv 内部 HLS demuxer 触发 reload → state.position 跳 0
+                - 视频源 m3u8 reload 后从 0 重新开始播
+              - v1.0.75 修法问题: position jump recovery seek 回去后 → 又到广告位置
+                → 又 reload → 又 seek → **死循环**
+              - 修法 v1.0.76:
+                1. **episode 锁** ([player_screen.dart#_recoverySeekedThisEpisode](file:///workspace/lib/screens/player_screen.dart#L115)):
+                   - 加 \`_recoverySeekedThisEpisode\` 标志, **每集只 seek 一次**
+                   - 第二次广告位置 reload 不再 seek, 视频停在 0 重头 (用户可手动快进)
+                   - 切集时清零, 下一集再允许一次 recovery
+                2. **测速跳过广告段** ([m3u8_service.dart#_parseSegmentsFromContent](file:///workspace/lib/services/m3u8_service.dart)):
+                   - 解析 m3u8 segment 时加 \_looksLikeAdSegment 启发式过滤:
+                     URL 含 \`/ad/\`, \`/ads/\`, \`/advert/\`, \`doubleclick\`, \`googlevideo\`,
+                     \`imasdk\`, \`adnxs\`, \`admarvel\`, \`pubmatic\` 等广告关键词
+                     OR URL host 跟 baseUrl 跨二级域名 (e.g. \`cdn.video.com\` vs \`ads.video.com\`)
+                   - 测速选第一个非广告 segment 测, 不被广告段失败干扰
+                   - **不影响实际播放** (播放还是 libmpv 主导, m3u8 内容没改),
+                     只让测速链路不被广告段污染
+              - 限制说明:
+                - episode 锁只解决**死循环**, 没法让用户**跳过广告**
+                - 真要彻底跳过广告, 需要在 worker 端改 m3u8 内容 (识别
+                  \`EXT-X-DISCONTINUITY\` 标签 + 重写 playlist 把广告段剔掉),
+                  不是 app 层能 100% 解决的事
+                - v1.0.76 装上后: 广告位置仍会重头 (第二次不再 seek 回去),
+                  但**不会死循环**, 用户可手动快进过广告段继续看
               - 验证:
-                1. 装 v1.0.75 → 播放任意 m3u8 源
-                2. 等待 ≥ 30s 让 _lastKnownPosition 增长
-                3. 触发 m3u8 reload (e.g. 切网络 / 模拟弱网 / 等待长视频 segment fail)
-                4. 预期: 视频自动 seek 回原位置继续播, 进度条不归零
-                5. 用户手动快进/快退不受影响 (cooldown 2s + _scrubbingValue 守门)
+                1. 装 v1.0.76 → 播放已知带广告的源 (用户报告的 2 集广告位置)
+                2. 到广告位置 → 视频重头 0:00 (episode 锁生效, 不再 seek 回去)
+                3. 拖进度条到广告段结束位置 (e.g. 26:00, 假设广告 24:00-26:00)
+                   继续播 → 正常看正片
+                4. 切下一集 → episode 锁清零, 下一集广告位置仍会重头 1 次
+                   (后续不重头, 跟第 2 步行为一致)
+
+            ---`,
+              'v1.0.75': `## 更新日志
+
+            ### ⚠️ 此版本有 bug, 请装 v1.0.76
+
+            - **广告位置会死循环**: 视频源 m3u8 在广告位置插入广告 segment,
+              加载失败 → libmpv reload → pos 0 → v1.0.75 position jump recovery
+              seek 回去 → 又到广告位置 → 又 reload → 又 seek → 死循环
+            - 用户场景: "播放到广告位置就重头播放了, 看了 2 集都是"
+            - v1.0.76 修: 加 episode 锁 (每集只 seek 一次) + 测速跳过广告段
+            - 不要装这个 release
 
             ---`,
               'v1.0.74': `## 更新日志
