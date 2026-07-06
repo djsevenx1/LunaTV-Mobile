@@ -93,6 +93,31 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v1.0.72': `## 更新日志
+
+            ### 🐛 修复
+
+            - **v1.0.71 release body 写不进去 (step "Set release body" 失败)**
+              - 现象: v1.0.71 push 触发 build (#489), 跑下来: build apk 成功, 上传 artifact 成功,
+                Create GitHub Release 成功, APK (53.5MB) 已经在 release 上, **最后一步
+                "Set release body" 失败** → build 整体标 failure → 用户看到"还报错"
+              - 真实错误 (从 CI log): \`Resource not accessible by integration\` / \`{"message":"Not Found","status":"404"}\`
+              - 根因 ([build.yml#Set-release-body](file:///workspace/.github/workflows/build.yml)):
+                - step 12 跑 \`softprops/action-gh-release@v2\` 创建 release
+                - step 13 立即调 \`github.rest.repos.getReleaseByTag({tag: 'v1.0.71'})\` 拿 release id
+                - **softprops 创建 release 后, GitHub API 索引有传播延迟** (几秒 ~ 十几秒),
+                  立即调 getReleaseByTag 拿不到, 报 404
+                - 整个 step 13 失败 → build 标 failure
+              - 修复 ([build.yml#Set-release-body](file:///workspace/.github/workflows/build.yml)):
+                1. getReleaseByTag 加 **retry 5 次, 每次间隔 3s**, 等 API 传播完
+                2. 5 次都失败退到 \`listReleases\` + \`find\` (按 tag_name 找) 再写 body, 兜底
+              - 验证: 装 v1.0.72 → CI Build APK #491 应通过
+                - release body 写入 v1.0.72 changelog
+                - 之前 v1.0.71 release body 是空 (None), 但 APK 53.5MB 正常下载,
+                  **功能没影响**, 装 v1.0.71 APK 跟 v1.0.72 一样能用
+              - 行为完全一致 (代码没动, 只修 CI release body 步骤)
+
+            ---`,
               'v1.0.71': `## 更新日志
 
             ### 🐛 修复
@@ -102,7 +127,7 @@ jobs:
                 - main build 走 \`flutter pub get\` 直接读 pubspec.yaml 里的 \`version: 1.0.70+1\`, OK
                 - tag build 先跑 \`Sync version from git tag\` 步骤, 把 \`$GITHUB_REF#refs/tags/v\` (= "v1.0.70") 直接 sed 进 pubspec
                   → \`version: v1.0.70+1\` → Dart 解析报 "Bad state: Cannot parse version 'v1.0.70+1'"
-              - 真实错误 (从 CI log): \`Error on line 4, column 11 of pubspec.yaml: Bad state: Cannot parse version "v1.0.70+1" at character 0\`
+              - 真实错误: \`Error on line 4, column 11 of pubspec.yaml: Bad state: Cannot parse version "v1.0.70+1" at character 0\`
               - 根因 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
                 - \`${GITHUB_REF#refs/tags/v}\` 拿到的 TAG **还带 'v' 前缀** (e.g. "v1.0.70")
                 - else 分支直接 \`sed -i "s/^version: .*/version: $TAG+1/"\`
@@ -111,8 +136,8 @@ jobs:
               - 修复 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
                 - 在 if/else 之前先 \`TAG=${TAG#v}\` 剥 'v' 前缀
                 - 改完: TAG = "1.0.70", else 分支 sed 写 \`version: 1.0.70+1\`, 合法
-              - 验证: 装 v1.0.71 → CI Build APK #489 应通过, release 出来带 APK
-              - 行为跟 v1.0.70 一致 (代码没动, 只修了 CI tag sync 步骤)
+              - 验证: 装 v1.0.71 → APK 53.5MB 已生成, 修法生效
+              - **注**: v1.0.71 release body 写入失败 (另 CI 脚本 bug), v1.0.72 修
 
             ---`,
               'v1.0.70': `## 更新日志
@@ -1284,11 +1309,36 @@ jobs:
             配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 \`bgm.tv\` 自动补 UA + Referer 兜头（commit \`87435d7\`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 \`_worker.js\` 即可。`,
             };
             const body = changelogs[tagName] || `Release ${tagName}`;
-            const release = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag: tagName,
-            });
+            // v1.0.72 fix: 之前直接 getReleaseByTag 拿 release, 偶尔 404 Not Found
+            // 根因: softprops/action-gh-release@v2 在 step 12 创建 release 后, GitHub API
+            // 有传播延迟, 立即调 getReleaseByTag 会拿到 404, 整个 step 失败
+            // 修法: retry 5 次, 每次间隔 3s, 等 API 索引传播完. 仍然 404 就退到
+            // listReleases find (按 tag_name 找) 再 retry, 兜底
+            let release;
+            for (let i = 0; i < 5; i++) {
+              try {
+                release = await github.rest.repos.getReleaseByTag({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag: tagName,
+                });
+                break;
+              } catch (e) {
+                if (i < 4) {
+                  core.info(`getReleaseByTag 失败 (try ${i+1}/5, ${e.status||e.message}), 等 3s 重试`);
+                  await new Promise(r => setTimeout(r, 3000));
+                } else {
+                  core.info(`getReleaseByTag 5 次都 404, 退到 listReleases 找 tag=${tagName}`);
+                  const list = await github.rest.repos.listReleases({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    per_page: 10,
+                  });
+                  release = { data: list.data.find(r => r.tag_name === tagName) };
+                  if (!release.data) throw new Error(`release ${tagName} 找不到 (listReleases 也无)`);
+                }
+              }
+            }
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
