@@ -40,15 +40,10 @@ jobs:
       - run: flutter pub get
 
       # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
-      # v1.0.71 fix: 之前 $GITHUB_REF#refs/tags/v 拿到的 TAG 还带 'v' 前缀 (e.g. "v1.0.70"),
-      # else 分支直接 sed 写进 pubspec → "version: v1.0.70+1" → Dart pubspec 不认 'v' 前缀
-      # 编译挂 (Error on line 4: Bad state: Cannot parse version "v1.0.70+1" at character 0)
-      # 修法: 在 if/else 之前先剥 'v' 前缀, VERSION 才是纯 "1.0.70"
       - name: Sync version from git tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          TAG=${TAG#v}  # 剥 'v' 前缀, TAG 变 "1.0.70"
+          TAG=${GITHUB_REF#refs/tags/v}
           if [[ "$TAG" == *"+"* ]]; then
             VERSION=${TAG%+*}
             BUILD=${TAG#*+}
@@ -93,121 +88,47 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v1.0.74': `## 更新日志
+              'v1.0.75': `## 更新日志
 
             ### 🐛 修复
 
-            - **开 CF 加速时选源页又只剩 ms 没下载速度 (v1.0.69 引入, v1.0.74 修)**
-              - 现象: 启用 CF Worker 加速后, 选源页只看到 "Xms" ping 数字,
-                看不到 KB/s 下载速度 (v1.0.45 引入的 "720p · 1.2MB/s · 85ms"
-                完整显示格式被退化成只剩 ms)
-              - 根因 ([m3u8_service.dart#_resolveUrl](file:///workspace/lib/services/m3u8_service.dart)):
-                - v1.0.69 测速改走 \`buildProxiedUrl\` → 拿到 worker URL
-                  (\`https://<worker>/m3u8?url=<encoded>\`)
-                - \`getStreamInfo\` 内部 \`_fetchM3U8Content\` GET worker URL,
-                  worker 透传 upstream m3u8 文本 ✓ (latency 拿到)
-                - 然后 \`_parseSegmentsFromContent\` 解析 segment 时, \`_resolveUrl\`
-                  用 **base URL = worker URL** 解析 m3u8 里的相对 segment
-                  → segment 拼成 \`https://<worker>/seg001.ts\` 或
-                  \`https://<worker>/m3u8/seg001.ts\` (worker 路径根本不存在)
-                - 测速时 GET 错地址 → 404 → \`_measureDownloadSpeedFast\` catch 静默吞
-                  → return 0.0
-                - \`getStreamInfo\` 拿到 \`{downloadSpeed: 0, success: true}\`,
-                  UI 走 success 分支, 但 \`formatLoadSpeed()\` 在 KB/s <= 0 时返回空
-                  → 拼出来只剩 "Xms"
-              - 修复:
-                - [m3u8_service.dart#getStreamInfo](file:///workspace/lib/services/m3u8_service.dart) 加两个可选参数:
-                  - \`originalUrl\`: 解析 segment 相对路径用的 base
-                    (测 worker URL 时传原始 m3u8 URL, 让 segment 用 upstream host 解析)
-                  - \`urlWrapper\`: 测速时包装 segment URL 的回调
-                    (传 \`(url) => buildProxiedUrl(url)\` 让 segment 测速也走 worker)
-                - [player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart) 调用时:
-                  - url 仍走 \`buildProxiedUrl\` (跟 CF 开关走, v1.0.69 思路保留)
-                  - 同时把 originalUrl 传给 m3u8_service, 配 urlWrapper
-                - 配套: [_testOneUrl] 的 fallback 改用 originalUrl (原始 m3u8 URL)
-                  测, 避免 worker 配错时 fallback 也撞 worker 限制拿到 0
-                  (跟 v1.0.66 修法精神一致: 兜底显示源真实速度, 不至于 0 让用户以为源挂了)
+            - **播放到一定时候会突然回到 0:00 重新播放 (libmpv m3u8 reload)**
+              - 现象: 播放途中, 进度条瞬间归零, 时间码显示 0:00, 视频从开头重新开始,
+                之前看到的位置丢失, 必须手动拖进度条回去. 跟"开 CF 看不到下载速度"
+                同期出现, 但跟 CF 开关无强相关 (libmpv / m3u8 HLS demuxer 自身行为).
+              - 根因 ([player_screen.dart#streams.position](file:///workspace/lib/screens/player_screen.dart#L190)):
+                - m3u8 HLS 媒体流 (e.g. CF worker 转发的 m3u8) 在某些场景下,
+                  libmpv 内部 HLS demuxer 遇到 segment 加载失败 / 超时 / playlist 刷新
+                  → 自动重新 open 整个 manifest 流
+                - 重新 open 完, state.position 跳回 0, streams.position 立刻发射 0
+                - 之前 _currentPosition 已经被 stream 重置, UI 立即显示 "0:00 / 30:00"
+                - video 从 0 重新开始播放, 进度条归零, 之前看的位置全部丢失
+                - 用户被迫手动拖进度条跳回原位置 (用户最近反馈"重播后得手动快进")
+              - 修法: position jump recovery
+                - [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) 新增 \`_lastKnownPosition\`
+                  跟踪 libmpv 上次发射的非 0 position. _currentPosition 本身在 reload
+                  期间被 stream 发射 0 重置, 单独维护一个兜底.
+                - streams.position 监听里检测"非用户主动"的位置跳变:
+                  上一帧 wasPos >= 30s + 这一帧 pos < 5s + _isPlaying + cooldown 2s
+                  → 自动 \`_player.seek(wasPos)\` 跳回原位置
+                - 4 个守门条件避免误判:
+                  1. \`_scrubbingValue == null\` — 用户没在拖进度条
+                  2. \`wasPos >= 30s\` — 已经播了至少 30 秒 (刚 open 那一刻不触发)
+                  3. \`pos < 5s\` — 跳到接近 0 的位置 (不是普通前进/后退)
+                  4. cooldown 2s — 防止 libmpv seek 过程中反复触发
+                - 配套: [_saveCurrentProgress](file:///workspace/lib/screens/player_screen.dart#L1075) 加
+                  \`_lastKnownPosition\` 兜底, 避免 reload 期间 10s 定时器把云端进度覆盖成 0
+                - 配套: [_playEpisode](file:///workspace/lib/screens/player_screen.dart#L1520) 切集时重置
+                  \`_lastKnownPosition = 0\`, 避免上一集的位置被新一集沿用
               - 验证:
-                1. 装 v1.0.74 → 开 CF 加速 → 选源页打开
-                2. 每个源显示完整 "720p · 1.2MB/s · 85ms" 格式 (v1.0.45 引入)
-                3. KB/s 是 worker 加速后的段速度 (跟用户真实播放体验一致)
-                4. 关 CF 加速: 行为不变, 走原始 URL 测速
-                5. CF 配错场景: fallback 用原始 URL 测, 至少能给个源真实速度
+                1. 装 v1.0.75 → 播放任意 m3u8 源
+                2. 等待 ≥ 30s 让 _lastKnownPosition 增长
+                3. 触发 m3u8 reload (e.g. 切网络 / 模拟弱网 / 等待长视频 segment fail)
+                4. 预期: 视频自动 seek 回原位置继续播, 进度条不归零
+                5. 用户手动快进/快退不受影响 (cooldown 2s + _scrubbingValue 守门)
 
             ---`,
-              'v1.0.73': `## 更新日志
-
-            ### 🐛 修复
-
-            - **v1.0.72 release body 步骤 SyntaxError 失败: changelog 模板字符串里的反引号代码块被 JS 当模板插值解析**
-              - 现象: v1.0.72 push 触发 build (#492), build apk + release 都成功,
-                最后 "Set release body" step 报 JS 语法错 → 整个 build 标 failure
-              - 真实错误 (从 CI log line 3163):
-                \`\`\`
-                SyntaxError: Missing } in template expression
-                    at new AsyncFunction (<anonymous>)
-                    at callAsyncFunction
-                \`\`\`
-              - 根因 ([build.yml#Set-release-body](file:///workspace/.github/workflows/build.yml)):
-                - step 13 用 \`actions/github-script@v6\` + 模板字符串存 changelog
-                - v1.0.71 changelog 里我写了一个 bash 风格的 dollar-curly 占位符示例
-                  (用反引号代码块围起来示意"v1.0.70 报错的根因是这个" )
-                - 但这段反引号代码块**嵌在 JS 模板字符串内部**, JS parser 看到反引号里
-                  出现 dollar-curly 组合就**直接当模板插值**开始解析, 后面不是合法 JS
-                  表达式 (像 shell 的 pound-pattern 那种) → 报 "Missing } in template expression"
-              - 修复 ([build.yml#Set-release-body](file:///workspace/.github/workflows/build.yml)):
-                - v1.0.73 changelog 重写, **不在反引号代码块里出现 dollar-curly 字面量**,
-                  用 "dollar-curly 占位符" 文字描述代替
-                - 后续写 changelog 的准则: 反引号代码块内禁止出现未转义的 dollar-curly 组合
-              - 验证: 装 v1.0.73 → CI Build APK #494 应通过
-              - 行为完全一致 (代码没动, 只修 CI changelog 模板字符串里的 bash 语法误用)
-
-            ---`,
-              'v1.0.71': `## 更新日志
-
-            ### 🐛 修复
-
-            - **v1.0.70 tag 触发的 build 失败: pubspec 多了 'v' 前缀**
-              - 现象: v1.0.70 push 触发 tag build (#487), 6m 11s 报红. **但同 commit push 触发的 main build (#486) success**
-                - main build 走 \`flutter pub get\` 直接读 pubspec.yaml 里的 \`version: 1.0.70+1\`, OK
-                - tag build 先跑 \`Sync version from git tag\` 步骤, 把 \`$GITHUB_REF#refs/tags/v\` (= "v1.0.70") 直接 sed 进 pubspec
-                  → \`version: v1.0.70+1\` → Dart 解析报 "Bad state: Cannot parse version 'v1.0.70+1'"
-              - 真实错误: \`Error on line 4, column 11 of pubspec.yaml: Bad state: Cannot parse version "v1.0.70+1" at character 0\`
-              - 根因 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
-                - \`$GITHUB_REF#refs/tags/v\` 拿到的 TAG **还带 'v' 前缀** (e.g. "v1.0.70")
-                - else 分支直接 \`sed -i "s/^version: .*/version: $TAG+1/"\`
-                - 写出来就是 \`version: v1.0.70+1\`, 多了 'v' 前缀
-                - Dart pubspec 的 version 字段格式是 X.Y.Z+BUILD, **不接受 v 前缀**
-              - 修复 ([build.yml#Sync-version-from-git-tag](file:///workspace/.github/workflows/build.yml)):
-                - 在 if/else 之前先 \`TAG=$TAG#v\` 剥 'v' 前缀
-                - 改完: TAG = "1.0.70", else 分支 sed 写 \`version: 1.0.70+1\`, 合法
-              - 验证: 装 v1.0.71 → APK 53.5MB 已生成, 修法生效
-              - **注**: v1.0.71 release body 写入失败 (另 CI 脚本 bug), v1.0.72 修
-
-            ---`,
-              'v1.0.70': `## 更新日志
-
-            ### ⚠️ 此版本 build 失败, 请装 v1.0.71
-
-            - v1.0.70 push 触发 tag build (#487) 失败, 但 main build (#486) 成功
-            - 真实错误: \`Sync version from git tag\` 步骤把 "v1.0.70" sed 进 pubspec,
-              变成 \`version: v1.0.70+1\` 多 'v' 前缀, Dart 不认, build step 报红
-            - 后续 release step 因为 build 失败被 skipped, **v1.0.70 release 没附 APK**
-            - 修复在 v1.0.71 一次 commit 上, 跟 v1.0.70 是同一份代码 + 修 CI tag sync
-            - 不要装这个 release (空 release, 无 APK)
-
-            ---`,
-              'v1.0.69': `## 更新日志
-
-            ### ⚠️ 此版本 build 失败, 请装 v1.0.71 (v1.0.70 也是空 build)
-
-            - v1.0.69 push 后 CI Build APK #485 失败 (编译错, 详见 v1.0.70 changelog)
-            - v1.0.70 修了编译错, 但 tag sync 步骤又有 'v' 前缀 bug, 又 build 失败
-            - 修复在 v1.0.71 一次 commit 上, 跟 v1.0.69 是同一份代码 + 修编译错 + 修 CI
-            - 不要装这两个 release
-
-            ---`,
-              'v1.0.68': `## 更新日志
+              'v1.0.74': `## 更新日志
 
             ### 🐛 修复
 
@@ -238,8 +159,6 @@ jobs:
                 2. 每个源都显示 "720p · 1.2MB/s · 85ms" 这种完整格式 (v1.0.45 引入)
                 3. 跟开不开 CF 加速开关无关, 显示的都是源本身的物理速度
                 4. 真播的时候 (走 \`buildProxiedUrl\` 链路) 加速效果保留, 跟之前一样快
-              - v1.0.69 反向修订: 用户反馈"打开加速要通过加速地址测速不然不准",
-                测速 URL 重新跟 CF 开关走, 详见 v1.0.69 changelog (注意: v1.0.69 编译失败, 实际生效是 v1.0.70)
 
             ---`,
               'v1.0.67': `## 更新日志
@@ -1354,36 +1273,11 @@ jobs:
             配套：[CORSAPI](https://github.com/djsevenx1/CORSAPI) Worker 已加 \`bgm.tv\` 自动补 UA + Referer 兜头（commit \`87435d7\`），如果上次 CF 代理 Bangumi 加载不出来，重新部署一次最新 \`_worker.js\` 即可。`,
             };
             const body = changelogs[tagName] || `Release ${tagName}`;
-            // v1.0.72 fix: 之前直接 getReleaseByTag 拿 release, 偶尔 404 Not Found
-            // 根因: softprops/action-gh-release@v2 在 step 12 创建 release 后, GitHub API
-            // 有传播延迟, 立即调 getReleaseByTag 会拿到 404, 整个 step 失败
-            // 修法: retry 5 次, 每次间隔 3s, 等 API 索引传播完. 仍然 404 就退到
-            // listReleases find (按 tag_name 找) 再 retry, 兜底
-            let release;
-            for (let i = 0; i < 5; i++) {
-              try {
-                release = await github.rest.repos.getReleaseByTag({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  tag: tagName,
-                });
-                break;
-              } catch (e) {
-                if (i < 4) {
-                  core.info(`getReleaseByTag 失败 (try ${i+1}/5, ${e.status||e.message}), 等 3s 重试`);
-                  await new Promise(r => setTimeout(r, 3000));
-                } else {
-                  core.info(`getReleaseByTag 5 次都 404, 退到 listReleases 找 tag=${tagName}`);
-                  const list = await github.rest.repos.listReleases({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    per_page: 10,
-                  });
-                  release = { data: list.data.find(r => r.tag_name === tagName) };
-                  if (!release.data) throw new Error(`release ${tagName} 找不到 (listReleases 也无)`);
-                }
-              }
-            }
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tagName,
+            });
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

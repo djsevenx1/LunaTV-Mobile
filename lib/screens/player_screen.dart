@@ -98,6 +98,15 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _showSkipIntro = false;
   bool _showSkipOutro = false;
 
+  // v1.0.75: m3u8 reload recovery
+  // 跟踪 libmpv 上次发射的非 0 position, 用于检测"非用户主动"的位置跳变
+  // (e.g. m3u8 segment 失败 → libmpv 重新 open 流 → position 突然跳 0)
+  // _currentPosition 本身在 reload 期间会被 stream 发射 0 重置, 失去原位置信息,
+  // 所以单独维护一个 _lastKnownPosition
+  Duration _lastKnownPosition = Duration.zero;
+  // 上次自动 seek 恢复时间, cooldown 2s 防 libmpv seek 过程里反复触发
+  DateTime _lastRecoverySeekAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   // 自动播下一集: 防止 position/completed 重复触发
   bool _autoPlayedThisEpisode = false;
 
@@ -181,7 +190,37 @@ class _PlayerScreenState extends State<PlayerScreen>
     _positionSub = _player.streams.position.listen((pos) {
       if (!mounted) return;
       if (_scrubbingValue == null) {
+        final wasPos = _lastKnownPosition;
         _currentPosition = pos;
+        // v1.0.75: m3u8 reload recovery
+        // 检测"非用户主动"的位置跳变: 上一帧 wasPos >= 30s, 这一帧 pos < 5s
+        // 典型场景: libmpv 内部 m3u8 HLS demuxer 遇到 segment 加载失败 → 重新
+        // open 整个 manifest 流 → state.position 跳回 0 重新开始播.
+        // 表现: 用户看到 0:00 又从头开始, 进度条瞬间归零, 之前看的位置丢失,
+        // 必须手动拖回 (用户最近反馈"播放到一定时候会重新播放" 就是这个).
+        //
+        // 触发条件 (守门):
+        //   1. _scrubbingValue == null — 用户没在拖进度条 (已有守门)
+        //   2. wasPos >= 30s — 已经播了至少 30 秒, 不是刚 open 那一刻
+        //      (刚 open 那一瞬间 _lastKnownPosition = 0, wasPos > pos 自然不成立)
+        //   3. pos < 5s — 跳到接近 0 的位置
+        //   4. cooldown 2s — 防止 libmpv seek 过程中反复触发 (e.g. 恢复 seek
+        //      完前, position stream 又发 0, 反复 seek 同一个点)
+        //   5. _isPlaying == true — 必须正在播, pause 期间不触发
+        if (wasPos >= const Duration(seconds: 30) &&
+            pos < const Duration(seconds: 5) &&
+            _isPlaying &&
+            DateTime.now().difference(_lastRecoverySeekAt) >
+                const Duration(seconds: 2)) {
+          _lastRecoverySeekAt = DateTime.now();
+          // 自动 seek 回 wasPos (上次的非 0 位置)
+          _player.seek(wasPos);
+          // 顺便修 _currentPosition 兜底, 避免 UI 在 seek 完成前显示 0
+          _currentPosition = wasPos;
+        }
+        if (pos > Duration.zero) {
+          _lastKnownPosition = pos;
+        }
         // v1.0.52: 实时刷新时间文字 + 进度条
         // 之前只更新 _currentPosition 但不 setState, 底部栏的
         // "${pos} / ${dur}" 时间文字 + 进度条 thumb 永远停在打开时那一帧,
@@ -1042,6 +1081,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       // 用本地 _currentPosition (stream 一直在跟) 兜底, 保证退出前最后一帧
       // 还有效的 position 能写盘
       if (pos < _currentPosition) pos = _currentPosition;
+      // v1.0.75 兜底: libmpv m3u8 reload 期间, state.completed=true 且
+      // state.position=0, _currentPosition 也被 stream 发射 0 重置, 三者都是 0.
+      // 此时用 _lastKnownPosition 拿"上次的非 0 position", 避免 10s 定时器存 0
+      // 覆盖云端进度. _lastKnownPosition 只在 streams.position 收到 pos > 0 时
+      // 才更新, reload 完 libmpv 重新播时 pos 会从 0 涨, 兜底期间它还停在原值.
+      if (pos < _lastKnownPosition) pos = _lastKnownPosition;
 
       // 正在播放 或 有进度且未播完 (用 !completed 表示)
       if (state.playing || (pos > Duration.zero && !state.completed)) {
@@ -1571,6 +1616,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     // 切集时先把自动切下一集标志重置, 让新一集播完时能再次触发
     _autoPlayedThisEpisode = false;
+    // v1.0.75: 切集时也重置 _lastKnownPosition, 避免上一集的位置被新一集沿用
+    // (新一集 open 完 position stream 从 0 开始, 但 _lastKnownPosition 还停在
+    // 上一集的最后一帧 → 1s 内新一集 pos=1s, _lastKnownPosition=上一集最后一帧,
+    // 不会触发 recovery seek 误判. 但保险起见显式清零)
+    _lastKnownPosition = Duration.zero;
 
     // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
     // 仅在用户主动开新集时且和云记忆吻合的那次才用
