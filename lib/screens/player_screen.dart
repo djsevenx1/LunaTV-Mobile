@@ -63,7 +63,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 多源结果
   List<SearchResult> _sourceResults = [];
   bool _sourcesLoading = true;
-  final Map<String, int> _pingCache = {}; // 兼容旧 fallback 测速
+  final Map<String, int> _pingCache = {}; // 兼容旧 fallback 测速 (v1.0.69 暂留, 不再写入)
   final Map<String, PingState> _pingState = {};
   // v1.0.45: 完整测速信息 (分辨率 + 下载速度 + ping), 用 M3U8Service
   final Map<String, _SourceSpeedInfo> _sourceSpeeds = {};
@@ -1314,33 +1314,40 @@ class _PlayerScreenState extends State<PlayerScreen>
     _sortSourcesBySpeed();
   }
 
-  /// 测单个源: 走 M3U8Service 完整测速, 失败 fallback 到 HEAD ping
+  /// 测单个源: 走 M3U8Service 完整测速, 失败 fallback 到轻量测速 (HEAD + Range)
   ///
-  /// v1.0.68: 测速改回测**原始 URL**, 跟 CF 加速开关解耦.
+  /// v1.0.69: 测速 URL 跟 CF 加速开关走 (回到 v1.0.66 思路, 但 fallback 升级).
   ///
-  /// 之前 (v1.0.67) 测速走 worker 代理 URL (`buildProxiedUrl`):
-  ///   - 流程: client → worker → upstream 拉 m3u8 manifest + 测 .ts 段延迟 + 测 .ts 段下载速度
-  ///   - 一次测速要过 3~4 次 worker 转发, 外层 4s timeout 经常不够
-  ///   - 超时 → fallback HEAD ping → 只剩 ms, KB/s 拿不到 (用户截图就只看到 ms)
-  ///   - 而且 worker 挂了所有源都 unavailable, 没法选源
+  /// 之前 v1.0.68 改成测原始 URL, 理由是"测速是挑源, 不该跟 CF 耦合".
+  /// 用户反馈"打开加速要通过加速地址测速不然不准":
+  ///   - 测原始 URL 看到的 ms/KB/s 是源本身的物理速度
+  ///   - 但用户实际播放走的是 worker, 体验跟直连测速不一致
+  ///   - 例: 源 A 直连 100ms 但 worker 转发卡 2000ms, 测速显示 100ms (快)
+  ///         实际播放却卡 → "不准"
+  ///   - 测 worker URL 才是用户真实播放体验
   ///
-  /// 测速的本质是"挑源": 源 A 比源 B 快, 走不走 worker 都不变. CF 加速是
-  /// "代理层优化", 对所有源一视同仁, 不该耦合到测速流程.
-  ///   - 测速永远走原始 URL → 快、准, KB/s 能算出来, 跟 CF 开关无关
-  ///   - CF 加速是播放时的事: 真播 m3u8 + .ts 段时走 worker, 拿到的是
-  ///     worker 边缘缓存 / 跨地区加速 的好处
-  ///   - worker 配错不影响选源 (选源测的是源本身), 配错时播放才会暴露问题
+  /// v1.0.69 修法:
+  ///   1. URL 走 \`buildProxiedUrl\`: CF on 拿 worker URL, CF off 拿原 URL
+  ///      (buildProxiedUrl 内部 \`_isCfWorkerUsableSync\` 已经按开关处理,
+  ///       开关没开就原样返回, 不需要外部 if/else)
+  ///   2. 外层 timeout 4s → 8s, 让 worker 代理下 \`getStreamInfo\` 有时间跑完
+  ///   3. **fallback 升级**: 之前 \`_fallbackHeadPing\` 只 HEAD 测一次 ms,
+  ///      loadSpeedKBps 永远 0 → UI 只显示 ms 看不到 KB/s (用户上条反馈的现象)
+  ///      现在改成 \`_fallbackLightSpeed\`: HEAD 测 ms + Range 测 KB/s 并发,
+  ///      即使 getStreamInfo 全失败 fallback 也能给出完整测速结果
   Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
     if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
-    return _testOneUrl(m3u8, s.episodes.first);
+    final url = UserDataService.buildProxiedUrl(s.episodes.first);
+    return _testOneUrl(m3u8, url);
   }
 
-  /// v1.0.66: 单 URL 测速, 内部走 m3u8.getStreamInfo + HEAD fallback, 都套 4s 超时
+  /// 单 URL 测速, 内部走 m3u8.getStreamInfo + 轻量 fallback (HEAD+Range), 8s 超时
   Future<_SourceSpeedInfo> _testOneUrl(M3U8Service m3u8, String url) async {
     try {
-      // v1.0.45: 优化后单源测速 0.5~1.5s, 给 4s 超时足够
+      // v1.0.69: 4s → 8s. worker 代理下 getStreamInfo 要过 3~4 次转发,
+      // 直连 0.5~1.5s 够, worker 转发单次 1~3s 不等, 8s 留足余量.
       final result = await m3u8.getStreamInfo(url).timeout(
-        const Duration(seconds: 4),
+        const Duration(seconds: 8),
         onTimeout: () => <String, dynamic>{
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,
@@ -1360,8 +1367,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
     } catch (_) {}
-    // fallback: HEAD ping (1.5s)
-    return await _fallbackHeadPing(url);
+    // fallback: HEAD + Range 并发轻量测速 (3s), KB/s + ms 都能拿到
+    return await _fallbackLightSpeed(url);
   }
 
   String _formatResolution(int h) {
@@ -1370,31 +1377,79 @@ class _PlayerScreenState extends State<PlayerScreen>
     return '${h}p';
   }
 
-  Future<_SourceSpeedInfo> _fallbackHeadPing(String url) async {
-    if (_pingCache.containsKey(url)) {
-      final ms = _pingCache[url]!;
-      return _SourceSpeedInfo(
-        resolution: '', loadSpeedKBps: 0, pingMs: ms,
-        success: ms < 3000,
-      );
-    }
-    final start = DateTime.now();
+  /// v1.0.69: fallback 升级 — HEAD 测 ms + Range 测 KB/s 并发
+  ///
+  /// 之前 \`_fallbackHeadPing\` 只 HEAD 测一次 ms, loadSpeedKBps 永远 0,
+  /// UI 走 success 分支但 KB/s 段为空, 只显示 "Xms" 看不到速度 (用户上条反馈).
+  /// 现在 HEAD + Range 并发, 即使 getStreamInfo 全失败, fallback 也能给
+  /// 完整 ms + KB/s 数据, UI 拼成 "Xms · YMB/s".
+  ///
+  /// 行为细节:
+  ///   - HEAD: 测 worker 转发到 upstream 的"首字节延迟" (worker URL 下)
+  ///           测 client 到 upstream 的延迟 (原始 URL 下)
+  ///   - Range bytes=0-65535: 取前 64KB 算下载速度
+  ///     跟 [m3u8_service.dart] 的 \`_measureDownloadSpeedFast\` 同思路
+  ///   - 两者都 1.5s 超时, 失败分别返回 3000ms / 0KB/s
+  ///   - 用一个共享 http.Client, 测完 finally 关闭避免泄漏
+  Future<_SourceSpeedInfo> _fallbackLightSpeed(String url) async {
     final httpClient = http.Client();
+    try {
+      final results = await Future.wait([
+        _fallbackMeasureLatency(httpClient, url),
+        _fallbackMeasureDownloadSpeed(httpClient, url),
+      ]).timeout(const Duration(milliseconds: 1800));
+      final ms = results[0];
+      final kbps = results[1];
+      return _SourceSpeedInfo(
+        resolution: '',
+        loadSpeedKBps: kbps,
+        pingMs: ms,
+        success: ms < 3000 || kbps > 0,
+      );
+    } catch (_) {
+      return _SourceSpeedInfo.unavailable();
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  Future<int> _fallbackMeasureLatency(http.Client client, String url) async {
+    final start = DateTime.now();
     try {
       final req = http.Request('HEAD', Uri.parse(url))
         ..followRedirects = true
         ..maxRedirects = 2;
-      await httpClient.send(req).timeout(const Duration(milliseconds: 1500));
+      await client.send(req).timeout(const Duration(milliseconds: 1500));
+      return DateTime.now().difference(start).inMilliseconds;
     } catch (_) {
-      _pingCache[url] = 3000;
-      return _SourceSpeedInfo(resolution: '', loadSpeedKBps: 0, pingMs: 3000, success: false);
+      return 3000;
     }
-    final ms = DateTime.now().difference(start).inMilliseconds;
-    _pingCache[url] = ms;
-    return _SourceSpeedInfo(
-      resolution: '', loadSpeedKBps: 0, pingMs: ms,
-      success: ms < 3000,
-    );
+  }
+
+  Future<double> _fallbackMeasureDownloadSpeed(http.Client client, String url) async {
+    try {
+      final stopwatch = Stopwatch()..start();
+      final req = http.Request('GET', Uri.parse(url))
+        ..followRedirects = true
+        ..maxRedirects = 2
+        ..headers['Range'] = 'bytes=0-65535';
+      final resp = await client.send(req).timeout(const Duration(milliseconds: 1500));
+      // 把 body 读完才能算下载速度
+      final bytes = <int>[];
+      await for (final chunk in resp.stream) {
+        bytes.addAll(chunk);
+        if (bytes.length >= 65536) break; // Range 只取 64KB, 收够就停
+        if (stopwatch.elapsedMilliseconds > 1400) break; // 兜底
+      }
+      stopwatch.stop();
+      final n = bytes.length;
+      if (n == 0) return 0.0;
+      final sec = stopwatch.elapsedMilliseconds / 1000.0;
+      if (sec <= 0) return 0.0;
+      return (n / 1024) / sec; // KB/s
+    } catch (_) {
+      return 0.0;
+    }
   }
 
   PingState _stateFromSpeed(_SourceSpeedInfo s) {
