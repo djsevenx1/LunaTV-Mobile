@@ -1394,12 +1394,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<_SourceSpeedInfo> _fallbackLightSpeed(String url) async {
     final httpClient = http.Client();
     try {
+      // v1.0.69 fix: Future.wait 返回 List<dynamic>, results[0/1] 是 dynamic,
+      // 直接赋给 _SourceSpeedInfo 的 int/double 形参编译报错 (argument type
+      // 'dynamic' can't be assigned to 'int'). 显式 .toInt()/.toDouble() 转一下.
+      // v1.0.45 同样套路: \`(result['latency'] as num).toInt()\`
       final results = await Future.wait([
         _fallbackMeasureLatency(httpClient, url),
         _fallbackMeasureDownloadSpeed(httpClient, url),
       ]).timeout(const Duration(milliseconds: 1800));
-      final ms = results[0];
-      final kbps = results[1];
+      final ms = (results[0] as num).toInt();
+      final kbps = (results[1] as num).toDouble();
       return _SourceSpeedInfo(
         resolution: '',
         loadSpeedKBps: kbps,

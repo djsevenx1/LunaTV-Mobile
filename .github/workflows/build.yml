@@ -88,42 +88,34 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
-              'v1.0.69': `## 更新日志
+              'v1.0.70': `## 更新日志
 
             ### 🐛 修复
 
-            - **开了 CF 加速后选源页只显示 ms 不显示 KB/s ([player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart))**
-              - 现象: v1.0.68 测速改回测原始 URL 后, 用户反馈"打开加速要通过加速地址测速不然不准"
-                - 测原始 URL 看到的数字是源本身的物理速度
-                - 但用户实际播放走 worker, 体验跟直连测速不一致
-                - 例: 源 A 直连 100ms 但 worker 转发卡 2000ms, 测速显示 100ms (快),
-                  实际播放却卡 → 数字"不准"
-              - v1.0.69 修 (两处一起改, 不再走 v1.0.68 那种"原始 URL"路线):
-                1. **测速 URL 跟 CF 加速开关走** ([player_screen.dart#_testSourceSpeed](file:///workspace/lib/screens/player_screen.dart)):
-                   \`buildProxiedUrl\` 内部已经按 \`_isCfWorkerUsableSync()\` 处理,
-                   CF on 拿 worker URL, CF off 拿原 URL, 不需要外部 if/else
-                2. **外层 timeout 4s → 8s** ([player_screen.dart#_testOneUrl](file:///workspace/lib/screens/player_screen.dart)):
-                   worker 代理下 \`getStreamInfo\` 要过 3\~4 次 worker 转发, 单次
-                   1\~3s 不等, 8s 留足余量让完整测速能跑完
-                3. **fallback 升级** ([player_screen.dart#_fallbackLightSpeed](file:///workspace/lib/screens/player_screen.dart)):
-                   之前 \`_fallbackHeadPing\` 只 HEAD 测一次 ms, \`loadSpeedKBps\`
-                   永远 0 → UI 只显示 ms 看不到 KB/s
-                   现在 fallback 改成 HEAD + Range **并发** 测速 (1.8s 内):
-                   - HEAD 测 ms (worker 转发到 upstream 的首字节延迟)
-                   - Range bytes=0-65535 取 64KB 算 KB/s
-                   即使 \`getStreamInfo\` 全失败, fallback 也能给完整 "ms · KB/s"
-              - 触发链 (CF on + 测速):
-                1. \`_testSourceSpeed\` 调 \`buildProxiedUrl(episodeUrl)\` → worker URL
-                2. \`_testOneUrl\` 调 \`getStreamInfo\` (8s timeout)
-                   - 成功: 返回完整 \`{resolution, downloadSpeed, latency}\`
-                   - 失败/超时: fallback 到 \`_fallbackLightSpeed\`, HEAD+Range 并发
-                3. UI \`_buildSpeedLabel\` 拼 \`"Xms · YMB/s"\` 完整显示
-              - 触发链 (CF off):
-                \`buildProxiedUrl\` 内部 \`_isCfWorkerUsableSync()\` 返回 false,
-                原样返回原 URL, 测速走直连 (跟 v1.0.45 之前一致)
-              - 不影响: 播放链路 \`buildProxiedUrl\` 没动, 加速效果保留
-              - 不影响: worker 配错时 \`getStreamInfo\` 失败 → fallback 兜底
-                仍能给出 ms + KB/s, 不会全红, 跟 v1.0.66 一样
+            - **v1.0.69 编译报错: dynamic 不能赋给 int/double 形参 ([player_screen.dart#_fallbackLightSpeed](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: v1.0.69 push 后 CI Build APK #485 失败, \`Run flutter build apk --release\` 步骤 8m 报红
+              - 真实错误: \`_fallbackLightSpeed\` 里 \`Future.wait([Future<int>, Future<double>])\` 返回 \`List<dynamic>\`, \`results[0]\` 是 dynamic, 直接赋给 \`_SourceSpeedInfo(pingMs: ms)\` 的 \`int\` 形参编译挂:
+                \`\`\`
+                Error: The argument type 'dynamic' can't be assigned to the parameter type 'int'.
+                \`\`\`
+              - 根因: 跟 v1.0.45 引入 \`getStreamInfo\` 时同样的问题, 当时用 \`(result['latency'] as num).toInt()\` 显式转换, 我 v1.0.69 写 fallback 时漏了
+              - 修复 ([player_screen.dart#_fallbackLightSpeed](file:///workspace/lib/screens/player_screen.dart)):
+                \`\`\`dart
+                final ms = (results[0] as num).toInt();
+                final kbps = (results[1] as num).toDouble();
+                \`\`\`
+                跟 v1.0.45 套路完全一致, 显式转型避开 dynamic→int/double 编译错
+              - 验证: 装 v1.0.70 → CI Build APK 应通过, 选源页 CF 加速时显示 \`Xms · YMB/s\`, CF off 走原 URL
+              - 行为跟 v1.0.69 设计一致, **只是修了编译错**, 没改其他逻辑
+
+            ---`,
+              'v1.0.69': `## 更新日志
+
+            ### ⚠️ 此版本 build 失败, 请装 v1.0.70
+
+            - v1.0.69 push 后 CI Build APK #485 失败 (编译错, 详见 v1.0.70 changelog)
+            - 修复在 v1.0.70 一次 commit 上, 跟 v1.0.69 是同一份代码 + 修编译错
+            - 不要装这个 release, GitHub 上也没自动生成 release apk
 
             ---`,
               'v1.0.68': `## 更新日志
@@ -158,7 +150,7 @@ jobs:
                 3. 跟开不开 CF 加速开关无关, 显示的都是源本身的物理速度
                 4. 真播的时候 (走 \`buildProxiedUrl\` 链路) 加速效果保留, 跟之前一样快
               - v1.0.69 反向修订: 用户反馈"打开加速要通过加速地址测速不然不准",
-                测速 URL 重新跟 CF 开关走, 详见 v1.0.69 changelog
+                测速 URL 重新跟 CF 开关走, 详见 v1.0.69 changelog (注意: v1.0.69 编译失败, 实际生效是 v1.0.70)
 
             ---`,
               'v1.0.67': `## 更新日志
