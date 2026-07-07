@@ -253,29 +253,7 @@ class CfOptimizer {
 class CfOptimizerHttpOverrides extends HttpOverrides {
   static bool _globalInstalled = false;
 
-  /// 安装全局 override (app 启动时调用)
-  static Future<void> install() async {
-    if (_globalInstalled) return;
-    HttpOverrides.global = CfOptimizerHttpOverrides();
-    _globalInstalled = true;
-  }
-
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return _OptimizingHttpClient(super.createHttpClient(context));
-  }
-}
-
-class _OptimizingHttpClient implements HttpClient {
-  final HttpClient _inner;
-  _OptimizingHttpClient(this._inner);
-
-  /// 同步获取优选 IP (启动时已 warmup, 可同步读)
-  List<String>? _cachedBestIps() {
-    // 直接从 SharedPreferences 同步读不可能, 所以走静态缓存
-    return _OptimizingHttpClient._bestIpsCache;
-  }
-
+  // 优选 IP 静态缓存 (跨 _OptimizingHttpClient 实例共享)
   static List<String>? _bestIpsCache;
   static String? _targetDomainCache;
   static bool _featureEnabled = false;
@@ -307,10 +285,27 @@ class _OptimizingHttpClient implements HttpClient {
     _featureEnabled = false;
   }
 
+  /// 安装全局 override (app 启动时调用)
+  static Future<void> install() async {
+    if (_globalInstalled) return;
+    HttpOverrides.global = CfOptimizerHttpOverrides();
+    _globalInstalled = true;
+  }
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return _OptimizingHttpClient(super.createHttpClient(context));
+  }
+}
+
+class _OptimizingHttpClient implements HttpClient {
+  final HttpClient _inner;
+  _OptimizingHttpClient(this._inner);
+
   InternetAddress? _tryOverrideAddress(Uri uri) {
-    if (!_featureEnabled) return null;
-    final ips = _bestIpsCache;
-    final target = _targetDomainCache;
+    if (!CfOptimizerHttpOverrides._featureEnabled) return null;
+    final ips = CfOptimizerHttpOverrides._bestIpsCache;
+    final target = CfOptimizerHttpOverrides._targetDomainCache;
     if (ips == null || ips.isEmpty || target == null || target.isEmpty) {
       return null;
     }
@@ -377,19 +372,29 @@ class _OptimizingHttpClient implements HttpClient {
   @override
   Duration get idleTimeout => _inner.idleTimeout;
   @override
-  set maxConnectionsPerHost(int value) => _inner.maxConnectionsPerHost = value;
+  set maxConnectionsPerHost(int? value) => _inner.maxConnectionsPerHost = value;
   @override
-  int get maxConnectionsPerHost => _inner.maxConnectionsPerHost;
+  int? get maxConnectionsPerHost => _inner.maxConnectionsPerHost;
   @override
   set userAgent(String? value) => _inner.userAgent = value;
   @override
   String? get userAgent => _inner.userAgent;
   @override
+  set connectionFactory(
+          Future<ConnectionTask<Socket>> Function(
+                  Uri url, String? proxyHost, int? proxyPort)?
+              f) =>
+      _inner.connectionFactory = f;
+  @override
+  set keyLog(void Function(String line)? callback) =>
+      _inner.keyLog = callback;
+  @override
   void addCredentials(Uri url, String realm, HttpClientCredentials credentials) =>
       _inner.addCredentials(url, realm, credentials);
   @override
-  void addProxy(String host, int port, {String? scheme}) =>
-      _inner.addProxy(host, port);
+  void addProxyCredentials(String host, int port, String realm,
+          HttpClientCredentials credentials) =>
+      _inner.addProxyCredentials(host, port, realm, credentials);
   @override
   set authenticate(Future<bool> Function(Uri url, String scheme, String? realm)?
           f) =>
@@ -409,36 +414,40 @@ class _OptimizingHttpClient implements HttpClient {
   set findProxy(String Function(Uri url)? f) => _inner.findProxy = f;
   @override
   void close({bool force = false}) => _inner.close(force: force);
+
+  // Shortcut 方法 (host/port/path 形式)
   @override
-  Future<HttpClientRequest> delete(Uri url, {Map<String, String>? headers}) =>
-      _inner.delete(url, headers: headers);
+  Future<HttpClientRequest> delete(String host, int port, String path) =>
+      _inner.delete(host, port, path);
+  @override
+  Future<HttpClientRequest> get(String host, int port, String path) =>
+      _inner.get(host, port, path);
+  @override
+  Future<HttpClientRequest> head(String host, int port, String path) =>
+      _inner.head(host, port, path);
+  @override
+  Future<HttpClientRequest> open(String method, String host, int port,
+          String path) =>
+      _inner.open(method, host, port, path);
+  @override
+  Future<HttpClientRequest> patch(String host, int port, String path) =>
+      _inner.patch(host, port, path);
+  @override
+  Future<HttpClientRequest> post(String host, int port, String path) =>
+      _inner.post(host, port, path);
+  @override
+  Future<HttpClientRequest> put(String host, int port, String path) =>
+      _inner.put(host, port, path);
+
+  // *Url 方法
   @override
   Future<HttpClientRequest> deleteUrl(Uri url) => _inner.deleteUrl(url);
   @override
-  Future<HttpClientRequest> get(Uri url, {Map<String, String>? headers}) =>
-      _inner.get(url, headers: headers);
-  @override
-  Future<HttpClientRequest> head(Uri url, {Map<String, String>? headers}) =>
-      _inner.head(url, headers: headers);
-  @override
   Future<HttpClientRequest> headUrl(Uri url) => _inner.headUrl(url);
-  @override
-  Future<HttpClientRequest> open(String method, Uri url,
-          {Map<String, String>? headers}) =>
-      _inner.open(method, url, headers: headers);
-  @override
-  Future<HttpClientRequest> patch(Uri url, {Map<String, String>? headers}) =>
-      _inner.patch(url, headers: headers);
   @override
   Future<HttpClientRequest> patchUrl(Uri url) => _inner.patchUrl(url);
   @override
-  Future<HttpClientRequest> post(Uri url, {Map<String, String>? headers}) =>
-      _inner.post(url, headers: headers);
-  @override
   Future<HttpClientRequest> postUrl(Uri url) => _inner.postUrl(url);
-  @override
-  Future<HttpClientRequest> put(Uri url, {Map<String, String>? headers}) =>
-      _inner.put(url, headers: headers);
   @override
   Future<HttpClientRequest> putUrl(Uri url) => _inner.putUrl(url);
 }
