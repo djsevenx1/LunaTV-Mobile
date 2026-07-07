@@ -10,6 +10,10 @@
 // libmpv 还是会发 SNI=cdn.example.com, CF edge 看 SNI 路由, cert
 // 用 cdn.example.com 的, 整条链路不破.
 //
+// v2.0.19: 借鉴 cmliu/edgetunnel 的 "预加载竞速拨号" — 同时拨 Top3 优选 IP,
+// 首个连上的就用, 避免单 IP 抽风. 单 IP 拨号 v2.0.16 5s 超时经常触发,
+// 改成并发拨后, 整体连接耗时基本等于最快 IP 的延迟.
+//
 // 触发条件 (全部满足才启动):
 //   1. CF Worker 加速开关打开
 //   2. CF Worker 域名配了
@@ -33,6 +37,7 @@ class VideoProxyServer {
   int _tunnelCount = 0;
   int _fallbackCount = 0;
   int _errorCount = 0;
+  int _raceWinCount = 0; // v2.0.19: 走预加载竞速拨号成功的次数
 
   /// 尝试启动代理.
   ///
@@ -86,6 +91,7 @@ class VideoProxyServer {
   int get tunneledRequests => _tunnelCount;
   int get fallbacks => _fallbackCount;
   int get errors => _errorCount;
+  int get raceWins => _raceWinCount;
 
   /// 关掉代理 (离开播放页 / app 退出时调用)
   Future<void> stop() async {
@@ -95,6 +101,56 @@ class VideoProxyServer {
       await _server?.close();
     } catch (_) {}
     _server = null;
+  }
+
+  /// v2.0.19: 借鉴 cmliu/edgetunnel "预加载竞速拨号"
+  ///
+  /// 同时拨 [candidateIps] 里的所有 IP, 首个连上的 Socket 立刻返回.
+  /// 全部失败 → fallback 到 [originalHost] 再试一次.
+  ///
+  /// 跟单 IP 拨号 (v2.0.16) 的对比:
+  ///   - v2.0.16: 1 IP × 5s 超时, 抽风时整个播放都卡
+  ///   - v2.0.19: 3 IP 并发, 整体耗时 ≈ 最快 IP 的延迟 (100~500ms)
+  ///   - 失败兜底: 全部 IP 都不行 → 连原 host (走 CF 自己的 DNS 解析)
+  static Future<Socket> _connectRace(
+    String originalHost,
+    int port,
+    List<String> candidateIps,
+  ) async {
+    if (candidateIps.isEmpty) {
+      // 没候选 IP, 直接连原 host
+      return await Socket.connect(originalHost, port,
+          timeout: const Duration(seconds: 5));
+    }
+
+    final completer = Completer<Socket>();
+    int errorCount = 0;
+    final totalCount = candidateIps.length;
+
+    for (final ip in candidateIps) {
+      // ignore: unawaited_futures
+      Socket.connect(ip, port, timeout: const Duration(seconds: 5))
+          .then((socket) {
+        if (!completer.isCompleted) {
+          completer.complete(socket);
+        }
+      }).catchError((e) {
+        errorCount++;
+        if (errorCount == totalCount && !completer.isCompleted) {
+          completer.completeError(
+            Exception('all $totalCount IPs failed: $e'),
+          );
+        }
+      });
+    }
+
+    try {
+      return await completer.future;
+    } catch (_) {
+      // 全部 IP 都失败, fallback 到原 host
+      return await Socket.connect(originalHost, port,
+          timeout: const Duration(seconds: 5));
+    }
   }
 
   void _handleConnection(Socket client) {
@@ -236,29 +292,21 @@ class VideoProxyServer {
         ? (int.tryParse(target.substring(colon + 1)) ?? 443)
         : 443;
 
-    final bestIp = CfOptimizerHttpOverrides.pickBestIpForDomain(host);
-    if (bestIp != null) {
-      // 走优选 IP
-      try {
-        final backend = await Socket.connect(bestIp, port,
-            timeout: const Duration(seconds: 5));
-        client.add('HTTP/1.1 200 Connection Established\r\n\r\n'.codeUnits);
-        await client.flush();
-        _tunnelCount++;
-        onBackendReady(backend);
-        return;
-      } catch (e) {
-        // 优选 IP 连不上, fallback 到原 host
-        _fallbackCount++;
-      }
-    }
-
-    // 没优选 / 优选连不上, fallback
+    // v2.0.19: 借鉴 edgetunnel 预加载竞速拨号, 同时拨 Top3 优选 IP
+    final topIps = CfOptimizerHttpOverrides.getTopNIpsForDomain(host, 3);
+    final raceStart = topIps.isNotEmpty ? DateTime.now() : null;
     try {
-      final backend = await Socket.connect(host, port,
-          timeout: const Duration(seconds: 5));
+      final backend = await _connectRace(host, port, topIps);
       client.add('HTTP/1.1 200 Connection Established\r\n\r\n'.codeUnits);
       await client.flush();
+      if (topIps.isNotEmpty) {
+        _raceWinCount++;
+        final ms = DateTime.now().difference(raceStart!).inMilliseconds;
+        // ignore: avoid_print
+        print('[VideoProxy] CONNECT $host: race dial won in ${ms}ms (${topIps.length} candidates)');
+      } else {
+        _tunnelCount++;
+      }
       onBackendReady(backend);
     } catch (e) {
       _errorCount++;
@@ -287,18 +335,13 @@ class VideoProxyServer {
 
     final host = uri.host;
     final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
-    final isHttps = uri.scheme == 'https';
 
-    // HTTP 也走优选 IP 没必要 (只是 GET / 静态资源)
-    // 但保险起见, 跟 HTTPS 一样查一下
-    final bestIp = CfOptimizerHttpOverrides.pickBestIpForDomain(host);
-    final connectHost = bestIp ?? host;
+    // v2.0.19: 借鉴 edgetunnel 预加载竞速拨号
+    final topIps = CfOptimizerHttpOverrides.getTopNIpsForDomain(host, 3);
 
-    // 拼新的 request line + headers
-    final newUri = isHttps
-        ? uri.replace(host: connectHost, port: port)
-        : uri.replace(host: connectHost, port: port);
-    final requestLine = '${state.method} $newUri HTTP/1.1';
+    // v2.0.19: 修 bug — request line + Host header 都用原 host, 不要用 IP
+    // IP 只用来做 TCP 路由, 服务端通过 Host header 找 vhost
+    final requestLine = '${state.method} $uri HTTP/1.1';
 
     final headerLines = <String>[];
     var hostHeaderSet = false;
@@ -323,34 +366,20 @@ class VideoProxyServer {
     final reqBytes = request.codeUnits;
 
     try {
-      final backend = await Socket.connect(connectHost, port,
-          timeout: const Duration(seconds: 5));
+      final backend = await _connectRace(host, port, topIps);
       backend.add(reqBytes);
       if (state.pendingBodyBytes.isNotEmpty) {
         backend.add(state.pendingBodyBytes);
       }
       await backend.flush();
-      _tunnelCount++;
+      if (topIps.isNotEmpty) {
+        _raceWinCount++;
+      } else {
+        _tunnelCount++;
+      }
       onBackendReady(backend);
     } catch (e) {
       _errorCount++;
-      // fallback 到原 host
-      if (bestIp != null && bestIp != host) {
-        try {
-          final backend = await Socket.connect(host, port,
-              timeout: const Duration(seconds: 5));
-          backend.add(reqBytes);
-          if (state.pendingBodyBytes.isNotEmpty) {
-            backend.add(state.pendingBodyBytes);
-          }
-          await backend.flush();
-          _fallbackCount++;
-          onBackendReady(backend);
-          return;
-        } catch (e2) {
-          // ignore
-        }
-      }
       _sendHttpError(client, 502, 'Bad Gateway', closeAll);
     }
   }

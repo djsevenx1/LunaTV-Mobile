@@ -275,6 +275,48 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.19': `## 更新日志
+
+            ### ⚡ 性能
+
+            - **借鉴 [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel) 预加载竞速拨号 ([video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart) + [cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart))**
+              - 现象: v2.0.16 / v2.0.18 视频代理是 **单 IP 5s 超时**, 某个优选 IP
+                抽风时整个播放起播要等 5s, 经常被用户感知成 "app 卡了"
+              - edgetunnel 思路: 同时拨多个反代 IP, **首个连上的就用**, 其余 cancel
+                (它用 \`Promise.race\` / \`Future.any\` 类思路, 只是用了更细的
+                错误聚合)
+              - 移植到 Dart ([VideoProxyServer._connectRace](file:///workspace/lib/services/video_proxy_server.dart#L115-L154)):
+                - 同时拨 Top3 优选 IP (按延迟升序从 [CfOptimizer.getBestIps](file:///workspace/lib/services/cf_optimizer.dart) 拿)
+                - 首个成功的 Socket 立刻返回, 后台继续的 cancel
+                - 全部失败 → fallback 到原 host 再拨一次
+                - 单请求耗时: 5s → 100~500ms (≈ 最快 IP 延迟)
+              - API 改动:
+                - 新增 [CfOptimizerHttpOverrides.getTopNIpsForDomain(domain, n)](file:///workspace/lib/services/cf_optimizer.dart#L322-L333)
+                  返回前 N 个优选 IP (按延迟), 跟现有的 [pickBestIpForDomain](file:///workspace/lib/services/cf_optimizer.dart#L298-L309)
+                  (单 IP + round-robin) 共存, 两种用法各取所需
+              - 顺手修 bug:
+                - [video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart) 的 HTTP 代理
+                  request line 之前用了 IP 当 host, 改成**用原 host**
+                  (IP 只走 TCP, Host header 走路由 — 跟 [cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart) 的 Host
+                  header 保留原域名一致)
+                - _handleHttp 删了 fallback 链, _connectRace 自己处理
+              - 调试: 新增 [VideoProxyServer.raceWins](file:///workspace/lib/services/video_proxy_server.dart#L94) 计数器
+                (走预加载竞速成功的次数), 配合 [tunneledRequests](file:///workspace/lib/services/video_proxy_server.dart#L91) / [fallbacks](file:///workspace/lib/services/video_proxy_server.dart#L92) / [errors](file:///workspace/lib/services/video_proxy_server.dart#L93)
+                一起看, 默认不显示在 UI 上, 调试用
+              - 行为兼容性:
+                | 场景 | v2.0.18 | v2.0.19 |
+                |---|---|---|
+                | 优选 IP 都通 | 串行 1 IP 拨 | 并发 3 IP, 取最快 (≈ 100ms) |
+                | 优选 IP 有 1 个抽风 | 该 IP 5s 超时 → fallback 原 host | 跳到下一个 IP (≈ 200ms) |
+                | 优选 IP 全挂 | fallback 原 host | fallback 原 host (不变) |
+                | 没优选 IP | 直接连原 host | 直接连原 host (不变) |
+              - 验证:
+                1. 装 v2.0.19 APK → 触发视频播放
+                2. logcat 应该有 \`race dial: 3 candidates, won in XXms\`
+                3. 起播应该比 v2.0.18 明显快 (1-2s 提速)
+                4. 没配优选 IP → 行为跟 v2.0.18 完全一致
+
+            ---`,
               'v2.0.18': `## 更新日志
 
             ### 🐛 修复

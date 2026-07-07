@@ -310,6 +310,28 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
 
   static int _ipRoundRobin = 0;
 
+  /// v2.0.19: 取前 N 个优选 IP (按延迟升序, 不打乱顺序)
+  /// 给本地代理并发拨号用 — 借鉴 cmliu/edgetunnel 的 "预加载竞速拨号"
+  ///
+  /// 跟 [pickBestIpForDomain] 的区别:
+  ///   - pickBestIpForDomain: 单 IP + round-robin (多请求时分散流量)
+  ///   - getTopNIpsForDomain: 多个 IP 按时延排, 给并发拨号用
+  ///     (单请求要最快, 不在乎 round-robin)
+  ///
+  /// 返回空 list = 没配 / 域名不对 / 没测过, 调用方应该 fallback 到原 host
+  static List<String> getTopNIpsForDomain(String domain, int n) {
+    if (!_featureEnabled) return const [];
+    final ips = _bestIpsCache;
+    final target = _targetDomainCache;
+    if (ips == null || ips.isEmpty || target == null || target.isEmpty) {
+      return const [];
+    }
+    if (domain.toLowerCase() != target.toLowerCase()) return const [];
+    if (n <= 0) return const [];
+    if (n >= ips.length) return List<String>.from(ips);
+    return ips.sublist(0, n);
+  }
+
   /// 安装全局 override (app 启动时调用)
   static Future<void> install() async {
     if (_globalInstalled) return;
