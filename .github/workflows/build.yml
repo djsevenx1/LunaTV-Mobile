@@ -35,7 +35,7 @@ jobs:
             setup_android: 'false'
             build_command: flutter build ios --release --no-codesign
             artifact_name: ios-runner-no-codesign
-            artifact_path: build/ios/iphoneos/Runner.app
+            artifact_path: ios-runner.zip
 
     steps:
       - uses: actions/checkout@v4
