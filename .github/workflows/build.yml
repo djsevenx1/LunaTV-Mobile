@@ -96,6 +96,41 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.9': `## 更新日志
+
+            ### 🐛 修复
+
+            - **Bangumi 图片加载不出来 (worker 域名填错) ([user_data_service.dart#buildBangumiImageUrl](file:///workspace/lib/services/user_data_service.dart))**
+              - 现象: 用户配了 \`api08.netlify.app\` 当 "CF Worker 加速源域名", Bangumi
+                图片加载不出来. 用户选 "直连" 也不行, 选 "Cors Proxy" 也不行
+              - 根因 (v2.0.9 才发现, 跟 v2.0.5 / v2.0.6 是不同 bug):
+                1. \`api08.netlify.app\` **不是 CF Worker**, 是 netlify 静态 site,
+                   没有 worker 反代能力
+                2. curl 测试: \`https://api08.netlify.app/?url=...\` 返 **404**
+                3. 之前 v2.0.5 加的 cf_worker case 只看域名是否非空, 不看是不是真
+                   worker, 所以填什么都走 netlify 404
+                4. \`buildBangumiImageUrl\` 优先级是: 配 worker > 用户选图片源
+                   配错的 worker 直接卡在第 1 步返 404, 用户选的 "直连" 根本没机会走
+              - 修法: 加 \`_isValidWorkerDomain\` 守门
+                - worker 域名必须以 \`.workers.dev\` 结尾才认
+                - 其他域名 (netlify / 自建 / 失效) 一律当"没配 worker",
+                  fallthrough 到用户选的图片源
+                - 用户选 "直连" → 走 lain.bgm.tv 直连 + UA/Referer
+                - 用户选 "cors_proxy" → 走 ciao-cors 公共代理
+                - 用户选 "cf_worker" → 走公共代理 (没真 worker 就这样)
+              - 行为对比 (用户场景: 配 \`api08.netlify.app\` + 选 "直连"):
+                - 修前: 走 netlify → 404 → 图加载不出来
+                - 修后: netlify 不是 worker, 忽略 → 走直连 + UA/Referer →
+                  走国内代理(用户有代理) → 加载成功
+              - 限制:
+                - 如果用户**自己买域名 CNAME 到 .workers.dev** (e.g. \`cdn.example.com\`
+                  CNAME \`xxx.workers.dev\`), 简化判断会漏掉, 请用 \`*.workers.dev\`
+                  原域名. 后续可加自定义域名白名单配置.
+              - 配套: 之前 v2.0.6 修的 \`release_calendar_screen.dart\` 用
+                \`CachedNetworkImage + getImageRequestHeaders\` 不变, 这次修的是
+                URL 包装层, 两者不冲突.
+
+            ---`,
               'v2.0.8': `## 更新日志
 
             ### 🛠️ CI 简化

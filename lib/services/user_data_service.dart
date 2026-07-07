@@ -577,8 +577,25 @@ class UserDataService {
   /// 就是"已知风险"，给个选择总比没有好。
   static String buildBangumiImageUrl(String originalUrl) {
     // 1) CF Worker 域名:只看域名是否配了,不看开关
+    //
+    // v2.0.9: 加 worker 域名有效性校验, 避免填错域名导致 404
+    //
+    // 之前只看 _cfWorkerDomainCache 是否非空, 但用户可能填错:
+    //   - 填了 netlify site (api08.netlify.app), 不是 CF Worker, 返 404
+    //   - 填了普通自建域名 (example.com), 没有 worker 反代, 返 404
+    //   - 填了失效 worker 域名, 返 404 / 502
+    //
+    // 这些情况下, 之前会直接走 worker URL 返 404, 图片加载不出来
+    // 修法: worker 域名必须以 `.workers.dev` 结尾, 或者域名解析指向
+    // CF Worker 才认. 这里**简化判断** — 只信 `.workers.dev` 结尾的,
+    // 其他域名一概当"没配 worker"处理, 让下面的 fallthrough 走
+    // 用户选的图片源 (cors_proxy / cf_worker / direct)
+    //
+    // ⚠️ 注意: 如果用户自己买域名 CNAME 到 .workers.dev (e.g. cdn.example.com
+    // CNAME xxx.workers.dev), 这个简化判断会漏掉. 这种情况请用真正的
+    // *.workers.dev 域名, 或后续加自定义域名白名单配置
     final worker = _cfWorkerDomainCache;
-    if (worker != null && worker.isNotEmpty) {
+    if (worker != null && worker.isNotEmpty && _isValidWorkerDomain(worker)) {
       return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
     }
 
@@ -595,6 +612,19 @@ class UserDataService {
       return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
     }
     return originalUrl;
+  }
+
+  /// v2.0.9: 判断配置的 worker 域名是不是真正的 CF Worker
+  ///
+  /// 简化规则: 必须以 `.workers.dev` 结尾才算 CF Worker
+  ///
+  /// 为什么不用更复杂的判断 (e.g. HTTP HEAD 请求验活):
+  ///   - buildBangumiImageUrl 是同步函数, 不能 await
+  ///   - 每次图片请求都发 HEAD 太慢, 影响图片加载
+  ///   - 简化判断已能覆盖 99% 情况: 用户填错 netlify / 自建域名时
+  ///     自动 fallback, 不会卡在 404
+  static bool _isValidWorkerDomain(String domain) {
+    return domain.endsWith('.workers.dev');
   }
 
   // Bangumi 数据源 key 同步初始化（main.dart 启动时调用）
