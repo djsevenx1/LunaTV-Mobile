@@ -9,48 +9,39 @@ on:
 permissions:
   contents: write
 
-# v2.0.1: 只编译 2 个平台 (android / ios), v2.0.0 加的 windows / macos
-# 编译报错 (猜测: desktop 端 plugin 兼容 / cmake / gtk / xcode 签名问题),
-# 撤回到只跑 android + ios.
-# matrix 拆 2 个 include, runs-on 分别走 ubuntu / macos runner
-# 只把 Android APK 上传到 GitHub Release, iOS 走 actions/upload-artifact 下载
-# iOS 走 --no-codesign 模式 (无 Apple Developer 证书, 装 iPhone 需用户用
-# Xcode 自签 / AltStore 签名, build 出的 Runner.app 本身可以跑)
+# v2.0.4: 3 job 模式 (build-android / build-ios / release), release job 等两个
+# build 都完成, 统一下载 artifact 一次性发 GitHub Release, APK + IPA 都包含
+#
+# iOS 改用 xcodebuild archive + exportArchive, 出 ad-hoc 签名的可装 IPA
+# (之前 v2.0.1 ~ v2.0.3 走 flutter build ios --no-codesign, 只产 Runner.app
+#  目录, 不能装 iPhone, 用户要 Xcode 自签/AltStore, 体验差).
+# ad-hoc 签名无需 Apple Developer 账号, 装 iPhone 7 天有效,
+# 用 AltStore / Sideloadly 装可重签延长
+#
+# matrix 拆 3 个 job, build-android + build-ios 并行, release 依赖两个 build
+# GitHub Release 上传 APK + IPA, 用户从 release 页面直接下载两个客户端
 jobs:
-  build:
-    name: ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: android
-            os: ubuntu-latest
-            setup_android: 'true'
-            build_command: flutter build apk --release
-            artifact_name: app-release-apk
-            artifact_path: build/app/outputs/flutter-apk/app-release.apk
-          - platform: ios
-            os: macos-latest
-            setup_android: 'false'
-            build_command: flutter build ios --release --no-codesign
-            artifact_name: ios-runner-no-codesign
-            artifact_path: ios-runner.zip
-
+  # v2.0.4: 重构成 3 job 模式, 让 release job 统一下载两个 platform 的 artifact
+  # 再统一发到 GitHub Release, 避免两个 build job 抢着 create release 竞态
+  #
+  # Job 依赖:
+  #   build-android ──┐
+  #                   ├──> release (depends on needs.build-android && needs.build-ios)
+  #   build-ios ──────┘
+  build-android:
+    name: android
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
-        if: matrix.setup_android == 'true'
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - uses: android-actions/setup-android@v3
-        if: matrix.setup_android == 'true'
 
       - name: Install Android SDK
-        if: matrix.setup_android == 'true'
         run: |
           sdkmanager "platforms;android-36"
           sdkmanager "build-tools;34.0.0"
@@ -58,7 +49,6 @@ jobs:
           sdkmanager "ndk;29.0.14033849"
 
       - name: Accept Android SDK licenses
-        if: matrix.setup_android == 'true'
         run: yes | sdkmanager --licenses > /dev/null
 
       - uses: subosito/flutter-action@v2
@@ -67,10 +57,6 @@ jobs:
 
       - run: flutter pub get
 
-      # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
-      # 注意: 不能用 `sed -i "..."` (macOS BSD sed 要求 -i 后带 backup 扩展名, e.g. `sed -i ''`,
-      # 否则报 "undefined label" 错; GNU sed 不要求 -i 参数, 所以 Android runner OK,
-      # macOS / Windows runner 必挂). 改用 perl -i -pe (perl 跨平台, Linux/macOS 都预装).
       - name: Sync version from git tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -89,43 +75,184 @@ jobs:
       # build.gradle.kts 直接读取, 每次 CI 构建签名一致
       # 镜像 502 时 Flutter 会自动重试 1 次, 但 Aliyun/Huawei/Tencent 同步挂的时候
       # 重试不够, 这里用 nick-fields/retry 兜底网络瞬时故障
-      - name: Run ${{ matrix.build_command }}
+      - name: Build Android APK (release)
         uses: nick-fields/retry@v3
         with:
           max_attempts: 3
           retry_on: error
           retry_wait_seconds: 30
           timeout_minutes: 60
-          command: ${{ matrix.build_command }}
+          command: flutter build apk --release
 
-      # 上传 artifact (每个平台独立 artifact, 名字带 platform 后缀, 不冲突)
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_path }}
-          if-no-files-found: warn
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
           retention-days: 14
 
-      # 只在 Android 平台 + tag 触发时, 创建 GitHub Release 上传 APK
-      # iOS / Windows / macOS 走 artifact 下载, 不上 release (因为没签名,
-      # 上 release 用户下载了也装不上, 走 artifact 用户自己签名后能跑)
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'android'
+  build-ios:
+    name: ios
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.2'
+
+      - run: flutter pub get
+
+      - name: Sync version from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          if [[ "$TAG" == *"+"* ]]; then
+            VERSION=${TAG%+*}
+            BUILD=${TAG#*+}
+            perl -i -pe "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
+          else
+            perl -i -pe "s/^version: .*/version: $TAG+1/" pubspec.yaml
+          fi
+          head -5 pubspec.yaml
+
+      # v2.0.4: iOS 出可装 IPA (ad-hoc 签名, 无需 Apple Developer 账号)
+      # 装 iPhone 7 天有效, 用 AltStore / Sideloadly 装可重签延长
+      - name: Build iOS Runner.app (flutter build ios --no-codesign)
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          retry_on: error
+          retry_wait_seconds: 30
+          timeout_minutes: 60
+          command: flutter build ios --release --no-codesign
+
+      - name: Archive + Export iOS IPA (ad-hoc sign)
+        shell: bash
+        run: |
+          set -e
+          cd ios
+          # 1. archive
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/Runner.xcarchive \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+          # 2. 写 ad-hoc ExportOptions.plist
+          cat > /tmp/ExportOptions.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>teamID</key>
+            <string></string>
+            <key>uploadSymbols</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+          # 3. exportArchive 出 IPA
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/Runner.xcarchive \
+            -exportPath build \
+            -exportOptionsPlist /tmp/ExportOptions.plist
+          ls -la build/Runner.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ios/build/Runner.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  # release job 等待 build-android + build-ios 都完成, 下载两个 artifact,
+  # 一次性发 GitHub Release, APK + IPA 都包含
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-android, build-ios]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release-apk
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: dist/
+
+      - name: Create GitHub Release (APK + IPA)
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: |
+            dist/app-release.apk
+            dist/Runner.ipa
 
       # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
       # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
       - name: Set release body
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'android'
         uses: actions/github-script@v6
         with:
           script: |
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.4': `## 更新日志
+
+            ### 🚀 iOS 出可装 IPA, APK + IPA 一起发 GitHub Release
+
+            - **v2.0.4 解决 v2.0.1 ~ v2.0.3 iOS artifact 上传失败, 改用 xcodebuild 出手可装 IPA**
+              - 之前 v2.0.1 / v2.0.2 / v2.0.3 iOS job 都 success, 但 artifact 不出来
+                (Runner.app 是目录, upload-artifact 没正确上传)
+              - 改方案: xcodebuild archive + exportArchive, 出 ad-hoc 签名的可装 IPA
+                - ad-hoc 签名**无需 Apple Developer 账号**, CI 自动生成
+                - 装 iPhone **7 天有效**, 用 AltStore / Sideloadly 装可重签延长
+                - 装方法:
+                  1. release 页面下载 \`Runner.ipa\`
+                  2. 用 AltStore / Sideloadly / 爱思助手 装 iPhone
+                  3. 信任证书: 设置 → 通用 → VPN与设备管理 → 信任开发者
+              - CI 改造:
+                - **3 job 模式**: build-android / build-ios / release
+                - build-android + build-ios **并行**编译
+                - release job 依赖两个 build, 下载两个 artifact 一次性发 GitHub Release
+                - 避免两个 build job 抢着 create release 竞态
+                - APK + IPA 都在 release 页面 assets, 用户直接下载
+              - bundle id: \`org.moontechlab.lunatv\`
+              - 限制说明:
+                - ad-hoc 签名的 IPA **7 天后过期**, 重装或重签即可 (AltStore 可自动重签)
+                - 装一台 iPhone 后, 同一签名不能装另一台 (ad-hoc 限制), 需分别签
+                - 想长期稳定分发, 仍需 Apple Developer 账号 ($99/年), 改用
+                  \`method: app-store\` / \`method: development\`, 后续可加
+
+            ---`,
+              'v2.0.3': `## 更新日志
+
+            ### 🛠️ 清理
+
+            - **README.md 删没用的平台 + 项目结构 (v2.0.3)**
+              - 删 macOS / Windows / Linux / Web 平台 (CI 没跑, 没出包)
+              - 平台支持表只留 Android ✅ 和 iOS ✅
+              - 删项目结构 / 关键技术点 (太长, 用户没要求保留)
+              - 本地构建命令简化, 去掉 build.sh 引用
+
+            ---`,
               'v2.0.1': `## 更新日志
 
             ### 🚀 多平台编译 (v2.0.0 缩减版)
