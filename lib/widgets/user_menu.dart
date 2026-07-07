@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
@@ -42,6 +43,13 @@ class _UserMenuState extends State<UserMenu> {
   bool _isLocalMode = false;
   bool _cfWorkerEnabled = false;
   String _cfWorkerDomain = '';
+  // v2.0.11: CF 优选
+  bool _cfOptimizerEnabled = true;
+  List<String> _cfBestIps = const [];
+  String _cfLastTestHuman = '从未测速';
+  bool _cfOptimizing = false;
+  int _cfProgressDone = 0;
+  int _cfProgressTotal = 0;
 
   @override
   void initState() {
@@ -76,6 +84,9 @@ class _UserMenuState extends State<UserMenu> {
     final localSearch = await UserDataService.getLocalSearch();
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
+    final cfOptimizerEnabled = await CfOptimizer.getEnabled();
+    final cfBestIps = await CfOptimizer.getBestIps();
+    final cfLastTestHuman = await CfOptimizer.lastTestHuman();
 
     if (mounted) {
       setState(() {
@@ -91,6 +102,9 @@ class _UserMenuState extends State<UserMenu> {
         _localSearch = localSearch;
         _cfWorkerEnabled = cfWorkerEnabled;
         _cfWorkerDomain = cfWorkerDomain;
+        _cfOptimizerEnabled = cfOptimizerEnabled;
+        _cfBestIps = cfBestIps;
+        _cfLastTestHuman = cfLastTestHuman;
       });
     }
   }
@@ -724,6 +738,7 @@ class _UserMenuState extends State<UserMenu> {
     required bool value,
     required Future<void> Function(bool) onChanged,
     required IconData icon,
+    String? subtitle,
   }) {
     return Material(
       color: Colors.transparent,
@@ -743,15 +758,33 @@ class _UserMenuState extends State<UserMenu> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                title,
-                style: FontUtils.poppins(context,
-                                    fontSize: 16,
-                  color: widget.isDarkMode
-                      ? const Color(0xFFffffff)
-                      : const Color(0xFF1f2937),
-                  fontWeight: FontWeight.w500,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: FontUtils.poppins(context,
+                                        fontSize: 16,
+                      color: widget.isDarkMode
+                          ? const Color(0xFFffffff)
+                          : const Color(0xFF1f2937),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: FontUtils.sourceCodePro(
+                        context,
+                        fontSize: 11,
+                        color: widget.isDarkMode
+                            ? const Color(0xFF9ca3af)
+                            : const Color(0xFF6b7280),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             GestureDetector(
@@ -792,6 +825,52 @@ class _UserMenuState extends State<UserMenu> {
         ),
       ),
     );
+  }
+
+  /// v2.0.11: 跑一次 CF 优选测速, 显示进度, 测完更新 UI + HttpOverrides
+  Future<void> _runCfOptimization() async {
+    if (_cfOptimizing) return;
+    if (_cfWorkerDomain.isEmpty) return;
+    setState(() {
+      _cfOptimizing = true;
+      _cfProgressDone = 0;
+      _cfProgressTotal = 0;
+    });
+    try {
+      final ips = await CfOptimizer.runOptimization(
+        targetDomain: _cfWorkerDomain,
+        onProgress: (done, total) {
+          if (mounted) {
+            setState(() {
+              _cfProgressDone = done;
+              _cfProgressTotal = total;
+            });
+          }
+        },
+      );
+      if (!mounted) return;
+      if (ips.isNotEmpty) {
+        // 刷新 override 缓存
+        CfOptimizerHttpOverrides.refresh(
+          bestIps: ips,
+          targetDomain: _cfWorkerDomain,
+        );
+        setState(() {
+          _cfBestIps = ips;
+          _cfLastTestHuman = '刚刚';
+        });
+      }
+    } catch (e) {
+      // 静默失败
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cfOptimizing = false;
+        });
+      } else {
+        _cfOptimizing = false;
+      }
+    }
   }
 
   @override
@@ -1041,19 +1120,148 @@ class _UserMenuState extends State<UserMenu> {
                           ? const Color(0xFF374151)
                           : const Color(0xFFe5e7eb),
                     ),
-                    // 优选测速选项
-                    _buildToggleOption(
-                      title: '优选测速',
-                      value: _preferSpeedTest,
-                      onChanged: (value) async {
-                        await UserDataService.savePreferSpeedTest(value);
-                        if (!mounted) return;
-                        setState(() {
-                          _preferSpeedTest = value;
-                        });
-                      },
-                      icon: LucideIcons.zap,
-                    ),
+                    // v2.0.11: CF 优选测速
+                    // 整段只在配了 CF Worker 域名时显示 (没域名没意义)
+                    if (_cfWorkerDomain.isNotEmpty) ...[
+                      _buildToggleOption(
+                        title: 'CF 优选测速',
+                        subtitle: _cfWorkerEnabled
+                            ? '仅在打开 CF Worker 加速时生效'
+                            : '需先打开 CF Worker 加速',
+                        value: _cfOptimizerEnabled,
+                        onChanged: (value) async {
+                          await CfOptimizer.setEnabled(value);
+                          if (!mounted) return;
+                          setState(() {
+                            _cfOptimizerEnabled = value;
+                          });
+                          if (!value) {
+                            await CfOptimizer.clear();
+                            CfOptimizerHttpOverrides.disable();
+                            if (mounted) {
+                              setState(() {
+                                _cfBestIps = const [];
+                                _cfLastTestHuman = '从未测速';
+                              });
+                            }
+                          }
+                        },
+                        icon: LucideIcons.zap,
+                      ),
+                      // 优选状态 + 立即测速按钮
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _cfOptimizerEnabled && _cfWorkerEnabled
+                                  ? '已选 IP: ${_cfBestIps.isEmpty ? '尚未测速' : _cfBestIps.join(', ')}'
+                                  : (_cfWorkerEnabled
+                                      ? '优选已关闭'
+                                      : '需打开 CF Worker 加速'),
+                              style: FontUtils.sourceCodePro(
+                                context,
+                                fontSize: 11,
+                                color: widget.isDarkMode
+                                    ? const Color(0xFF9ca3af)
+                                    : const Color(0xFF6b7280),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '上次测速: $_cfLastTestHuman',
+                              style: FontUtils.sourceCodePro(
+                                context,
+                                fontSize: 11,
+                                color: widget.isDarkMode
+                                    ? const Color(0xFF9ca3af)
+                                    : const Color(0xFF6b7280),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // 进度条 / 按钮
+                            if (_cfOptimizing) ...[
+                              LinearProgressIndicator(
+                                value: _cfProgressTotal == 0
+                                    ? null
+                                    : _cfProgressDone / _cfProgressTotal,
+                                backgroundColor: widget.isDarkMode
+                                    ? const Color(0xFF374151)
+                                    : const Color(0xFFe5e7eb),
+                                valueColor: const AlwaysStoppedAnimation(
+                                  Color(0xFF27ae60),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '测速中: $_cfProgressDone / $_cfProgressTotal',
+                                style: FontUtils.sourceCodePro(
+                                  context,
+                                  fontSize: 11,
+                                  color: widget.isDarkMode
+                                      ? const Color(0xFF9ca3af)
+                                      : const Color(0xFF6b7280),
+                                ),
+                              ),
+                            ] else
+                              Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: _cfWorkerEnabled
+                                      ? _runCfOptimization
+                                      : null,
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _cfWorkerEnabled
+                                          ? const Color(0xFF27ae60)
+                                              .withOpacity(0.12)
+                                          : (widget.isDarkMode
+                                              ? Colors.white.withOpacity(0.05)
+                                              : Colors.grey.withOpacity(0.1)),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          LucideIcons.zap,
+                                          size: 16,
+                                          color: _cfWorkerEnabled
+                                              ? const Color(0xFF27ae60)
+                                              : (widget.isDarkMode
+                                                  ? Colors.white
+                                                      .withOpacity(0.3)
+                                                  : Colors.grey),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '立即优选测速',
+                                          style: FontUtils.poppins(context,
+                                                                              fontSize: 13,
+                                            color: _cfWorkerEnabled
+                                                ? const Color(0xFF27ae60)
+                                                : (widget.isDarkMode
+                                                    ? Colors.white
+                                                        .withOpacity(0.3)
+                                                    : Colors.grey),
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                     // 本地搜索选项（本地模式下不显示）
                     if (!_isLocalMode) ...[
                       // 分割线

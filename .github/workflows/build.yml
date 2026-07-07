@@ -275,6 +275,47 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.11': `## 更新日志
+
+            ### 🚀 CF 优选测速 (加速源 IP 优选)
+
+            - **CF Worker 加速源域名自动优选 IP ([cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart))**
+              - 现象: CF 加速源(CORSAPI worker)国内访问慢. CF Anycast 默认分配 IP
+                经常给美国/欧洲节点,延迟 200-300ms,图片加载慢,视频起播卡
+              - 用户需求: "我要的是加速源" — 优选 CF 加速源域名的 IP,
+                让加速源本身变快
+              - 原理 (客户端纯 override DNS, **CORSAPI worker 代码 0 改动**):
+                1. 启动时跑 TCP 443 握手测速,扫 ~110 个 CF 公开 IPv4 段代表 IP
+                2. 选 Top 3 最低延迟 IP 存 SharedPreferences
+                3. \`HttpOverrides\` 强制把 worker 自定义域名解析到优选 IP
+                4. **只在 CF Worker 加速开关打开时才生效** (用户要求)
+              - 兼容性: CORSAPI 项目不用改,不用重新部署. worker 自己**不知道**
+                客户端走的是优选 IP 还是默认 IP,照常处理请求
+              - 触发条件:
+                - CF Worker 加速开关 (\`getCfWorkerEnabled\`) **必须**打开
+                - CF 优选测速开关 (默认开) 必须打开
+                - CF Worker 域名必须配置
+                - 三者缺一 → 优选不生效, 走系统默认 DNS
+              - 7 天自动重测 + 后台跑 (不阻塞 app 启动)
+              - 菜单新增 "立即优选测速" 按钮 + 进度条, 显示:
+                - 当前优选 IP 列表
+                - 上次测速时间 (人类可读)
+                - 测速进度 (\`X / 110\`)
+              - UI 行为:
+                - 没开 CF Worker 加速 → "需打开 CF Worker 加速" (灰按钮)
+                - 关了优选开关 → 清空缓存, override disable
+                - 换了 worker 域名 → 旧的优选 IP 失效, 自动重测
+              - 已知限制:
+                - libmpv 视频流走原生 C 库, **不**走 Dart HttpClient,
+                  所以视频播放**不**走优选 IP (v2.0.11 已知, 后续如需改要碰 libmpv 层)
+                - 优选**只对自定义域名**有效 (CNAME 到 .workers.dev).
+                  \`*.workers.dev\` 原域名走 CF 自己的 CDN, override 容易被忽略.
+                  如果你只填了 \`xxx.workers.dev\` 没绑自定义域名, 优选**不生效** —
+                  必须在 CORSAPI 项目里绑自定义域名 (e.g. cdn.example.com)
+                - 优选测速在 WiFi / 4G 切换时**不会**自动重测, 7 天后才重测.
+                  想强制重测去菜单点 "立即优选测速"
+
+            ---`,
               'v2.0.10': `## 更新日志
 
             ### 🐛 修复

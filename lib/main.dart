@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
@@ -17,6 +19,7 @@ import 'package:luna_tv/screens/release_calendar_screen.dart';
 import 'package:luna_tv/screens/short_drama_screen.dart';
 import 'package:luna_tv/screens/youtube_screen.dart';
 import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/local_mode_storage_service.dart';
@@ -43,7 +46,73 @@ void main() async {
   // 预热 CF Worker 加速配置(开关+域名),后续 buildProxiedUrl 同步可用
   await UserDataService.warmupCfWorkerConfig();
 
+  // v2.0.11: 安装 CF 优选 HttpOverrides + 预热优选 IP 缓存
+  // 必须在 warmupCfWorkerConfig 之后, 才能拿到 worker 域名
+  await _warmupCfOptimizer();
+
   runApp(LunaTVApp(themeService: themeService));
+}
+
+/// v2.0.11: 预热 CF 优选 — 装 HttpOverrides + 把优选 IP 缓存到静态变量
+///
+/// 触发逻辑:
+/// - CF Worker 加速开关打开 + CF 优选开关打开 + 优选 IP 已缓存 → 装 override
+/// - 否则 → 不装 (override 里的 _featureEnabled=false, 等于无操作)
+/// - 7 天没测过 / 域名变了 → 后台跑优选, 跑完刷新缓存
+Future<void> _warmupCfOptimizer() async {
+  final enabled = await UserDataService.getCfWorkerEnabled();
+  if (!enabled) {
+    return;
+  }
+  final domain = await UserDataService.getCfWorkerDomain();
+  if (domain.isEmpty) {
+    return;
+  }
+  final optimizerEnabled = await CfOptimizer.getEnabled();
+  if (!optimizerEnabled) {
+    return;
+  }
+
+  final bestIps = await CfOptimizer.getBestIps();
+  final storedDomain = await CfOptimizer.getTargetDomain();
+
+  // 装 override (即使优选 IP 空, 装上也不影响, 内部 _featureEnabled=false)
+  if (bestIps.isNotEmpty && storedDomain == domain) {
+    CfOptimizerHttpOverrides.warmup(
+      bestIps: bestIps,
+      targetDomain: domain,
+      featureEnabled: true,
+    );
+    CfOptimizerHttpOverrides.install();
+  } else {
+    // 缓存空 / 域名变了, 装个 disable 的 override
+    CfOptimizerHttpOverrides.warmup(
+      bestIps: const [],
+      targetDomain: domain,
+      featureEnabled: false,
+    );
+    CfOptimizerHttpOverrides.install();
+  }
+
+  // 后台跑优选 (7 天过期 或 没测过 或 域名变了)
+  if (await CfOptimizer.needsRetest(currentDomain: domain)) {
+    // fire-and-forget, 不 await, 让 app 启动不被优选阻塞
+    unawaited(_runBackgroundOptimization(domain));
+  }
+}
+
+Future<void> _runBackgroundOptimization(String domain) async {
+  try {
+    final ips = await CfOptimizer.runOptimization(targetDomain: domain);
+    if (ips.isNotEmpty) {
+      CfOptimizerHttpOverrides.refresh(
+        bestIps: ips,
+        targetDomain: domain,
+      );
+    }
+  } catch (e) {
+    // 静默失败, 不影响 app
+  }
 }
 
 class LunaTVApp extends StatelessWidget {
