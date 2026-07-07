@@ -1,4 +1,4 @@
-name: Build Multi-Platform
+name: Build Android APK
 
 on:
   push:
@@ -9,26 +9,17 @@ on:
 permissions:
   contents: write
 
-# v2.0.4: 3 job 模式 (build-android / build-ios / release), release job 等两个
-# build 都完成, 统一下载 artifact 一次性发 GitHub Release, APK + IPA 都包含
-#
-# iOS 改用 xcodebuild archive + exportArchive, 出 ad-hoc 签名的可装 IPA
-# (之前 v2.0.1 ~ v2.0.3 走 flutter build ios --no-codesign, 只产 Runner.app
-#  目录, 不能装 iPhone, 用户要 Xcode 自签/AltStore, 体验差).
-# ad-hoc 签名无需 Apple Developer 账号, 装 iPhone 7 天有效,
-# 用 AltStore / Sideloadly 装可重签延长
-#
-# matrix 拆 3 个 job, build-android + build-ios 并行, release 依赖两个 build
-# GitHub Release 上传 APK + IPA, 用户从 release 页面直接下载两个客户端
+# v2.0.8: 撤回 iOS 编译, 只编 Android
+# 之前 v2.0.1 ~ v2.0.7 试过 windows / macos / ios, 全失败或太折腾:
+#   - v2.0.0 windows + macos: 编译报错
+#   - v2.0.1 iOS: BSD sed 失败 (已修)
+#   - v2.0.2 / v2.0.3 iOS: artifact 上传失败
+#   - v2.0.4 iOS xcodebuild archive: 失败
+#   - v2.0.7 iOS zip 打包: 成功但用户装法跟 ad-hoc IPA 一样
+# 用户决定: iOS 撤回, 只编 Android
 jobs:
-  # v2.0.4: 重构成 3 job 模式, 让 release job 统一下载两个 platform 的 artifact
-  # 再统一发到 GitHub Release, 避免两个 build job 抢着 create release 竞态
-  #
-  # Job 依赖:
-  #   build-android ──┐
-  #                   ├──> release (depends on needs.build-android && needs.build-ios)
-  #   build-ios ──────┘
-  build-android:
+  # 单一 job 模式, build-android 直接做 release
+  build:
     name: android
     runs-on: ubuntu-latest
     steps:
@@ -57,6 +48,10 @@ jobs:
 
       - run: flutter pub get
 
+      # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
+      # 注意: 不能用 `sed -i "..."` (macOS BSD sed 要求 -i 后带 backup 扩展名, e.g. `sed -i ''`,
+      # 否则报 "undefined label" 错; GNU sed 不要求 -i 参数, 所以 Android runner OK,
+      # macOS / Windows runner 必挂). 改用 perl -i -pe (perl 跨平台, Linux/macOS 都预装).
       - name: Sync version from git tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -84,107 +79,45 @@ jobs:
           timeout_minutes: 60
           command: flutter build apk --release
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 14
-
-  build-ios:
-    name: ios
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.22.2'
-
-      - run: flutter pub get
-
-      - name: Sync version from git tag
+      - name: Create GitHub Release (APK)
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          TAG=${GITHUB_REF#refs/tags/v}
-          if [[ "$TAG" == *"+"* ]]; then
-            VERSION=${TAG%+*}
-            BUILD=${TAG#*+}
-            perl -i -pe "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
-          else
-            perl -i -pe "s/^version: .*/version: $TAG+1/" pubspec.yaml
-          fi
-          head -5 pubspec.yaml
-
-      # v2.0.7: 撤回 v2.0.4 xcodebuild archive + exportArchive 流程
-      # 之前 v2.0.4 / v2.0.5 / v2.0.6 iOS job 都在 "Archive + Export iOS IPA" 失败
-      # 错误大概率是 xcodebuild 找不到 xcworkspace (Flutter iOS 工程结构是
-      # Runner.xcworkspace, 在 ios/ 目录下, 我 cd ios 之后直接调 xcodebuild
-      # 但没加 -project Runner.xcodeproj -scheme Runner 完整参数链, 失败)
-      #
-      # 改回 v2.0.3 的简单方案: flutter build ios --release --no-codesign
-      # 产物 build/ios/iphoneos/Runner.app 是个目录, 直接用 zip 打包,
-      # artifact 上传, iOS 用户用 AltStore / Sideloadly 装
-      # (无签名装不上 iPhone, 但 AltStore / Sideloadly 装的时候会自动重签)
-      - name: Build iOS Runner.app (flutter build ios --no-codesign)
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 3
-          retry_on: error
-          retry_wait_seconds: 30
-          timeout_minutes: 60
-          command: flutter build ios --release --no-codesign
-
-      # 把 Runner.app 目录打包成 zip, iOS 用户下载 zip 解压装
-      - name: Package iOS Runner.app as zip
-        shell: bash
-        run: |
-          cd build/ios/iphoneos && zip -r -y "$GITHUB_WORKSPACE/Runner.app.zip" Runner.app
-          ls -la "$GITHUB_WORKSPACE/Runner.app.zip"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ios-runner-app
-          path: Runner.app.zip
-          if-no-files-found: error
-          retention-days: 14
-
-  # release job 等待 build-android + build-ios 都完成, 下载两个 artifact,
-  # 一次性发 GitHub Release, APK + IPA 都包含
-  release:
-    name: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-android, build-ios]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: app-release-apk
-          path: dist/
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: ios-runner-app
-          path: dist/
-
-      - name: Create GitHub Release (APK + iOS zip)
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          files: |
-            dist/app-release.apk
-            dist/Runner.app.zip
+          files: build/app/outputs/flutter-apk/app-release.apk
 
       # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
       # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
       - name: Set release body
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/github-script@v6
         with:
           script: |
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.8': `## 更新日志
+
+            ### 🛠️ CI 简化
+
+            - **v2.0.8 撤回 iOS 编译, 只编 Android ([build.yml](file:///workspace/.github/workflows/build.yml))**
+              - 用户决定: iOS 撤回, 只编 Android APK
+              - 撤回原因: 之前 v2.0.1 ~ v2.0.7 试过 windows / macos / ios, 全失败或太折腾
+                - v2.0.0 windows + macos: 编译报错
+                - v2.0.1 iOS: BSD sed 失败 (已修)
+                - v2.0.2 / v2.0.3 iOS: artifact 上传失败
+                - v2.0.4 iOS xcodebuild archive: 失败
+                - v2.0.7 iOS zip 打包: 成功但用户装法跟 ad-hoc IPA 一样
+              - CI 改造:
+                - **单 job 模式**: build-android 直接做 release, 不再 3 job
+                - 删 build-ios job / 删 release job
+                - build job 里直接调 softprops/action-gh-release 上传 APK
+                - CI 时间减半, 不再 5+ 分钟 macos runner 钱
+                - 不再触发 macos-latest runner 配额
+              - GitHub Release 只发 APK, 用户从 release 页面直接下载
+              - iOS 用户: 不再维护, iOS 端没出新版本
+
+            ---`,
               'v2.0.7': `## 更新日志
 
             ### 🛠️ CI 修复

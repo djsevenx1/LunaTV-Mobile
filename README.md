@@ -1,6 +1,6 @@
 # LunaTV Mobile
 
-> 一款基于 Flutter 的 LunaTV 客户端,支持 Android 和 iOS。
+> 一款基于 Flutter 的 LunaTV Android 客户端。
 
 主打开箱即用的多源聚合搜索 + 高质量本地播放,搭配 **[CORSAPI](https://github.com/djsevenx1/CORSAPI)** 配套 CF Worker 解决 Bangumi / 源加速 / m3u8 重写。
 
@@ -9,7 +9,7 @@
 | 平台 | 状态 | 说明 |
 |---|---|---|
 | Android | ✅ | 主目标, GitHub Actions 自动出 APK 发 Release |
-| iOS | ✅ | CI 自动编译,无签名 (需用户用 Xcode / AltStore 自签后安装), 从 Actions artifact 下载 |
+| iOS | ❌ | 不再维护 (v2.0.8 起撤回 iOS 编译) |
 
 ## 主要功能
 
@@ -70,10 +70,9 @@
 ### 环境要求
 
 - Flutter SDK `3.22.2` 或更高
-- Java JDK 17(Android 构建)
+- Java JDK 17
 - Android SDK Platform 36 + Build-Tools 34.0.0
 - Android NDK `29.0.14033849`(可选,媒体插件需要)
-- Xcode 15+(iOS 构建)
 
 ### 拉取代码
 
@@ -86,14 +85,12 @@ flutter pub get
 ### 本地构建
 
 ```bash
-flutter build apk --release       # Android
-flutter build ios --release --no-codesign  # iOS (无签名)
+flutter build apk --release
 ```
 
 ### 输出产物
 
 - Android APK: `build/app/outputs/flutter-apk/app-release.apk`
-- iOS: `build/ios/iphoneos/Runner.app` (无签名,需自签)
 
 ## CI/CD
 
@@ -102,8 +99,8 @@ GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
 工作流文件: [.github/workflows/build.yml](.github/workflows/build.yml)
 
 - **Android**: ubuntu-latest, APK 上传到 GitHub Release
-- **iOS**: macos-latest, `--no-codesign` 模式, Runner.app 上传到 Actions artifact (需用户自签安装)
 - Flutter: `3.22.2` / JDK: Temurin 17 / Android SDK: 36 / Build-Tools: 34.0.0 / NDK: 29.0.14033849
+- v2.0.8 起撤回 iOS 编译 (用户决定), CI 改单 job 模式, 时间减半
 
 ## 配置说明
 
