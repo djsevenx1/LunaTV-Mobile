@@ -439,7 +439,7 @@ class UserDataService {
       return '$publicCorsProxyBase$targetUrl';
     }
     // 兜底: 协议相对或无协议, 强制 https
-    return '$publicCorsProxyBasehttps://$targetUrl';
+    return '$publicCorsProxyBase/https://$targetUrl';
   }
 
   // 保存 Bangumi 数据源设置（key 值：direct / cors_proxy / cf_worker）
