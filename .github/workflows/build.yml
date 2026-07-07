@@ -275,6 +275,78 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.14': `## 更新日志
+
+            ### 🐛 修复
+
+            - **配了 CF Worker 域名但视频还是不走 worker ([player_screen.dart#_playEpisode](file:///workspace/lib/screens/player_screen.dart) + [live_player_screen.dart#_buildPlayerWidget](file:///workspace/lib/screens/live_player_screen.dart))**
+              - 现象: 用户在 App 菜单填了 CF Worker 自定义域名 (e.g. \`cdn.example.com\`
+                CNAME 到 \`xxx.workers.dev\`) + 打开"CF Worker 加速源"开关, 选源页
+                测速数字也走 worker 了, **但实际点播放视频还是直连源站, 不走域名**
+                - 配的域名形同虚设, 视频加载慢 / 国内直连卡顿 / 跨地区访问全暴露
+                - 用户反馈"我有域名为啥视频收不了" — 字面意思就是"配了 worker
+                  域名但视频没走它"
+              - 根因 ([player_screen.dart#_playEpisode](file:///workspace/lib/screens/player_screen.dart#L1654) 旧代码):
+                \`\`\`dart
+                final url = source.episodes[index];   // 原始源 URL
+                await _player.open(Media(url));
+                \`\`\`
+                - 测速路径走的是 \`buildProxiedUrl(originalUrl)\` (v1.0.69 修的),
+                  拼成 \`https://<worker>/m3u8?url=...\` 走 worker, 测速面板绿
+                - 实际播放直接拿 \`source.episodes[index]\` 喂给 libmpv, libmpv 是
+                  **native C 库用自己的 HTTP stack**, 完全绕过 Dart 的
+                  \`HttpOverrides\` + \`buildProxiedUrl\` — 两套机制都没碰到视频流
+                - v2.0.11 加的 CF 优选测速也是同理: \`CfOptimizerHttpOverrides\`
+                  只 override Dart 端, libmpv 视频流根本读不到
+              - 修法 (本版本, 跟测速对齐):
+                1. [player_screen.dart#_playEpisode](file:///workspace/lib/screens/player_screen.dart#L1649)
+                   播放前把 URL 套一层 \`buildProxiedUrl\`:
+                   \`\`\`dart
+                   final originalUrl = source.episodes[index];
+                   final url = UserDataService.buildProxiedUrl(originalUrl);
+                   \`\`\`
+                2. [live_player_screen.dart#_buildPlayerWidget](file:///workspace/lib/screens/live_player_screen.dart#L594)
+                   直播频道 URL 同样套一层
+                3. \`buildProxiedUrl\` 内部有守门:
+                   - CF Worker 加速开关没开 / 域名没配 → 返回原 URL, 行为不变
+                   - 配了 → m3u8 走 \`/m3u8?url=...\` (worker 递归重写 .ts 段),
+                     直链 MP4 等走 \`/?url=...\` (普通代理)
+                4. 配合 CORSAPI worker 的 \`/m3u8\` 端点
+                   ([_worker.js#L309-L417](https://github.com/djsevenx1/CORSAPI/blob/main/_worker.js#L309-L417)),
+                   整条 m3u8 → .ts 链路都能代理, 包括签名 URL / 跨域 segment
+              - 行为对比 (用户场景: 配 \`cdn.example.com\` + 打开 CF Worker 加速):
+                | 链路 | v2.0.13 修前 | v2.0.14 修后 |
+                |---|---|---|
+                | 测速 (选源面板) | ✅ 走 worker (v1.0.69 修过) | ✅ 走 worker |
+                | 视频 m3u8 playlist | ❌ 走原源 URL | ✅ 走 worker /m3u8 |
+                | 视频 .ts 段 | ❌ 走原 CDN | ✅ worker 递归重写后也走 worker |
+                | 直链 MP4 | ❌ 走原源 URL | ✅ 走 worker / |
+                | 直播频道 | ❌ 走原源 URL | ✅ 走 worker |
+                | 配错 worker / 没配 | 原 URL | 原 URL (buildProxiedUrl 内部 fallback) |
+              - 限制说明:
+                1. **CF 优选测速仍然不覆盖视频**: 优选只 override Dart HttpClient,
+                   libmpv 视频流还是走 CF Anycast 默认 IP. 想"国内加速"必须配
+                   自定义域名 (CNAME 到 workers.dev) 走 Anycast 边缘, 或者用 worker
+                   转发到离用户近的源. 优选那块 v2.0.11 已知限制, 不在本版本处理
+                2. **CORSAPI worker 必须是最新版**: 老版 worker 没有 \`/m3u8\`
+                   端点的 segment rewrite, 走 \`/m3u8?url=...\` 会返原始 m3u8,
+                   .ts 段还是回原源, 走不到 worker. 用户配 worker 时请确认
+                   [djsevenx1/CORSAPI](https://github.com/djsevenx1/CORSAPI)
+                   \`_worker.js\` 包含 \`handleM3u8Request\` 函数
+                3. **测速跟实际播放可能仍有差异**: v1.0.74 修过"测速跟 CF 耦合"
+                   的问题, 测速现在跟播放同步走 buildProxiedUrl, 一致性 OK.
+                   但测速只 ping / Range 测一次, 实际 .ts 段连续加载的抖动 +
+                   worker 9s 超时可能让某些源播着播着断流
+              - 验证:
+                1. 装 v2.0.14 APK → App 菜单打开"CF Worker 加速源" + 填 worker 域名
+                2. 进任意剧集 → 选源 → 点播放
+                3. 看 logcat 或 \`https://<worker>/health\` 日志, 应该能看到
+                   \`GET /m3u8?url=https://...index.m3u8\` + 后续多个 \`GET /?url=...\`
+                   (被 worker 改写后的 .ts 段)
+                4. 没配 worker / 开关没开 → 行为跟 v2.0.13 一模一样 (走原 URL)
+                5. 关闭 worker 域名 / 开关 → 同样回退到原 URL, 不影响非 CF 用户
+
+            ---`,
               'v2.0.13': `## 更新日志
 
             ### 🐛 修复

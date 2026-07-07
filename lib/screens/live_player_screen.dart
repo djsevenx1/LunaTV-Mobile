@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/widgets/video_player_surface.dart';
 import 'package:luna_tv/widgets/video_player_widget.dart';
 import 'package:luna_tv/models/live_channel.dart';
@@ -593,7 +594,9 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
 
   /// 构建播放器组件
   Widget _buildPlayerWidget() {
-    final videoUrl = _currentChannel.url;
+    // v2.0.14: 直播 URL 也走 buildProxiedUrl 拼 worker
+    // 跟 player_screen._playEpisode 同模板: 开关没开 / 域名没配就返回原 URL
+    final videoUrl = UserDataService.buildProxiedUrl(_currentChannel.url);
     return VideoPlayerWidget(
       surface: DeviceUtils.isPC()
           ? VideoPlayerSurface.desktop
