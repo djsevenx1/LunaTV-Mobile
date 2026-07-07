@@ -68,6 +68,9 @@ jobs:
       - run: flutter pub get
 
       # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
+      # 注意: 不能用 `sed -i "..."` (macOS BSD sed 要求 -i 后带 backup 扩展名, e.g. `sed -i ''`,
+      # 否则报 "undefined label" 错; GNU sed 不要求 -i 参数, 所以 Android runner OK,
+      # macOS / Windows runner 必挂). 改用 perl -i -pe (perl 跨平台, Linux/macOS 都预装).
       - name: Sync version from git tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -76,9 +79,9 @@ jobs:
           if [[ "$TAG" == *"+"* ]]; then
             VERSION=${TAG%+*}
             BUILD=${TAG#*+}
-            sed -i "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
+            perl -i -pe "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
           else
-            sed -i "s/^version: .*/version: $TAG+1/" pubspec.yaml
+            perl -i -pe "s/^version: .*/version: $TAG+1/" pubspec.yaml
           fi
           head -5 pubspec.yaml
 
