@@ -59,6 +59,10 @@ void main() async {
 /// - CF Worker 加速开关打开 + CF 优选开关打开 + 优选 IP 已缓存 → 装 override
 /// - 否则 → 不装 (override 里的 _featureEnabled=false, 等于无操作)
 /// - 7 天没测过 / 域名变了 → 后台跑优选, 跑完刷新缓存
+/// v2.0.31: 装 CF 优选 HTTP override (Dart HTTP 请求强制解析到优选 IP)
+/// 触发条件 (任一即可):
+/// - 手动优选 IP 已填 (优先级最高, 不依赖测速 / 开关)
+/// - CF 优选开关开 + 测速结果非空
 Future<void> _warmupCfOptimizer() async {
   final enabled = await UserDataService.getCfWorkerEnabled();
   if (!enabled) {
@@ -68,16 +72,26 @@ Future<void> _warmupCfOptimizer() async {
   if (domain.isEmpty) {
     return;
   }
-  final optimizerEnabled = await CfOptimizer.getEnabled();
-  if (!optimizerEnabled) {
-    return;
-  }
 
+  // v2.0.31: 手动优选 IP 不需要 CfOptimizer 开关. 只要填了就生效.
+  final manualIp = await UserDataService.getCfBestIp();
+
+  final optimizerEnabled = await CfOptimizer.getEnabled();
   final bestIps = await CfOptimizer.getBestIps();
   final storedDomain = await CfOptimizer.getTargetDomain();
 
-  // 装 override (即使优选 IP 空, 装上也不影响, 内部 _featureEnabled=false)
-  if (bestIps.isNotEmpty && storedDomain == domain) {
+  // 装 override (内部 _tryOverrideAddress 决定走手动 IP / 测速 IP / 不走)
+  if (manualIp != null && manualIp.isNotEmpty) {
+    // 手动优选 IP 模式
+    CfOptimizerHttpOverrides.warmup(
+      bestIps: bestIps,
+      targetDomain: domain,
+      featureEnabled: optimizerEnabled,
+      manualPreferredIp: manualIp,
+    );
+    CfOptimizerHttpOverrides.install();
+  } else if (bestIps.isNotEmpty && storedDomain == domain && optimizerEnabled) {
+    // 测速结果模式
     CfOptimizerHttpOverrides.warmup(
       bestIps: bestIps,
       targetDomain: domain,
@@ -85,7 +99,7 @@ Future<void> _warmupCfOptimizer() async {
     );
     CfOptimizerHttpOverrides.install();
   } else {
-    // 缓存空 / 域名变了, 装个 disable 的 override
+    // 缓存空 / 域名变了 / 优选开关关, 装个 disable 的 override (不放行任何 IP 覆盖)
     CfOptimizerHttpOverrides.warmup(
       bestIps: const [],
       targetDomain: domain,
@@ -94,8 +108,8 @@ Future<void> _warmupCfOptimizer() async {
     CfOptimizerHttpOverrides.install();
   }
 
-  // 后台跑优选 (7 天过期 或 没测过 或 域名变了)
-  if (await CfOptimizer.needsRetest(currentDomain: domain)) {
+  // 后台跑优选 (7 天过期 或 没测过 或 域名变了). 仅在测速开关开时跑.
+  if (optimizerEnabled && await CfOptimizer.needsRetest(currentDomain: domain)) {
     // fire-and-forget, 不 await, 让 app 启动不被优选阻塞
     unawaited(_runBackgroundOptimization(domain));
   }

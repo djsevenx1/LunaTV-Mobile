@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
+import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -19,6 +20,7 @@ class CfAccelerationPage extends StatefulWidget {
 class _CfAccelerationPageState extends State<CfAccelerationPage> {
   bool _cfWorkerEnabled = false;
   String _cfWorkerDomain = '';
+  String _cfBestIp = ''; // v2.0.31: 手动优选 IP
   bool _loading = true;
 
   @override
@@ -30,10 +32,12 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
   Future<void> _load() async {
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
+    final bestIp = await UserDataService.getCfBestIp();
     if (mounted) {
       setState(() {
         _cfWorkerEnabled = cfWorkerEnabled;
         _cfWorkerDomain = cfWorkerDomain;
+        _cfBestIp = bestIp ?? '';
         _loading = false;
       });
     }
@@ -45,6 +49,18 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     setState(() {
       _cfWorkerEnabled = v;
     });
+  }
+
+  Future<void> _setBestIp(String ip) async {
+    await UserDataService.saveCfBestIp(ip);
+    if (!mounted) return;
+    setState(() {
+      _cfBestIp = ip;
+    });
+    // 立即生效 (不用重启 App), 把手动 IP 推到 override
+    CfOptimizerHttpOverrides.setManualPreferredIp(
+      ip.isEmpty ? null : ip,
+    );
   }
 
   // ============== 弹窗 ==============
@@ -151,6 +167,132 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                         domain.isEmpty
                             ? '已清空 CF Worker 域名(仅保留开关无效)'
                             : '已保存 CF Worker 域名',
+                        style:
+                            FontUtils.poppins(ctx, color: Colors.white),
+                      ),
+                      backgroundColor: const Color(0xFF10b981),
+                    ),
+                  );
+                }
+              },
+              child: Text(
+                '保存',
+                style: FontUtils.poppins(ctx,
+                    fontSize: 14,
+                    color: const Color(0xFF10b981),
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        );
+      },
+    ).whenComplete(controller.dispose);
+  }
+
+  // v2.0.31: 手动优选 IP 输入弹窗
+  void _showBestIpDialog(bool isDark) {
+    final controller = TextEditingController(text: _cfBestIp);
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF2c2c2c) : Colors.white,
+          title: Text(
+            '优选 IP（可选）',
+            style: FontUtils.poppins(ctx,
+                fontSize: 18,
+                color: isDark
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+                fontWeight: FontWeight.w600),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: FontUtils.poppins(ctx,
+                    fontSize: 14,
+                    color: isDark
+                        ? const Color(0xFFffffff)
+                        : const Color(0xFF1f2937)),
+                decoration: InputDecoration(
+                  hintText: '104.16.123.45',
+                  hintStyle: FontUtils.poppins(ctx,
+                      fontSize: 14,
+                      color: isDark
+                          ? const Color(0xFF9ca3af)
+                          : const Color(0xFF6b7280)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: isDark
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: isDark
+                          ? const Color(0xFF374151)
+                          : const Color(0xFFe5e7eb),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF10b981),
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '填一个 Cloudflare anycast IPv4 (104.16.0.0/12, 172.64.0.0/13 '
+                '等), 留空 = 不使用. 优选 IP 必须是 CF 公共段, 否则 worker '
+                '域名连不上.\n\n'
+                '效果: App 内所有 HTTP 请求 (豆瓣/Bangumi/图片/元数据) '
+                '强制走这个 IP, 跳过 DNS 解析, 解决某些 CF POP 慢的问题.\n\n'
+                '推荐: 拿 CloudflareScanner / cloudflare-better-ip 项目扫一下, '
+                '把延迟最低的填进来.\n\n'
+                '⚠️ 视频走 libmpv (原生 C), 不受 Dart 优选 IP 影响. '
+                '视频加速靠 worker 自带的 CF edge cache.',
+                style: FontUtils.poppins(ctx,
+                    fontSize: 11,
+                    color: isDark
+                        ? const Color(0xFF9ca3af)
+                        : const Color(0xFF6b7280),
+                    height: 1.5),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(
+                '取消',
+                style: FontUtils.poppins(ctx,
+                    fontSize: 14,
+                    color: isDark
+                        ? const Color(0xFF9ca3af)
+                        : const Color(0xFF6b7280)),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                final ip = controller.text.trim();
+                await _setBestIp(ip);
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        ip.isEmpty ? '已清空优选 IP' : '已保存优选 IP $ip',
                         style:
                             FontUtils.poppins(ctx, color: Colors.white),
                       ),
@@ -442,6 +584,15 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       emptyHint: '（点击配置）',
                       onTap: () => _showWorkerDomainDialog(isDark),
                       icon: LucideIcons.server,
+                      isDark: isDark,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInputTile(
+                      title: '优选 IP（可选）',
+                      currentValue: _cfBestIp,
+                      emptyHint: '（未设置，使用 DNS 解析）',
+                      onTap: () => _showBestIpDialog(isDark),
+                      icon: LucideIcons.zap,
                       isDark: isDark,
                     ),
                   ],

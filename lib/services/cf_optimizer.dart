@@ -257,16 +257,21 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
   static List<String>? _bestIpsCache;
   static String? _targetDomainCache;
   static bool _featureEnabled = false;
+  // v2.0.31: 用户手动填的优选 IP. 优先级最高, 不依赖测速, 不依赖开关.
+  // 一旦设置, 所有指向 targetDomain 的 Dart HTTP 请求都强制用这个 IP.
+  static String? _manualPreferredIp;
 
   /// app 启动时 warmup 缓存 (主线程读 SharedPreferences 后调用)
   static void warmup({
     required List<String> bestIps,
     required String targetDomain,
     required bool featureEnabled,
+    String? manualPreferredIp,
   }) {
     _bestIpsCache = bestIps;
     _targetDomainCache = targetDomain;
     _featureEnabled = featureEnabled;
+    _manualPreferredIp = manualPreferredIp;
   }
 
   /// 刷新缓存 (优选测速完后调用)
@@ -278,11 +283,21 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
     _targetDomainCache = targetDomain;
   }
 
+  /// v2.0.31: 用户在设置页改了手动优选 IP, 立即生效 (不用重启 App)
+  static void setManualPreferredIp(String? ip) {
+    if (ip == null || ip.isEmpty) {
+      _manualPreferredIp = null;
+    } else {
+      _manualPreferredIp = ip;
+    }
+  }
+
   /// 关闭优选 (开关关了 / 优选 IP 清空)
   static void disable() {
     _bestIpsCache = null;
     _targetDomainCache = null;
     _featureEnabled = false;
+    // 注意: 不清 _manualPreferredIp, 手动 IP 不受 featureEnabled 控制
   }
 
   /// v2.0.16: 给本地视频代理用的查表
@@ -358,14 +373,21 @@ class _OptimizingHttpClient implements HttpClient {
   _OptimizingHttpClient(this._inner);
 
   InternetAddress? _tryOverrideAddress(Uri uri) {
-    if (!CfOptimizerHttpOverrides._featureEnabled) return null;
-    final ips = CfOptimizerHttpOverrides._bestIpsCache;
     final target = CfOptimizerHttpOverrides._targetDomainCache;
-    if (ips == null || ips.isEmpty || target == null || target.isEmpty) {
-      return null;
-    }
+    if (target == null || target.isEmpty) return null;
     final host = uri.host.toLowerCase();
     if (host != target.toLowerCase()) return null;
+
+    // v2.0.31: 手动优选 IP 优先级最高, 不受 featureEnabled 控制
+    final manualIp = CfOptimizerHttpOverrides._manualPreferredIp;
+    if (manualIp != null && manualIp.isNotEmpty) {
+      return InternetAddress(manualIp, type: InternetAddressType.IPv4);
+    }
+
+    // 退回测速结果 (需要 featureEnabled + 测速结果)
+    if (!CfOptimizerHttpOverrides._featureEnabled) return null;
+    final ips = CfOptimizerHttpOverrides._bestIpsCache;
+    if (ips == null || ips.isEmpty) return null;
     // 返回第一个优选 IP (按延迟最低排)
     return InternetAddress(ips.first, type: InternetAddressType.IPv4);
   }

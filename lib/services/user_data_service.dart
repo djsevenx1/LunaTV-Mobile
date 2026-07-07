@@ -16,6 +16,8 @@ class UserDataService {
   static const String _cfWorkerEnabledKey = 'cf_worker_enabled';
   static const String _cfWorkerDomainKey = 'cf_worker_domain';
   static const String _videoProxyEnabledKey = 'video_proxy_enabled';
+  // v2.0.31: 用户手动填的优选 IP, 优先级高于测速结果
+  static const String _cfBestIpKey = 'cf_best_ip';
 
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -23,6 +25,7 @@ class UserDataService {
   static String? _cfWorkerDomainCache;
   static String? _bangumiDataSourceCache;
   static String? _bangumiImageSourceCache;
+  static String? _cfBestIpCache;
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -360,6 +363,53 @@ class UserDataService {
     final v = prefs.getString(_cfWorkerDomainKey) ?? '';
     _cfWorkerDomainCache = v;
     return v;
+  }
+
+  // ===== v2.0.31: 手动优选 IP (优先级高于测速结果) =====
+
+  /// 保存用户手动填的优选 IP. 空串 = 清空.
+  static Future<void> saveCfBestIp(String ip) async {
+    final cleaned = _cleanIp(ip);
+    final prefs = await SharedPreferences.getInstance();
+    if (cleaned.isEmpty) {
+      await prefs.remove(_cfBestIpKey);
+    } else {
+      await prefs.setString(_cfBestIpKey, cleaned);
+    }
+    _cfBestIpCache = cleaned.isEmpty ? null : cleaned;
+  }
+
+  /// 异步读优选 IP. 没填 = null.
+  static Future<String?> getCfBestIp() async {
+    if (_cfBestIpCache != null) return _cfBestIpCache;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_cfBestIpKey);
+    if (v == null || v.isEmpty) {
+      _cfBestIpCache = null;
+      return null;
+    }
+    _cfBestIpCache = v;
+    return v;
+  }
+
+  /// 同步读 (启动 warmup 后用)
+  static String? getCfBestIpSync() {
+    return _cfBestIpCache;
+  }
+
+  /// 校验/清理 IP. 接受 IPv4 字符串, 其他原样返回空串.
+  static String _cleanIp(String input) {
+    final s = input.trim();
+    if (s.isEmpty) return '';
+    // IPv4 简单校验
+    final ipv4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$');
+    final m = ipv4.firstMatch(s);
+    if (m == null) return '';
+    for (var i = 1; i <= 4; i++) {
+      final n = int.parse(m.group(i)!);
+      if (n < 0 || n > 255) return '';
+    }
+    return s;
   }
 
   // 清理域名：去掉尾部斜杠、协议前缀、空白

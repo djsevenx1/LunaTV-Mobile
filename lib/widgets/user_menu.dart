@@ -77,6 +77,7 @@ class _UserMenuState extends State<UserMenu> {
     final localSearch = await UserDataService.getLocalSearch();
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
+    final cfBestIp = await UserDataService.getCfBestIp();
 
     if (mounted) {
       setState(() {
@@ -95,6 +96,7 @@ class _UserMenuState extends State<UserMenu> {
         _cfSummary = _computeCfSummary(
           domain: cfWorkerDomain,
           enabled: cfWorkerEnabled,
+          bestIp: cfBestIp,
         );
       });
     }
@@ -102,12 +104,22 @@ class _UserMenuState extends State<UserMenu> {
 
   /// v2.0.17: 给 user_menu 入口行用的一行状态摘要.
   /// v2.0.30: 简化, 不再展示优选 IP 数量和测速时间.
+  /// v2.0.31: 展示手动优选 IP (如有).
   String _computeCfSummary({
     required String domain,
     required bool enabled,
+    String? bestIp,
   }) {
     if (domain.isEmpty) return '未配置';
-    if (!enabled) return '$domain · 开关未开';
+    if (!enabled) {
+      if (bestIp != null && bestIp.isNotEmpty) {
+        return '$domain · 开关未开 · IP $bestIp';
+      }
+      return '$domain · 开关未开';
+    }
+    if (bestIp != null && bestIp.isNotEmpty) {
+      return '$domain · IP $bestIp';
+    }
     return '$domain · 已开启';
   }
 
@@ -120,6 +132,7 @@ class _UserMenuState extends State<UserMenu> {
     // 从子页面返回后, 重新读 CF 状态, 刷新入口行的一行摘要
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
+    final cfBestIp = await UserDataService.getCfBestIp();
     if (!mounted) return;
     setState(() {
       _cfWorkerEnabled = cfWorkerEnabled;
@@ -127,6 +140,7 @@ class _UserMenuState extends State<UserMenu> {
       _cfSummary = _computeCfSummary(
         domain: cfWorkerDomain,
         enabled: cfWorkerEnabled,
+        bestIp: cfBestIp,
       );
     });
   }
