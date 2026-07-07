@@ -96,6 +96,53 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.23': `## 更新日志
+
+            ### 🐛 修复
+
+            - **CF 加速下播放完全没速度 — 真根因: v2.0.14 把播放 URL 包了一层 CF Worker ([player_screen.dart#_playEpisode](file:///workspace/lib/screens/player_screen.dart) + [live_player_screen.dart#_buildPlayerWidget](file:///workspace/lib/screens/live_player_screen.dart))**
+              - 现象: 用户反馈 "从 v2.0.14 开始没速度, 不是慢是没速度, 关掉 CF 加速就正常".
+                v1.0.77 有 CF 加速也没问题, v2.0.14 之后才坏.
+              - 根因 (跟 v2.0.21/v2.0.22 修的不是同一个 bug):
+                v2.0.14 把播放 URL 从 \`source.episodes[index]\` (原 URL)
+                改成 \`UserDataService.buildProxiedUrl(originalUrl)\` (包一层 CF Worker):
+                \`\`\`dart
+                // v2.0.14 旧代码
+                final url = UserDataService.buildProxiedUrl(originalUrl);
+                // url = https://<worker>/m3u8?url=https%3A%2F%2F...
+                await _player.open(Media(url));
+                \`\`\`
+                CF Worker 做视频流代理时, 每个 .ts 段都要 worker fetch 再返回.
+                Worker 有 CPU 时间限制 (免费 10ms / 付费 30s) + subrequest 限制 +
+                不能高效流式转发大 body. 长 HLS 几百段累计后视频流就断了 → "没速度".
+                不是慢, 是数据流断了.
+              - 为什么 v1.0.77 没问题:
+                v1.0.77 时播放走原 URL 直连, worker 只给测速 (\`_testSourceSpeed\`) 用.
+                v2.0.14 把播放也走 worker, 就坏了.
+              - 为什么关掉 CF 加速就正常:
+                关掉 → \`buildProxiedUrl\` 内部返回原 URL → 直连 → 没问题
+              - 修法: 撤回 v2.0.14 对播放 URL 的 worker 包装
+                \`\`\`dart
+                // v2.0.23 修
+                final url = originalUrl;  // 直连原 URL, 不包 worker
+                \`\`\`
+                加速改由 VideoProxyServer (v2.0.16+, v2.0.22 修好) 通过 --http-proxy
+                让 libmpv 走本地代理 → 竞速拨号优选 IP → CF edge, 不经过 worker.
+                - 代理 active → 走优选 IP 加速 (不经过 worker)
+                - 代理没起 (条件不满足) → 直连原 URL (用户反馈正常)
+                - 测速 (_testSourceSpeed) 继续走 buildProxiedUrl, 不受影响
+              - 同步修: [live_player_screen.dart](file:///workspace/lib/screens/live_player_screen.dart) 直播 URL 也撤回 worker 包装
+              - v2.0.21/v2.0.22 修的还有用吗:
+                - v2.0.21 (双 listener / FD 泄漏 / HTTP 短连接 / 测速 timeout): 有用, 修的是 VideoProxyServer 内部 bug
+                - v2.0.22 (onBackendReady 漏推 state.buffer): 有用, 修的是代理数据丢失
+                - 这两个版本修的是代理本身的 bug, 但代理跑的 URL 是 worker 包过的, 所以代理修好了播放还是断. v2.0.23 把 URL 改回原 URL 后, 代理跑的就是原视频 CDN 的 URL, 整条链路才通
+              - 验证:
+                1. 装 v2.0.23 APK → 配好 CF Worker + 优选 IP → 选 HLS 源
+                2. 播放应该正常, 不再"没速度"
+                3. 开着 CF 加速看 10 分钟, 不卡
+                4. 关掉 CF 加速 → 行为不变 (直连)
+
+            ---`,
               'v2.0.22': `## 更新日志
 
             ### 🐛 修复

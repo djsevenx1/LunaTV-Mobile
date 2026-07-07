@@ -594,9 +594,10 @@ class _LivePlayerScreenState extends State<LivePlayerScreen>
 
   /// 构建播放器组件
   Widget _buildPlayerWidget() {
-    // v2.0.14: 直播 URL 也走 buildProxiedUrl 拼 worker
-    // 跟 player_screen._playEpisode 同模板: 开关没开 / 域名没配就返回原 URL
-    final videoUrl = UserDataService.buildProxiedUrl(_currentChannel.url);
+    // v2.0.23: 直播 URL 不再走 buildProxiedUrl 包 worker (跟 player_screen 同步)
+    //   v2.0.14 把直播 URL 也包了一层 worker, 导致直播也没速度.
+    //   现在直连原 URL, VideoProxyServer (如果 active) 通过 --http-proxy 加速.
+    final videoUrl = _currentChannel.url;
     return VideoPlayerWidget(
       surface: DeviceUtils.isPC()
           ? VideoPlayerSurface.desktop

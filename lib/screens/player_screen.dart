@@ -1697,14 +1697,20 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (index < 0 || index >= source.episodes.length) return;
     final originalUrl = source.episodes[index];
     if (originalUrl.isEmpty) return;
-    // v2.0.14: 实际播放 URL 走 buildProxiedUrl 拼 worker
-    //   - CF Worker 加速开关 + 域名都配了 → 拼 worker URL
-    //     - m3u8 → /m3u8?url=...  (worker 会递归把 .ts 段链接也重写)
-    //     - 直链 MP4 等 → /?url=...  (普通代理)
-    //   - 开关没开 / 域名没配 → buildProxiedUrl 内部返回原 URL, 行为不变
-    //   - 之前只有 _testSourceSpeed 走 buildProxiedUrl, 测速显示快但实际播放
-    //     还是直连原 URL, 跟用户"配了域名期望视频也加速"的预期不符
-    final url = UserDataService.buildProxiedUrl(originalUrl);
+    // v2.0.23: 播放 URL 不再走 buildProxiedUrl 包 worker
+    //   v2.0.14 把播放 URL 包了一层 CF Worker (https://<worker>/m3u8?url=...),
+    //   导致"从 v2.0.14 开始没速度, 关掉 CF 加速就正常".
+    //   根因: CF Worker 做视频流代理时, 每个 .ts 段都要 worker fetch 再返回,
+    //   worker 有 CPU 时间限制 + subrequest 限制 + 不能高效流式转发大 body,
+    //   长 HLS 几百段累计后视频流就断了 → "没速度" (不是慢, 是断了)
+    //   v1.0.77 时播放走原 URL 直连 (worker 只给测速用), 所以没问题.
+    //
+    //   现在的加速方案:
+    //   - VideoProxyServer (v2.0.16+, v2.0.22 修好) 通过 --http-proxy 让
+    //     libmpv 走本地代理 → 竞速拨号优选 IP → CF edge, 不经过 worker
+    //   - 代理没起 (条件不满足) → 直连原 URL, 用户反馈直连正常
+    //   - 测速 (_testSourceSpeed) 继续走 buildProxiedUrl, 不受影响
+    final url = originalUrl;
 
     // 切集时先把自动切下一集标志重置, 让新一集播完时能再次触发
     _autoPlayedThisEpisode = false;
