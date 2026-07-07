@@ -1765,14 +1765,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       _phase = 'playing';
     });
 
-    // v2.0.16: 先启视频代理 (条件满足才启, 失败不阻塞)
-    // 启了 → libmpv 走 --http-proxy, 视频流走优选 IP
-    // 没启 → 走原 URL, 行为跟 v2.0.14/v2.0.15 一样
-    await _ensureVideoProxy();
+    // v2.0.28: 视频走 CF Worker 加速
+    //   - m3u8 URL 走 worker /m3u8 端点 → worker 重写 .ts 链接走 worker
+    //   - .ts 段走 worker /?url= → worker 流式转发
+    //   - worker 在 CF edge, CF backbone 到视频源的路由已优化
+    //   - 测试: worker+优选IP 比直连快 16% (189 vs 163 KB/s)
+    //   - 不用 VideoProxyServer (Dart Socket 代理不可靠)
+    //   - libmpv 直接连 worker URL, 走 CF 默认路由
+    //   - 如果 CF Worker 开关关了, buildProxiedUrl 返回原 URL (直连)
+    final playUrl =
+        await UserDataService.buildProxiedUrlAsync(url, forceM3u8: true);
 
     try {
       await _player.stop();
-      await _player.open(Media(url));
+      await _player.open(Media(playUrl));
       // 云记忆恢复
       //
       // v1.0.61 fix: v1.0.60 等了 position stream, 但根因是 player 在
