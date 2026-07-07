@@ -283,3 +283,10 @@ getImageUrl(originalUrl, source, { upgradeDouban: false })
 ---
 
 Made with ❤️ by the LunaTV Mobile contributors
+# LunaTV# LunaTV Mobile
+
+> 一款基于 Flutter 的 LunaTV 移动端客户端,支持 Android 和 iOS# LunaTV Mobile
+
+> 一款基于 Flutter 的 LunaTV 移动端客户端,支持 Android 和 iOS。
+
+主打开箱即用的多源聚合搜索 + 高质量本地播放,搭配 **[CORSAPI](https://github.com/djseven
