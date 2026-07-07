@@ -96,6 +96,48 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.24': `## 更新日志
+
+            ### 🐛 修复
+
+            - **打开优选 IP 播放没速度 — 禁用 VideoProxyServer, 回退 v1.0.77 行为 ([player_screen.dart#_playEpisode](file:///workspace/lib/screens/player_screen.dart))**
+              - 现象: 用户反馈 "v2.0.23 关掉优选 IP 可以正常播放, 打开不行".
+                v2.0.23 撤回了 worker 包装 (URL 用 originalUrl 直连), 但打开优选 IP
+                仍会启 VideoProxyServer 给 libmpv 配 --http-proxy, 视频流走这个
+                Dart 手写的 CONNECT 隧道代理 → 不行.
+              - 根因: v2.0.16 引入的 [VideoProxyServer](file:///workspace/lib/services/video_proxy_server.dart)
+                本质是手写 CONNECT 隧道代理. TLS 握手数据在 client→backend 之间
+                转发, 竞态多, v2.0.21/v2.0.22/v2.0.23 修了几轮还是脆弱.
+                "关掉优选 IP 可以, 打开不行" 直接指向代理本身.
+              - 修法: 禁用 \`_ensureVideoProxy()\` 调用, 代理永远不启动.
+                libmpv 永远直连视频源站, 跟 v1.0.77 一致.
+                \`\`\`dart
+                // v2.0.24: 禁用
+                // await _ensureVideoProxy();
+                \`\`\`
+                CF Worker 加速 + 优选 IP 仍然对以下场景生效 (走 Dart HttpClient
+                + HttpOverrides):
+                - API 请求 (站点源数据)
+                - 选源测速 (_testSourceSpeed)
+                - 图片加载 (CachedNetworkImage)
+                视频播放直连, 不受代理影响.
+              - 为什么不直接删 VideoProxyServer:
+                代码保留, 供未来用更可靠的方式 (如 native 插件 / platform channel
+                调 libmpv) 重新实现后再启用. 现在禁用是为了让用户能正常看视频.
+              - v2.0.21/v2.0.22/v2.0.23 的修复还有用吗:
+                - v2.0.23 (撤回 worker 包装): **有用**, 撤回 v2.0.14 把播放 URL
+                  包 worker 的错误改动, 视频回到直连原 URL
+                - v2.0.21/v2.0.22 (VideoProxyServer 内部 bug 修复): 代码保留,
+                  未来重新启用代理时这些修复仍然需要
+              - 兼容性:
+                - 关掉优选 IP → 行为完全不变 (代理本来就不会启动)
+                - 打开优选 IP → 代理不再启动, 视频直连, API/测速/图片仍走优选 IP
+              - 验证:
+                1. 装 v2.0.24 APK → 打开 CF Worker + 优选 IP → 播放应该正常
+                2. 关掉优选 IP → 行为不变 (直连)
+                3. API 请求 / 选源测速 / 图片加载仍走优选 IP (快)
+
+            ---`,
               'v2.0.23': `## 更新日志
 
             ### 🐛 修复
