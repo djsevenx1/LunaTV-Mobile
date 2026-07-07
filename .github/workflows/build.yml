@@ -275,7 +275,43 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
-              'v2.0.1': `## 更新日志
+              'v2.0.10': `## 更新日志
+
+            ### 🐛 修复
+
+            - **Bangumi 放送日历图依然加载不出 (404) ([release_calendar_screen.dart](file:///workspace/lib/screens/release_calendar_screen.dart))**
+              - 现象: v2.0.6 之后日历页能加载**部分**图, 但部分 cover 仍报 404.
+                用户反馈: "lain.bgm.tv 打开就是 404" + 给的"真确地址"格式是
+                \`https://lain.bgm.tv/pic/cover/l/6f/42/571784_leRlL.jpg\`
+              - 根因 (v2.0.10 才发现, 跟 v2.0.6 / v2.0.9 是不同 bug):
+                - 之前 \`release_calendar_screen.dart\` 的 \`CachedNetworkImage\`
+                  **直接传 \`item.cover\` 原始 URL**, **没走 \`getImageUrl\` 包装层**,
+                  即便 v2.0.6 修了 headers 也只是"能直连", 但:
+                  1. 用户配的 **CF Worker 加速域名**完全没生效 (没走 buildBangumiImageUrl)
+                  2. 用户选的 **cors_proxy / cf_worker 图片源**完全没生效
+                  3. 永远走 lain.bgm.tv 直连, 走的是 dart:io HttpClient **不走系统代理**,
+                     国内 4G / WiFi 直连 → 经常 404 / 403 / 超时
+                - 跟 video_card / hero_banner / continue_watching / player_details /
+                  fullscreen_image_viewer 比, 这些 widget 全部是
+                  \`FutureBuilder<String>(future: getImageUrl(...), ...)\` 模式,
+                  唯独 release_calendar 漏包装
+              - 修法: 改用 \`FutureBuilder<String>(future: getImageUrl(item.cover, 'bangumi'))\`
+                - 包装后才传给 \`CachedNetworkImage\`
+                - \`getImageRequestHeaders\` 接收**包装后** URL, worker 模式
+                  (\`https://xx.workers.dev/?url=...\`) 里检测 \`bgm.tv\` 用
+                  \`contains\` 仍能命中 (URL query 里还有 lain.bgm.tv), headers 仍然对
+                - 走通后, 用户配的 CF Worker 域名 / 选的 cors_proxy 都生效
+              - 行为对比 (用户场景: 配 .workers.dev 域名 + 选 "cf_worker"):
+                - 修前: 直传 item.cover → 直连 lain.bgm.tv → 国内 4G 走系统通道
+                  被墙 / DNS 污染 → 404
+                - 修后: 走 buildBangumiImageUrl → .workers.dev 反代 → 200 → 加载成功
+              - 配套: v2.0.9 worker 域名 .workers.dev 守门, v2.0.6 headers 修复
+                都保留, 这次只补 release_calendar 漏的包装层
+              - 验证方法: 装 v2.0.10 APK → 进放送日历页 → 看图加载成功 →
+                后台看 logcat 应该有 \`https://<worker>.workers.dev/?url=...\`
+
+            ---`,
+              'v2.0.9': `## 更新日志
 
             ### 🚀 多平台编译 (v2.0.0 缩减版)
 
