@@ -19,7 +19,6 @@ import 'package:luna_tv/screens/release_calendar_screen.dart';
 import 'package:luna_tv/screens/short_drama_screen.dart';
 import 'package:luna_tv/screens/youtube_screen.dart';
 import 'package:luna_tv/services/api_service.dart';
-import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/local_mode_storage_service.dart';
