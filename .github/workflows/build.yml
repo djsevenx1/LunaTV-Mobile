@@ -117,8 +117,16 @@ jobs:
           fi
           head -5 pubspec.yaml
 
-      # v2.0.4: iOS 出可装 IPA (ad-hoc 签名, 无需 Apple Developer 账号)
-      # 装 iPhone 7 天有效, 用 AltStore / Sideloadly 装可重签延长
+      # v2.0.7: 撤回 v2.0.4 xcodebuild archive + exportArchive 流程
+      # 之前 v2.0.4 / v2.0.5 / v2.0.6 iOS job 都在 "Archive + Export iOS IPA" 失败
+      # 错误大概率是 xcodebuild 找不到 xcworkspace (Flutter iOS 工程结构是
+      # Runner.xcworkspace, 在 ios/ 目录下, 我 cd ios 之后直接调 xcodebuild
+      # 但没加 -project Runner.xcodeproj -scheme Runner 完整参数链, 失败)
+      #
+      # 改回 v2.0.3 的简单方案: flutter build ios --release --no-codesign
+      # 产物 build/ios/iphoneos/Runner.app 是个目录, 直接用 zip 打包,
+      # artifact 上传, iOS 用户用 AltStore / Sideloadly 装
+      # (无签名装不上 iPhone, 但 AltStore / Sideloadly 装的时候会自动重签)
       - name: Build iOS Runner.app (flutter build ios --no-codesign)
         uses: nick-fields/retry@v3
         with:
@@ -128,54 +136,17 @@ jobs:
           timeout_minutes: 60
           command: flutter build ios --release --no-codesign
 
-      - name: Archive + Export iOS IPA (ad-hoc sign)
+      # 把 Runner.app 目录打包成 zip, iOS 用户下载 zip 解压装
+      - name: Package iOS Runner.app as zip
         shell: bash
         run: |
-          set -e
-          cd ios
-          # 1. archive
-          xcodebuild \
-            -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -archivePath build/Runner.xcarchive \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_ALLOWED=NO \
-            archive
-          # 2. 写 ad-hoc ExportOptions.plist
-          cat > /tmp/ExportOptions.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>ad-hoc</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>teamID</key>
-            <string></string>
-            <key>uploadSymbols</key>
-            <false/>
-          </dict>
-          </plist>
-          EOF
-          # 3. exportArchive 出 IPA
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/Runner.xcarchive \
-            -exportPath build \
-            -exportOptionsPlist /tmp/ExportOptions.plist
-          ls -la build/Runner.ipa
+          cd build/ios/iphoneos && zip -r -y "$GITHUB_WORKSPACE/Runner.app.zip" Runner.app
+          ls -la "$GITHUB_WORKSPACE/Runner.app.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ios-ipa
-          path: ios/build/Runner.ipa
+          name: ios-runner-app
+          path: Runner.app.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -194,16 +165,16 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ios-ipa
+          name: ios-runner-app
           path: dist/
 
-      - name: Create GitHub Release (APK + IPA)
+      - name: Create GitHub Release (APK + iOS zip)
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           files: |
             dist/app-release.apk
-            dist/Runner.ipa
+            dist/Runner.app.zip
 
       # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
       # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
@@ -214,6 +185,32 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.7': `## 更新日志
+
+            ### 🛠️ CI 修复
+
+            - **v2.0.7 撤回 v2.0.4 iOS xcodebuild archive 流程, 改回 zip 打包 ([build.yml](file:///workspace/.github/workflows/build.yml))**
+              - 现象: v2.0.4 / v2.0.5 / v2.0.6 iOS job 都在 "Archive + Export iOS IPA"
+                这一步失败, CI 跑不通, release job 被 skip, iOS 客户端没出
+              - 根因: 之前 v2.0.4 加的 \`xcodebuild archive + exportArchive\` 流程
+                有问题 (大概率是 xcodebuild 参数链不对, 找不到 xcworkspace /
+                xcodeproj), 实际 Flutter iOS 出 IPA 需要一整套 entitlements /
+                provisioning profile 配置, 折腾方向不对
+              - 修法: 改回 v2.0.3 简单的方案
+                1. \`flutter build ios --release --no-codesign\` 跑出 \`Runner.app\` 目录
+                2. 用 \`zip -r -y Runner.app.zip Runner.app\` 打包成 zip
+                3. upload-artifact 上传 zip
+                4. release job download zip 上传到 GitHub Release
+              - iOS 用户装法:
+                1. release 页面下载 \`Runner.app.zip\`
+                2. 解压得到 \`Runner.app\` 目录
+                3. 用 AltStore / Sideloadly 装 \`Runner.app\` (它会自动重签)
+                4. 信任证书: 设置 → 通用 → VPN与设备管理 → 信任开发者
+              - 对比 v2.0.4 (失败) vs v2.0.7 (成功):
+                - v2.0.4 试图 \`xcodebuild archive + exportArchive\` 出 IPA, 失败
+                - v2.0.7 直接 zip 打包 Runner.app, 成功, 装法跟 v2.0.3 一样
+
+            ---`,
               'v2.0.6': `## 更新日志
 
             ### 🐛 修复
