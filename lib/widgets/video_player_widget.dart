@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:luna_tv/services/video_proxy_server.dart';
+import 'package:luna_tv/services/mpv_ffi.dart';
 import 'package:luna_tv/widgets/mobile_player_controls.dart';
 import 'package:luna_tv/widgets/pc_player_controls.dart';
 import 'package:luna_tv/widgets/video_player_surface.dart';
@@ -166,13 +167,29 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> with WidgetsBindi
     }
     _player = Player();
     // v2.0.16: 启本地代理给 libmpv 走优选 IP (条件满足才启, 失败不阻塞)
+    // v2.0.20: media_kit 1.2.6 Player 没 setProperty/command, 改用 dart:ffi
     final proxy = await VideoProxyServer.tryStart();
     if (proxy != null) {
       try {
-        // media_kit 1.2.6 没有 setProperty, 用 raw mpv command
-        _player!.command(['set', 'http-proxy', proxy.proxyUrl]);
-        _videoProxy = proxy;
+        if (MpvFFI.isAvailable) {
+          final handle = await _player!.handle;
+          final rc = MpvFFI.setPropertyString(
+              handle, 'http-proxy', proxy.proxyUrl);
+          if (rc >= 0) {
+            _videoProxy = proxy;
+          } else {
+            // ignore: avoid_print
+            print('[VideoProxy] mpv_set_property_string 返 $rc, 停代理走原 URL');
+            await proxy.stop();
+          }
+        } else {
+          // ignore: avoid_print
+          print('[VideoProxy] FFI libmpv 不可用: ${MpvFFI.loadError ?? "unknown"}');
+          await proxy.stop();
+        }
       } catch (e) {
+        // ignore: avoid_print
+        print('[VideoProxy] 设 http-proxy 异常: $e');
         await proxy.stop();
       }
     }

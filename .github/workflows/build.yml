@@ -275,6 +275,47 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.20': `## 更新日志
+
+            ### 🐛 修复
+
+            - **v2.0.18 / v2.0.19 编译不过 ([mpv_ffi.dart](file:///workspace/lib/services/mpv_ffi.dart) + [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) + [video_player_widget.dart](file:///workspace/lib/widgets/video_player_widget.dart) + [font_utils.dart](file:///workspace/lib/utils/font_utils.dart))**
+              - 现象: v2.0.18 / v2.0.19 推到 GitHub Actions 跑 \`flutter build apk --release\` 一直 fail (Child_process exited with error code 1), GitHub Release 里压根没 APK. 2 个 build 错:
+                1. \`Error: The method 'command' isn't defined for the class 'Player'\` (player_screen.dart:1668 + video_player_widget.dart:173)
+                2. \`Error: No named parameter with the name 'height'\` (cf_acceleration_page.dart:316)
+              - 根因 (这次挖得深, 跟 v2.0.16 是同一个 bug 反复修错):
+                1. **media_kit 1.2.6 (pub.dev 最新 stable) 的 \`Player\` 类压根没 \`setProperty\` 也没 \`command\` 方法**.
+                   只有高层 API: \`play/pause/open/seek/setVolume/setRate/setRate/setPlaylistMode\` 等.
+                   v2.0.16 用 setProperty 编不过, v2.0.18 改成 \`command\` 还是编不过, v2.0.19 直接继承 v2.0.18 的代码, 3 个版本都 build 不出 APK.
+                2. **cf_acceleration_page.dart:316 用了 \`FontUtils.poppins(... height: 1.5)\`, 但 \`FontUtils.poppins\` 签名里没 \`height\` 参数**, 老 commit 加这行的时候没注意到 API 不匹配.
+              - 修法:
+                1. 新加 [lib/services/mpv_ffi.dart](file:///workspace/lib/services/mpv_ffi.dart): 用 \`dart:ffi\` dlopen \`libmpv.so\` 直接调 libmpv C API:
+                   \`\`\`dart
+                   // int mpv_set_property_string(mpv_handle *ctx, const char *name, const char *value);
+                   typedef _MpvSetPropertyStringC = Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>);
+                   final handle = await _player.handle;  // media_kit 暴露的 mpv_handle*
+                   MpvFFI.setPropertyString(handle, 'http-proxy', proxy.proxyUrl);
+                   \`\`\`
+                   libmpv 拿到 \`http-proxy\` 后, 所有 HTTP/HTTPS 请求就走本地代理 (VideoProxyServer),
+                   代理里再用 v2.0.19 加的 \`_connectRace\` 并发拨 Top3 优选 IP, 整个 CF 加速链路
+                   才算真正跑通.
+                2. \`FontUtils.poppins\` / \`sourceCodePro\` 加 \`height: double?\` 参数
+              - 兼容性:
+                | 平台 | libmpv 加载方式 |
+                |---|---|
+                | Android | \`DynamicLibrary.open('libmpv.so')\` (media_kit_libs_video 自带) |
+                | Linux | \`DynamicLibrary.open('libmpv.so')\` (apt 装 libmpv-dev) |
+                | Windows | \`DynamicLibrary.open('libmpv-2.dll')\` |
+                | macOS / iOS | \`DynamicLibrary.process()\` (libmpv 静态链进 media_kit framework) |
+                失败兜底: 任何一步挂 (lib 找不到 / symbol 找不到 / handle=0) → \`MpvFFI.isAvailable == false\`,
+                代理 stop 掉, 行为跟 v2.0.14 一模一样 (走 buildProxiedUrl, 不走本地代理)
+              - 验证:
+                1. 装 v2.0.20 APK → 触发视频播放 (配好 CF Worker + 优选 IP)
+                2. logcat 应该有 \`MpvFFI libmpv 加载成功\` 或 \`loadError\` 提示
+                3. 起播应该比 v2.0.18 明显快 (race-dial 起作用, 100-500ms 起)
+                4. FFI 加载失败 → 静默回退, 播放照常 (走 worker, 不走优选 IP)
+
+            ---`,
               'v2.0.19': `## 更新日志
 
             ### ⚡ 性能

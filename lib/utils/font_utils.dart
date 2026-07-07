@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class FontUtils {
   static const _fontFamily = 'Microsoft YaHei';
 
-  static TextStyle poppins(BuildContext? context, {double? fontSize, FontWeight? fontWeight, Color? color}) {
+  static TextStyle poppins(BuildContext? context, {double? fontSize, FontWeight? fontWeight, Color? color, double? height}) {
     final Color fallbackColor = context != null
         ? (Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black87)
         : Colors.black87;
@@ -12,10 +12,11 @@ class FontUtils {
       fontSize: fontSize ?? 14,
       fontWeight: fontWeight ?? FontWeight.w400,
       color: color ?? fallbackColor,
+      height: height,
     );
   }
 
-  static TextStyle sourceCodePro(BuildContext? context, {double? fontSize, FontWeight? fontWeight, Color? color}) {
+  static TextStyle sourceCodePro(BuildContext? context, {double? fontSize, FontWeight? fontWeight, Color? color, double? height}) {
     final Color fallbackColor = context != null
         ? (Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black87)
         : Colors.black87;
@@ -24,6 +25,7 @@ class FontUtils {
       fontSize: fontSize ?? 14,
       fontWeight: fontWeight ?? FontWeight.w400,
       color: color ?? fallbackColor,
+      height: height,
     );
   }
 

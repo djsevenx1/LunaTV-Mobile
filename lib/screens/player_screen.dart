@@ -14,6 +14,7 @@ import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/m3u8_service.dart';
 import 'package:luna_tv/services/video_proxy_server.dart';
+import 'package:luna_tv/services/mpv_ffi.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -1653,6 +1654,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// v2.0.16: 启本地代理 + 给 libmpv 配 --http-proxy (如果条件满足)
+  /// v2.0.20: media_kit 1.2.6 Player 类没有 setProperty / command 方法,
+  ///   改用 dart:ffi 直接调 libmpv 的 mpv_set_property_string (MpvFFI).
   ///
   /// 条件: CF Worker 加速 + 优选测速都开 + 优选 IP 已测
   /// 任一不满足 → 代理不起, 播放走原 URL
@@ -1662,11 +1665,25 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_videoProxy != null && _videoProxy!.isRunning) return;
     final proxy = await VideoProxyServer.tryStart();
     if (proxy == null) return;
-    // 给 libmpv 配 --http-proxy, 之后 _player.open() 所有 HTTP/HTTPS 请求都走代理
-    // media_kit 1.2.6 没有 setProperty, 用 raw mpv command: set <prop> <value>
+    // v2.0.20: dart:ffi 直调 libmpv 设 http-proxy (绕开 media_kit API 限制)
     try {
-      _player.command(['set', 'http-proxy', proxy.proxyUrl]);
+      if (!MpvFFI.isAvailable) {
+        // ignore: avoid_print
+        print('[VideoProxy] FFI libmpv 不可用: ${MpvFFI.loadError ?? "unknown"}');
+        await proxy.stop();
+        return;
+      }
+      final handle = await _player.handle;
+      final rc = MpvFFI.setPropertyString(handle, 'http-proxy', proxy.proxyUrl);
+      if (rc < 0) {
+        // ignore: avoid_print
+        print('[VideoProxy] mpv_set_property_string 返 $rc, 停代理走原 URL');
+        await proxy.stop();
+        return;
+      }
     } catch (e) {
+      // ignore: avoid_print
+      print('[VideoProxy] 设 http-proxy 异常: $e');
       await proxy.stop();
       return;
     }
