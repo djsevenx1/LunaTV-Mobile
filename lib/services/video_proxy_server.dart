@@ -227,6 +227,24 @@ class VideoProxyServer {
               backend.add(state.pendingBodyBytes);
               state.pendingBodyBytes = [];
             }
+            // v2.0.22 修: 推 await _connectRace 期间累积的 client 数据
+            //   旧代码只推 pendingBodyBytes (header 解析那一刻的 body),
+            //   但 _handleConnect / _handleHttp 是 async fire-and-forget,
+            //   await _connectRace 期间 client 发来的数据全堆 state.buffer
+            //   没人转. onBackendReady 时只推 pendingBodyBytes 不推 buffer,
+            //   这段数据就永久丢了.
+            //
+            //   对 CONNECT 隧道: libmpv 收到 "200 Connection Established"
+            //     后立刻发 TLS ClientHello, 这个数据堆 buffer 被 onBackendReady
+            //     漏推 → TLS 握手永远完不成 → 没数据流 → "没速度"
+            //   对 HTTP 直连: 请求 body 后续 chunk 丢失 → 请求不完整 → 502
+            //
+            //   这就是用户反馈"从 v2.0 开始没速度, 关掉 CF 加速就正常"的
+            //   真根因 — 不是慢, 是 TLS 握手数据丢了整条流就死了.
+            if (state.buffer.isNotEmpty) {
+              backend.add(state.buffer);
+              state.buffer = [];
+            }
             // client → backend: 后续流过来的都推给 backend
             clientSub = client.listen(
               (d) {

@@ -96,6 +96,53 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.22': `## 更新日志
+
+            ### 🐛 修复
+
+            - **CF 加速下观看视频完全没速度 (用户反馈"从 2.0 开始没速度, 关掉 CF 加速就正常") ([video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart))**
+              - 现象: 装好 CF Worker + 优选 IP, 起播可能成功, 但**观看中拉下一段 .ts 时整条流就死了**.
+                不是慢, 是完全没数据. 关掉 CF 加速直连就正常.
+              - 根因 (跟 v2.0.21 修的"慢"不是同一个 bug, 是更早的**数据丢失 bug**):
+                [_handleConnect](file:///workspace/lib/services/video_proxy_server.dart#L316) / [_handleHttp](file:///workspace/lib/services/video_proxy_server.dart#L352) 是 async 函数,
+                但 [_onClientData](file:///workspace/lib/services/video_proxy_server.dart#L259) 里调它们时**没 await**, fire-and-forget.
+                内部 \`await _connectRace\` (100ms-5s) 期间, libmpv 发来的数据全部堆在
+                [state.buffer](file:///workspace/lib/services/video_proxy_server.dart#L445) 里, 没人转发.
+                之后 \`onBackendReady\` 回调只推 \`pendingBodyBytes\` (header 解析那一刻的 body),
+                **不推 \`state.buffer\`** → 这段数据永久丢失.
+                - **CONNECT 隧道 (HTTPS 视频走这条)**: 代理发完 "200 Connection Established"
+                  后, libmpv 立刻发 TLS ClientHello. 这包数据堆 buffer 被漏推 →
+                  **TLS 握手永远完不成** → 整条 HTTPS 流就死了 → "没速度"
+                - **HTTP 直链**: 请求 body 后续 chunk 丢失 → 请求不完整 → 502
+                - 起播的第一个 CONNECT 运气好 (_connectRace 快, ClientHello 还没到,
+                  buffer 空) 能成功, 观看中开新连接拉下一段时竞态触发, 数据丢 → 卡死
+              - 修法: [onBackendReady 回调](file:///workspace/lib/services/video_proxy_server.dart#L226) 里推完
+                \`pendingBodyBytes\` 后, 再推 \`state.buffer\` (await 期间累积的全部数据):
+                \`\`\`dart
+                if (state.buffer.isNotEmpty) {
+                  backend.add(state.buffer);
+                  state.buffer = [];
+                }
+                \`\`\`
+                之后才建新的 \`clientSub\` 接管后续转发. 这样 await 期间堆的数据全部
+                补发给 backend, TLS ClientHello 不再丢, 握手能正常完成.
+              - 为什么 v2.0.21 没修好:
+                - v2.0.21 修的 3 处 bug (双 listener / FD 泄漏 / HTTP 短连接) 都是"慢"
+                  和"累积失败"的范畴, 没触及"数据丢失"
+                - 用户反馈"不是速度慢是没速度" + "关掉 CF 加速就正常" 直接指向
+                  **数据流根本没通**, 而不是性能问题
+                - v2.0.16 起代理就有这个 fire-and-forget 漏推 buffer 的 bug, 但 v2.0.16-v2.0.19
+                  FFI 没编过代理没真跑; v2.0.20 修好 FFI 才让代理真正生效, bug 才暴露
+              - 兼容性:
+                - 没配 CF Worker / 没优选 IP → 代理不起, 走原 URL, 完全不受影响
+                - 改的只是代理内部数据转发, libmpv 协议层没动
+              - 验证:
+                1. 装 v2.0.22 APK → 配好 CF Worker + 优选 IP → 选 HTTPS HLS 源
+                2. 起播应该成功 + **观看 5-10 分钟不再卡死**
+                3. 切集 / 拖进度条都应该正常 (每次新 CONNECT 都不丢 ClientHello)
+                4. logcat 应该看到连续的 \`CONNECT ... race dial won\` 日志, 不再中断
+
+            ---`,
               'v2.0.21': `## 更新日志
 
             ### 🐛 修复
