@@ -422,6 +422,26 @@ class UserDataService {
   // 但对 lain.bgm.tv 图片仍返回 403（上游拦了 CF 节点），所以图片必须走 CF Worker
   static const String publicCorsProxyBase = 'https://ciao-cors.is-an.org/';
 
+  /// v2.0.12: 构造 ciao-cors 代理 URL
+  ///
+  /// 老用法 (v2.0.0 ~ v2.0.11):
+  ///   `https://ciao-cors.is-an.org/?url=https%3A%2F%2F...`
+  ///   → 现在返 400 "Invalid URL format", **100% 失败**
+  ///
+  /// 新用法 (v2.0.12+):
+  ///   `https://ciao-cors.is-an.org/https://...` (path 拼接, **不 encode**)
+  ///   + 必须带 `X-Requested-With: XMLHttpRequest` 或 `Origin` 头, 否则 403
+  ///
+  /// 调用方负责带 header (参考 [bangumi_service.dart] 的请求)
+  static String buildCiaoCorsUrl(String targetUrl) {
+    // 直接 path 拼接, target URL 必须带 https:// 前缀
+    if (targetUrl.startsWith('https://') || targetUrl.startsWith('http://')) {
+      return '$publicCorsProxyBase$targetUrl';
+    }
+    // 兜底: 协议相对或无协议, 强制 https
+    return '$publicCorsProxyBasehttps://$targetUrl';
+  }
+
   // 保存 Bangumi 数据源设置（key 值：direct / cors_proxy / cf_worker）
   static Future<void> saveBangumiDataSource(String key) async {
     final prefs = await SharedPreferences.getInstance();
@@ -559,7 +579,9 @@ class UserDataService {
     // 2) 公共 CORS 代理
     final key = getBangumiDataSourceKeySync();
     if (key == 'cors_proxy') {
-      return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
+      // v2.0.12: ciao-cors 改用法 (?url= → path 拼接),
+      // 老用法返 400 "Invalid URL format", 见 [buildCiaoCorsUrl]
+      return buildCiaoCorsUrl(originalUrl);
     }
     return originalUrl;
   }
@@ -602,14 +624,16 @@ class UserDataService {
     // 2) 用户选的图片源
     final key = getBangumiImageSourceKeySync();
     if (key == 'cors_proxy') {
-      return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
+      // v2.0.12: ciao-cors 改用法, 见 [buildCiaoCorsUrl]
+      return buildCiaoCorsUrl(originalUrl);
     }
     // v2.0.5: 之前 cf_worker case 缺了, 走 fallthrough 到 return originalUrl
     // 直连 lain.bgm.tv, 国内 403/被墙, 图片加载不出来。
     // 现在加 case: cf_worker 模式 (没配 CF Worker 域名) 退化成 cors_proxy,
     // 至少公共代理能加载, 比直连好
     if (key == 'cf_worker') {
-      return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
+      // v2.0.12: ciao-cors 改用法
+      return buildCiaoCorsUrl(originalUrl);
     }
     return originalUrl;
   }
