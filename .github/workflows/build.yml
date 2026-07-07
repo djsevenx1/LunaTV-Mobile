@@ -214,6 +214,34 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.5': `## 更新日志
+
+            ### 🐛 修复
+
+            - **Bangumi 图片加载不出来 ([user_data_service.dart#buildBangumiImageUrl](file:///workspace/lib/services/user_data_service.dart))**
+              - 现象: Bangumi 番剧封面 / Bangumi 详情页 banner / Bangumi 海报, 用户菜单里
+                选 "CF Worker 加速" 或 "直连" 时加载不出图片, 选 "Cors Proxy By Zwei"
+                时能加载 (看运气, 公共代理对 lain.bgm.tv 经常 403)
+              - 根因: \`buildBangumiImageUrl\` 只 case 了 \`cors_proxy\`, \`cf_worker\` /
+                \`direct\` 都 fallthrough 到 \`return originalUrl\` (直连 lain.bgm.tv).
+                菜单里能看到 "CF Worker 加速" 选项, 但代码里没 case 处理这个值.
+                直连国内多数时候 403 / 被墙, 图片就加载不出来.
+              - 修法: 加 \`cf_worker\` case
+                - 用户没配 CF Worker 域名 (走 \`cf_worker\` 模式) → 退化成
+                  \`publicCorsProxyBase\` (跟 \`cors_proxy\` 模式同样处理)
+                - 至少公共代理能加载, 比直连好
+                - 配了 CF Worker 域名 (走优先级 1) → 走 worker 代理, 不受影响
+              - 行为对比:
+                - 配 worker 域名 + 选 cf_worker → 走 worker 加速 (修复前后一样 OK)
+                - 配 worker 域名 + 选 cors_proxy → 走 worker 加速 (优先级 1 优先)
+                - **没配 worker 域名 + 选 cf_worker → 之前直连失败, 现在退到公共代理**
+                - 没配 worker 域名 + 选 cors_proxy → 走公共代理 (修复前后一样)
+                - 没配 worker 域名 + 选 direct → 直连 (修复前后一样, 用户自选)
+              - 配套: \`getImageRequestHeaders\` 给 Bangumi 图片补 \`User-Agent\`
+                (LunaTV-Mobile/1.0) + \`Referer: https://bgm.tv/\` (跟 api.bgm.tv
+                v0 API 同款), 代理过去后 lain.bgm.tv 不会 403
+
+            ---`,
               'v2.0.4': `## 更新日志
 
             ### 🚀 iOS 出可装 IPA, APK + IPA 一起发 GitHub Release

@@ -569,7 +569,8 @@ class UserDataService {
   /// 优先级（和 Bangumi 数据源对齐）：
   /// 1. CF Worker 域名（只要配了就用，不受 CF Worker 加速开关控制）
   /// 2. 用户选的 cors_proxy（公共 CORS 代理）
-  /// 3. 直连
+  /// 3. 用户选的 cf_worker（CF Worker 加速）— v2.0.5 新增
+  /// 4. 直连
   ///
   /// 注意：publicCorsProxyBase 对 lain.bgm.tv 返 403，
   /// 所以 cors_proxy 模式下图片依然可能加载失败，但用户自己选了
@@ -581,9 +582,16 @@ class UserDataService {
       return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
     }
 
-    // 2) 公共 CORS 代理
+    // 2) 用户选的图片源
     final key = getBangumiImageSourceKeySync();
     if (key == 'cors_proxy') {
+      return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
+    }
+    // v2.0.5: 之前 cf_worker case 缺了, 走 fallthrough 到 return originalUrl
+    // 直连 lain.bgm.tv, 国内 403/被墙, 图片加载不出来。
+    // 现在加 case: cf_worker 模式 (没配 CF Worker 域名) 退化成 cors_proxy,
+    // 至少公共代理能加载, 比直连好
+    if (key == 'cf_worker') {
       return publicCorsProxyBase + Uri.encodeComponent(originalUrl);
     }
     return originalUrl;
