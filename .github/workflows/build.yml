@@ -275,6 +275,46 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.13': `## 更新日志
+
+            ### 🐛 修复
+
+            - **CI 编译报错 ([cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart) + [user_data_service.dart#buildCiaoCorsUrl](file:///workspace/lib/services/user_data_service.dart))**
+              - 现象: v2.0.12 push 触发 CI 构建, 3 次重试全失败, 编译日志关键错:
+                \`lib/services/cf_optimizer.dart:269:7: Error: The non-abstract class '_OptimizingHttpClient' is missing implementations for these members\`
+                后面跟 18 个 HttpClient 接口不匹配错误
+              - 根因 (CI 用的 Flutter 3.22.2 + Dart SDK 比本地 v2.0.11 编译时新, 接口有变化):
+                1. **HttpClient 静态方法位置错**: v2.0.11 把 \`warmup/refresh/disable\`
+                   + 缓存字段写在私有类 \`_OptimizingHttpClient\` 上, 但
+                   \`main.dart\` / \`user_menu.dart\` 调用的是
+                   \`CfOptimizerHttpOverrides.warmup\` — 编译器找不到
+                2. **HttpClient 接口升级**: Dart SDK 新版 \`HttpClient\` 多了 3 个
+                   必须实现的成员 (\`addProxyCredentials\` / \`connectionFactory=\`
+                   / \`keyLog=\`), 还把 \`maxConnectionsPerHost\` 类型从 \`int\`
+                   改 \`int?\`, \`addProxy\` 直接移除
+                3. **方法签名不对齐**: \`delete/get/head/open/patch/post/put\`
+                   旧版 (Uri, {headers}) 重载被移除, 新版只剩
+                   \`(String host, int port, String path)\` 单一签名
+                4. **URL 拼接 typo**: \`buildCiaoCorsUrl\` 兜底分支
+                   \`'$publicCorsProxyBasehttps://...'\` — \`Base\` 和 \`https\`
+                   之间漏了 \`/\`, 拼出来是 \`https://ciao-cors.is-an.orghttps://...\`
+                   (没分隔符, 必 404)
+              - 修法:
+                1. [cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart):
+                   - 缓存 + 静态方法从 \`_OptimizingHttpClient\` 移到
+                     \`CfOptimizerHttpOverrides\` (跟调用方对齐)
+                   - 补 \`addProxyCredentials\` / \`connectionFactory=\` / \`keyLog=\`
+                   - \`maxConnectionsPerHost\` 类型改 \`int?\`
+                   - 删 \`addProxy\` (移除的方法)
+                   - 7 个 shortcut 方法签名改 \`(String host, int port, String path)\`
+                2. [user_data_service.dart](file:///workspace/lib/services/user_data_service.dart):
+                   - \`buildCiaoCorsUrl\` 兜底分支 typo 修正:
+                     \`$publicCorsProxyBase/https://$targetUrl\`
+              - 用户场景: 装 v2.0.13 APK → 启动 app → CF 优选照常工作 (HTTP 请求
+                override 没破) → 选 cors_proxy / cf_worker 图片源时, 公共代理
+                URL 拼对了, 图能加载出来
+
+            ---`,
               'v2.0.12': `## 更新日志
 
             ### 🐛 修复
