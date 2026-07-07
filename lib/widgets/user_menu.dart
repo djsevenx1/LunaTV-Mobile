@@ -332,6 +332,7 @@ class _UserMenuState extends State<UserMenu> {
     required List<String> options,
     required Future<void> Function(String) onChanged,
     required IconData icon,
+    required Color iconColor,
   }) {
     return Material(
       color: Colors.transparent,
@@ -340,17 +341,11 @@ class _UserMenuState extends State<UserMenu> {
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: 16,
-            vertical: 10,
+            vertical: 12,
           ),
           child: Row(
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: widget.isDarkMode
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF6b7280),
-              ),
+              _buildIconContainer(icon, iconColor),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -359,7 +354,7 @@ class _UserMenuState extends State<UserMenu> {
                     Text(
                       title,
                       style: FontUtils.poppins(context,
-                                                fontSize: 16,
+                        fontSize: 16,
                         color: widget.isDarkMode
                             ? const Color(0xFFffffff)
                             : const Color(0xFF1f2937),
@@ -370,7 +365,7 @@ class _UserMenuState extends State<UserMenu> {
                     Text(
                       currentValue,
                       style: FontUtils.poppins(context,
-                                                fontSize: 12,
+                        fontSize: 12,
                         color: widget.isDarkMode
                             ? const Color(0xFF9ca3af)
                             : const Color(0xFF6b7280),
@@ -574,6 +569,7 @@ class _UserMenuState extends State<UserMenu> {
     required String currentValue,
     required VoidCallback onTap,
     required IconData icon,
+    required Color iconColor,
   }) {
     return Material(
       color: Colors.transparent,
@@ -582,17 +578,11 @@ class _UserMenuState extends State<UserMenu> {
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: 16,
-            vertical: 10,
+            vertical: 12,
           ),
           child: Row(
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: widget.isDarkMode
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF6b7280),
-              ),
+              _buildIconContainer(icon, iconColor),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -601,7 +591,7 @@ class _UserMenuState extends State<UserMenu> {
                     Text(
                       title,
                       style: FontUtils.poppins(context,
-                                                fontSize: 16,
+                        fontSize: 16,
                         color: widget.isDarkMode
                             ? const Color(0xFFffffff)
                             : const Color(0xFF1f2937),
@@ -612,7 +602,7 @@ class _UserMenuState extends State<UserMenu> {
                     Text(
                       currentValue.isEmpty ? '未设置' : currentValue,
                       style: FontUtils.poppins(context,
-                                                fontSize: 12,
+                        fontSize: 12,
                         color: widget.isDarkMode
                             ? const Color(0xFF9ca3af)
                             : const Color(0xFF6b7280),
@@ -643,6 +633,7 @@ class _UserMenuState extends State<UserMenu> {
     required bool value,
     required Future<void> Function(bool) onChanged,
     required IconData icon,
+    required Color iconColor,
     String? subtitle,
   }) {
     return Material(
@@ -650,17 +641,11 @@ class _UserMenuState extends State<UserMenu> {
       child: Container(
         padding: const EdgeInsets.symmetric(
           horizontal: 16,
-          vertical: 10,
+          vertical: 12,
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: widget.isDarkMode
-                  ? const Color(0xFF9ca3af)
-                  : const Color(0xFF6b7280),
-            ),
+            _buildIconContainer(icon, iconColor),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -669,7 +654,7 @@ class _UserMenuState extends State<UserMenu> {
                   Text(
                     title,
                     style: FontUtils.poppins(context,
-                                        fontSize: 16,
+                      fontSize: 16,
                       color: widget.isDarkMode
                           ? const Color(0xFFffffff)
                           : const Color(0xFF1f2937),
@@ -732,31 +717,280 @@ class _UserMenuState extends State<UserMenu> {
     );
   }
 
-  /// 设置页分组标题
+  /// 设置页分组标题: 小号、带颜色色条强调的标签
   Widget _buildSectionHeader(String title) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        title,
-        style: FontUtils.poppins(
-          context,
-          fontSize: 13,
-          color: widget.isDarkMode
-              ? const Color(0xFF9ca3af)
-              : const Color(0xFF6b7280),
-          fontWeight: FontWeight.w600,
+      padding: const EdgeInsets.fromLTRB(24, 20, 16, 8),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 14,
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366f1),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: FontUtils.poppins(
+              context,
+              fontSize: 13,
+              color: widget.isDarkMode
+                  ? const Color(0xFF9ca3af)
+                  : const Color(0xFF6b7280),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 卡片内列表项之间的细分隔线: 带 indent, 不贴边
+  Widget _buildDivider() {
+    return Padding(
+      padding: const EdgeInsets.only(left: 60),
+      child: Container(
+        height: 0.5,
+        color: widget.isDarkMode
+            ? const Color(0xFF374151)
+            : const Color(0xFFe5e7eb),
+      ),
+    );
+  }
+
+  /// iOS 设置风格的彩色图标圆角方块背景
+  Widget _buildIconContainer(IconData icon, Color iconColor) {
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: iconColor.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(icon, size: 18, color: iconColor),
+    );
+  }
+
+  /// iOS 设置风格的圆角分组卡片: 12px 左右 margin, 圆角裁剪子项
+  Widget _buildCard({required List<Widget> children}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color:
+            widget.isDarkMode ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: children),
+    );
+  }
+
+  /// 卡片内的普通操作项 (清除缓存 / 检查更新 等)
+  Widget _buildActionItem({
+    required String title,
+    required IconData icon,
+    required Color iconColor,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              _buildIconContainer(icon, iconColor),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: FontUtils.poppins(
+                    context,
+                    fontSize: 16,
+                    color: widget.isDarkMode
+                        ? const Color(0xFFffffff)
+                        : const Color(0xFF1f2937),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  /// 选项之间的分隔线
-  Widget _buildDivider() {
+  /// 用户信息头部卡片: 渐变背景 + 首字母头像圆 + 角色标签
+  Widget _buildUserHeader() {
+    final String avatarText;
+    final String displayName;
+    if (_isLocalMode) {
+      avatarText = '本';
+      displayName = '本地模式';
+    } else {
+      final name = _username ?? '未知用户';
+      displayName = name;
+      avatarText = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    }
+
     return Container(
-      height: 1,
-      color: widget.isDarkMode
-          ? const Color(0xFF374151)
-          : const Color(0xFFe5e7eb),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF6366f1),
+            Color(0xFF8b5cf6),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6366f1).withOpacity(0.25),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.25),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.4),
+                  width: 2,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  avatarText,
+                  style: FontUtils.poppins(
+                    context,
+                    fontSize: 24,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayName,
+                    style: FontUtils.poppins(
+                      context,
+                      fontSize: 18,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (!_isLocalMode) ...[
+                    const SizedBox(height: 6),
+                    _buildRoleTag(),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 登出: 底部独立的红色卡片, 居中文字
+  Widget _buildLogoutCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: widget.isDarkMode ? const Color(0xFF1F2937) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _handleLogout,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  LucideIcons.logOut,
+                  size: 18,
+                  color: Color(0xFFef4444),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '登出',
+                  style: FontUtils.poppins(
+                    context,
+                    fontSize: 16,
+                    color: const Color(0xFFef4444),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 版本号: 底部居中, 弱化颜色, 可点击打开 GitHub
+  Widget _buildVersionNumber() {
+    return MouseRegion(
+      cursor: DeviceUtils.isPC()
+          ? SystemMouseCursors.click
+          : MouseCursor.defer,
+      child: GestureDetector(
+        onTap: () async {
+          final url =
+              Uri.parse('https://github.com/MoonTechLab/LunaTV');
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+          }
+        },
+        child: Center(
+          child: Text(
+            _version.isEmpty ? 'v1.4.3' : 'v$_version',
+            style: FontUtils.poppins(
+              context,
+              fontSize: 13,
+              color: widget.isDarkMode
+                  ? const Color(0xFF9ca3af)
+                  : const Color(0xFF6b7280),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -764,12 +998,12 @@ class _UserMenuState extends State<UserMenu> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: widget.isDarkMode
-          ? const Color(0xFF000000)
-          : const Color(0xFFf5f5f5),
+          ? const Color(0xFF0F1117)
+          : const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: widget.isDarkMode
-            ? const Color(0xFF1e1e1e)
-            : Colors.white,
+            ? const Color(0xFF0F1117)
+            : const Color(0xFFF5F5F5),
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
@@ -777,7 +1011,7 @@ class _UserMenuState extends State<UserMenu> {
             LucideIcons.arrowLeft,
             color: widget.isDarkMode
                 ? const Color(0xFFffffff)
-                : const Color(0xFF2c3e50),
+                : const Color(0xFF1f2937),
           ),
           onPressed: () => Navigator.of(context).pop(),
         ),
@@ -795,318 +1029,167 @@ class _UserMenuState extends State<UserMenu> {
         centerTitle: true,
       ),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
+        padding: const EdgeInsets.only(top: 4, bottom: 32),
         children: [
-          // 用户信息区域
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-            child: Column(
-              children: [
-                // 本地模式下不显示"当前用户"标签
-                if (!_isLocalMode)
-                  Text(
-                    '当前用户',
-                    style: FontUtils.poppins(
-                      context,
-                      fontSize: 12,
-                      color: widget.isDarkMode
-                          ? const Color(0xFF9ca3af)
-                          : const Color(0xFF6b7280),
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                if (!_isLocalMode) const SizedBox(height: 8),
-                // 用户名或本地模式
-                if (_isLocalMode)
-                  Text(
-                    '本地模式',
-                    style: FontUtils.poppins(
-                      context,
-                      fontSize: 18,
-                      color: widget.isDarkMode
-                          ? const Color(0xFFffffff)
-                          : const Color(0xFF1f2937),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  )
-                else
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _username ?? '未知用户',
-                        style: FontUtils.poppins(
-                          context,
-                          fontSize: 18,
-                          color: widget.isDarkMode
-                              ? const Color(0xFFffffff)
-                              : const Color(0xFF1f2937),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // 角色标签
-                      _buildRoleTag(),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-          _buildDivider(),
+          // ===== 用户信息头部卡片 =====
+          _buildUserHeader(),
           // ===== 数据源 =====
           _buildSectionHeader('数据源'),
-          // 豆瓣数据源选项
-          _buildOptionSelector(
-            title: '豆瓣数据源',
-            currentValue: _doubanDataSource,
-            options: const [
-              '直连',
-              'Cors Proxy By Zwei',
-              '豆瓣 CDN By CMLiussss（腾讯云）',
-              '豆瓣 CDN By CMLiussss（阿里云）',
+          _buildCard(
+            children: [
+              // 豆瓣数据源选项
+              _buildOptionSelector(
+                title: '豆瓣数据源',
+                currentValue: _doubanDataSource,
+                options: const [
+                  '直连',
+                  'Cors Proxy By Zwei',
+                  '豆瓣 CDN By CMLiussss（腾讯云）',
+                  '豆瓣 CDN By CMLiussss（阿里云）',
+                ],
+                onChanged: (value) async {
+                  await UserDataService.saveDoubanDataSource(value);
+                  if (!mounted) return;
+                  setState(() {
+                    _doubanDataSource = value;
+                  });
+                },
+                icon: LucideIcons.database,
+                iconColor: const Color(0xFF10b981),
+              ),
+              _buildDivider(),
+              // 豆瓣图片源选项
+              _buildOptionSelector(
+                title: '豆瓣图片源',
+                currentValue: _doubanImageSource,
+                options: const [
+                  '直连',
+                  '豆瓣官方精品 CDN',
+                  '豆瓣 CDN By CMLiussss（腾讯云）',
+                  '豆瓣 CDN By CMLiussss（阿里云）',
+                ],
+                onChanged: (value) async {
+                  await UserDataService.saveDoubanImageSource(value);
+                  if (!mounted) return;
+                  setState(() {
+                    _doubanImageSource = value;
+                  });
+                },
+                icon: LucideIcons.image,
+                iconColor: const Color(0xFF14b8a6),
+              ),
+              _buildDivider(),
+              // Bangumi 数据源选项
+              _buildOptionSelector(
+                title: 'Bangumi 数据源',
+                currentValue: _bangumiDataSource,
+                options: const [
+                  '直连',
+                  'Cors Proxy By Zwei',
+                  'CF Worker 加速',
+                ],
+                onChanged: (value) async {
+                  final key = UserDataService
+                      .getBangumiDataSourceKeyFromDisplayName(value);
+                  await UserDataService.saveBangumiDataSource(key);
+                  if (!mounted) return;
+                  setState(() {
+                    _bangumiDataSource = value;
+                  });
+                },
+                icon: LucideIcons.database,
+                iconColor: const Color(0xFFec4899),
+              ),
+              _buildDivider(),
+              // Bangumi 图片源选项
+              _buildOptionSelector(
+                title: 'Bangumi 图片源',
+                currentValue: _bangumiImageSource,
+                options: const [
+                  '直连',
+                  'Cors Proxy By Zwei',
+                  'CF Worker 加速',
+                ],
+                onChanged: (value) async {
+                  final key = UserDataService
+                      .getBangumiImageSourceKeyFromDisplayName(value);
+                  await UserDataService.saveBangumiImageSource(key);
+                  if (!mounted) return;
+                  setState(() {
+                    _bangumiImageSource = value;
+                  });
+                },
+                icon: LucideIcons.image,
+                iconColor: const Color(0xFFf43f5e),
+              ),
+              _buildDivider(),
+              // M3U8 代理 URL 选项
+              _buildInputOption(
+                title: 'M3U8 代理 URL',
+                currentValue: _m3u8ProxyUrl,
+                onTap: _showM3u8ProxyUrlDialog,
+                icon: LucideIcons.link,
+                iconColor: const Color(0xFF6366f1),
+              ),
             ],
-            onChanged: (value) async {
-              await UserDataService.saveDoubanDataSource(value);
-              if (!mounted) return;
-              setState(() {
-                _doubanDataSource = value;
-              });
-            },
-            icon: LucideIcons.database,
-          ),
-          _buildDivider(),
-          // 豆瓣图片源选项
-          _buildOptionSelector(
-            title: '豆瓣图片源',
-            currentValue: _doubanImageSource,
-            options: const [
-              '直连',
-              '豆瓣官方精品 CDN',
-              '豆瓣 CDN By CMLiussss（腾讯云）',
-              '豆瓣 CDN By CMLiussss（阿里云）',
-            ],
-            onChanged: (value) async {
-              await UserDataService.saveDoubanImageSource(value);
-              if (!mounted) return;
-              setState(() {
-                _doubanImageSource = value;
-              });
-            },
-            icon: LucideIcons.image,
-          ),
-          _buildDivider(),
-          // Bangumi 数据源选项
-          _buildOptionSelector(
-            title: 'Bangumi 数据源',
-            currentValue: _bangumiDataSource,
-            options: const [
-              '直连',
-              'Cors Proxy By Zwei',
-              'CF Worker 加速',
-            ],
-            onChanged: (value) async {
-              final key = UserDataService
-                  .getBangumiDataSourceKeyFromDisplayName(value);
-              await UserDataService.saveBangumiDataSource(key);
-              if (!mounted) return;
-              setState(() {
-                _bangumiDataSource = value;
-              });
-            },
-            icon: LucideIcons.database,
-          ),
-          _buildDivider(),
-          // Bangumi 图片源选项
-          _buildOptionSelector(
-            title: 'Bangumi 图片源',
-            currentValue: _bangumiImageSource,
-            options: const [
-              '直连',
-              'Cors Proxy By Zwei',
-              'CF Worker 加速',
-            ],
-            onChanged: (value) async {
-              final key = UserDataService
-                  .getBangumiImageSourceKeyFromDisplayName(value);
-              await UserDataService.saveBangumiImageSource(key);
-              if (!mounted) return;
-              setState(() {
-                _bangumiImageSource = value;
-              });
-            },
-            icon: LucideIcons.image,
-          ),
-          _buildDivider(),
-          // M3U8 代理 URL 选项
-          _buildInputOption(
-            title: 'M3U8 代理 URL',
-            currentValue: _m3u8ProxyUrl,
-            onTap: _showM3u8ProxyUrlDialog,
-            icon: LucideIcons.link,
           ),
           // ===== 加速 =====
           _buildSectionHeader('加速'),
-          // v2.0.17: CF 加速与优选 入口 (点击进入子页面)
-          _buildInputOption(
-            title: 'CF 加速与优选',
-            currentValue: _cfSummary,
-            onTap: _openCfAccelerationPage,
-            icon: LucideIcons.rocket,
+          _buildCard(
+            children: [
+              // v2.0.17: CF 加速与优选 入口 (点击进入子页面)
+              _buildInputOption(
+                title: 'CF 加速与优选',
+                currentValue: _cfSummary,
+                onTap: _openCfAccelerationPage,
+                icon: LucideIcons.rocket,
+                iconColor: const Color(0xFFf59e0b),
+              ),
+            ],
           ),
           // ===== 其他 =====
           _buildSectionHeader('其他'),
-          // 本地搜索选项（本地模式下不显示）
-          if (!_isLocalMode) _buildToggleOption(
-            title: '本地搜索',
-            value: _localSearch,
-            onChanged: (value) async {
-              await UserDataService.saveLocalSearch(value);
-              if (!mounted) return;
-              setState(() {
-                _localSearch = value;
-              });
-            },
-            icon: LucideIcons.search,
-          ),
-          if (!_isLocalMode) _buildDivider(),
-          // 清除豆瓣缓存按钮
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _handleClearDoubanCache,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
+          _buildCard(
+            children: [
+              // 本地搜索选项（本地模式下不显示）
+              if (!_isLocalMode)
+                _buildToggleOption(
+                  title: '本地搜索',
+                  value: _localSearch,
+                  onChanged: (value) async {
+                    await UserDataService.saveLocalSearch(value);
+                    if (!mounted) return;
+                    setState(() {
+                      _localSearch = value;
+                    });
+                  },
+                  icon: LucideIcons.search,
+                  iconColor: const Color(0xFF3b82f6),
                 ),
-                child: Row(
-                  children: [
-                    Icon(
-                      LucideIcons.trash2,
-                      size: 20,
-                      color: const Color(0xFFf59e0b),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '清除豆瓣缓存',
-                      style: FontUtils.poppins(
-                        context,
-                        fontSize: 16,
-                        color: widget.isDarkMode
-                            ? const Color(0xFFffffff)
-                            : const Color(0xFF1f2937),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+              if (!_isLocalMode) _buildDivider(),
+              // 清除豆瓣缓存按钮
+              _buildActionItem(
+                title: '清除豆瓣缓存',
+                icon: LucideIcons.trash2,
+                iconColor: const Color(0xFFf59e0b),
+                onTap: _handleClearDoubanCache,
               ),
-            ),
-          ),
-          _buildDivider(),
-          // 检查更新按钮
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _handleCheckUpdate,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      LucideIcons.download,
-                      size: 20,
-                      color: const Color(0xFF3b82f6),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '检查更新',
-                      style: FontUtils.poppins(
-                        context,
-                        fontSize: 16,
-                        color: widget.isDarkMode
-                            ? const Color(0xFFffffff)
-                            : const Color(0xFF1f2937),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+              _buildDivider(),
+              // 检查更新按钮
+              _buildActionItem(
+                title: '检查更新',
+                icon: LucideIcons.download,
+                iconColor: const Color(0xFF06b6d4),
+                onTap: _handleCheckUpdate,
               ),
-            ),
+            ],
           ),
-          _buildDivider(),
-          // 登出按钮
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _handleLogout,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      LucideIcons.logOut,
-                      size: 20,
-                      color: Color(0xFFef4444),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      '登出',
-                      style: FontUtils.poppins(
-                        context,
-                        fontSize: 16,
-                        color: const Color(0xFFef4444),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          _buildDivider(),
-          // 版本号
-          MouseRegion(
-            cursor: DeviceUtils.isPC()
-                ? SystemMouseCursors.click
-                : MouseCursor.defer,
-            child: GestureDetector(
-              onTap: () async {
-                final url =
-                    Uri.parse('https://github.com/MoonTechLab/LunaTV');
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url,
-                      mode: LaunchMode.externalApplication);
-                }
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 16,
-                ),
-                child: Center(
-                  child: Text(
-                    _version.isEmpty ? 'v1.4.3' : 'v$_version',
-                    style: FontUtils.poppins(
-                      context,
-                      fontSize: 14,
-                      color: widget.isDarkMode
-                          ? const Color(0xFF9ca3af)
-                          : const Color(0xFF6b7280),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+          // ===== 登出 (独立红色卡片) =====
+          const SizedBox(height: 8),
+          _buildLogoutCard(),
+          // ===== 版本号 =====
+          const SizedBox(height: 16),
+          _buildVersionNumber(),
         ],
       ),
     );
