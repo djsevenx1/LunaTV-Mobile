@@ -374,7 +374,9 @@ class M3U8Service {
         url,
         options: Options(
           responseType: ResponseType.bytes,
-          receiveTimeout: const Duration(seconds: 3),
+          // v2.0.21: 3s 偏紧, 走 CF Worker 跨洲路由偶尔首批字节就 > 3s
+          // → 直接返回 0 KB/s, UI 看着像"没速度". 放到 8s 给慢网留余量.
+          receiveTimeout: const Duration(seconds: 8),
           headers: {'Range': 'bytes=0-65535'},
         ),
       );

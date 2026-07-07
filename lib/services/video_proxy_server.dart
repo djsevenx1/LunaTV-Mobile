@@ -112,6 +112,16 @@ class VideoProxyServer {
   ///   - v2.0.16: 1 IP × 5s 超时, 抽风时整个播放都卡
   ///   - v2.0.19: 3 IP 并发, 整体耗时 ≈ 最快 IP 的延迟 (100~500ms)
   ///   - 失败兜底: 全部 IP 都不行 → 连原 host (走 CF 自己的 DNS 解析)
+  /// v2.0.21 修: 输的 socket 必须 destroy
+  ///   旧代码 .then((socket) { if (!completer.isCompleted) completer.complete(socket); })
+  ///   输的 .then 也触发, completer 已被完成 → 静默丢 socket, **FD 泄漏**:
+  ///     - 长 HLS 几百段, 每段 CONNECT 触发 3 个 Socket.connect
+  ///     - 输的 2 个 socket 没人 destroy, 直到 OS 超时(分钟级)或进程退出才回收
+  ///     - 移动端 FD 上限本来就紧 (Android 软限 ~1024), 累积到一定程度
+  ///       Socket.connect 开始失败 → 视频起播变慢 / 部分段 502
+  ///   修法: 输的 socket 立即 destroy, 配套用 winnerChosen 标志区分
+  ///   "已胜出" 还是 "真失败", 防止 winner 已返回后输的 catchError
+  ///   还把 errorCount 累上去把 completer 误覆盖成错误.
   static Future<Socket> _connectRace(
     String originalHost,
     int port,
@@ -126,15 +136,28 @@ class VideoProxyServer {
     final completer = Completer<Socket>();
     int errorCount = 0;
     final totalCount = candidateIps.length;
+    bool winnerChosen = false;
 
     for (final ip in candidateIps) {
       // ignore: unawaited_futures
       Socket.connect(ip, port, timeout: const Duration(seconds: 5))
           .then((socket) {
-        if (!completer.isCompleted) {
-          completer.complete(socket);
+        if (!winnerChosen) {
+          winnerChosen = true;
+          if (!completer.isCompleted) {
+            completer.complete(socket);
+          } else {
+            socket.destroy();
+          }
+        } else {
+          // v2.0.21: 输的 socket 立即 destroy, 不留到 OS 超时
+          socket.destroy();
         }
       }).catchError((e) {
+        // v2.0.21: winner 已选就忽略, 别把 errorCount 累上去
+        // (旧代码这里会被输的 catchError 干扰, completer 已完成
+        // completeError 是 no-op 但语义上错乱, 不利于调试)
+        if (winnerChosen) return;
         errorCount++;
         if (errorCount == totalCount && !completer.isCompleted) {
           completer.completeError(
@@ -175,6 +198,18 @@ class VideoProxyServer {
         try {
           _onClientData(client, state, data, (backend) {
             // 接到 backend 后, 把 client ↔ backend 串起来
+            //
+            // v2.0.21 修: 旧代码在 onBackendReady 回调里直接
+            //   clientSub = client.listen(...)
+            // 没 cancel 老的 clientSub, 老的 listener 还在订阅 client.
+            // 后续每包数据都会触发两个 listener (老的进 _onClientData
+            // 当 no-op 浪费 CPU, 新的进 backend.add 正常转发), 跑长 HLS
+            // (几百段) 累计浪费明显.
+            //
+            // 修法: 先 cancel 老的 clientSub, 再建新的.
+            final oldClientSub = clientSub;
+            clientSub = null;
+            oldClientSub?.cancel();
             backendSub = backend.listen(
               (d) {
                 try {
@@ -358,11 +393,16 @@ class VideoProxyServer {
     if (!hostHeaderSet) {
       headerLines.add('Host: $host${port == 80 || port == 443 ? '' : ':$port'}');
     }
-    // HTTP/1.0 让 backend 短连接, 简化代理逻辑
-    // (libmpv 通常是 HTTP/1.1 keep-alive, 但代理串接两条 keep-alive 太麻烦)
-
+    // v2.0.21 改: 不再强加 Connection: close
+    //   旧逻辑: HTTP/1.1 + Connection: close = 等价 HTTP/1.0 短连接
+    //   后果: 客户端 (libmpv 拉 HLS) 每个 .ts 段都开新 TCP 连接, 长 HLS
+    //         几百段累计: TLS 握手 × N + 竞速拨号 × N, 看着像"没速度"
+    //   现状: 代理 client→backend 的 listener 是持久的, backend→client
+    //         也是持久的, backend 自己维持 keep-alive 没问题, 真要断开
+    //         onDone: closeAll 自然兜底. 删掉 Connection: close 让
+    //         HTTP/1.1 backend 复用连接即可.
     final request =
-        '$requestLine\r\n${headerLines.join('\r\n')}\r\nConnection: close\r\n\r\n';
+        '$requestLine\r\n${headerLines.join('\r\n')}\r\n\r\n';
     final reqBytes = request.codeUnits;
 
     try {

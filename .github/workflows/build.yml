@@ -96,6 +96,56 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.21': `## 更新日志
+
+            ### 🐛 修复
+
+            - **从 v2.0 (v2.0.16+ 视频代理) 开始起播 / 长 HLS 看着像"没速度" ([video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart) + [m3u8_service.dart](file:///workspace/lib/services/m3u8_service.dart))**
+              - 现象: 装好 CF Worker 域名 + 优选 IP 后, 短片能放, 一到 HLS 几十 / 几百段
+                的剧就卡, 选源面板常常显示 0 KB/s. 反馈"从 2.0 开始没速度了".
+              - 根因: v2.0.16 引入 [VideoProxyServer](file:///workspace/lib/services/video_proxy_server.dart) 给 libmpv
+                走优选 IP, 配套 v2.0.19 加竞速拨号. 代码写完后又补了 dart:ffi
+                (v2.0.20) 才真跑通, 但代理本身有 3 处 bug 一起放大成"没速度":
+                1. **双 listener 漏 cancel (v2.0.16 起就有的 bug)** — [_handleConnection](file:///workspace/lib/services/video_proxy_server.dart#L179)
+                   第一次拿到 header 后, 回调里直接 \`clientSub = client.listen(...)\`
+                   **没 cancel 老的 subscription**. 老的 listener 还活着, 之后每
+                   包数据触发两个回调 (老的进 [_onClientData](file:///workspace/lib/services/video_proxy_server.dart#L259) 当 no-op 浪费 CPU,
+                   新的正常 forward). 跑长 HLS 累计几万次浪费函数调用.
+                2. **FD 泄漏 ([_connectRace](file:///workspace/lib/services/video_proxy_server.dart#L125))** — 3 个
+                   \`Socket.connect\` 并发拨号, 首个连上的 \`completer.complete(socket)\`,
+                   **输的 .then 也触发, 但 completer 已完成 → 静默丢 socket, 没人
+                   destroy**, 一直留到 OS 分钟级超时. 移动端 FD 软限 ~1024,
+                   几百段累计下来 \`Socket.connect\` 失败 → 视频段 502.
+                3. **HTTP 路径强加 \`Connection: close\` ([_handleHttp](file:///workspace/lib/services/video_proxy_server.dart#L396))** —
+                   旧代码为了"简化代理逻辑"在每个 HTTP 请求里塞 \`Connection: close\`,
+                   等价 HTTP/1.0 短连接. 走 HTTP HLS (m3u8 + 几百个 .ts 段) 时,
+                   **每段都开新 TCP + TLS 握手 + 竞速拨号**, 跟"没速度"症状高度吻合.
+                4. **m3u8 测速 \`receiveTimeout: 3s\` 太紧** ([_measureDownloadSpeedFast](file:///workspace/lib/services/m3u8_service.dart#L367)) —
+                   走 CF Worker 跨洲路由时首批字节偶尔就 > 3s, 直接 catchError
+                   返 0 KB/s. 选源面板一直"超时 / 0KB/s", 用户以为源都挂了.
+              - 修法 (4 处全在本次改):
+                1. [_handleConnection](file:///workspace/lib/services/video_proxy_server.dart) 里建新 listener 前先
+                   \`oldClientSub?.cancel()\`, 老的彻底退订.
+                2. [_connectRace](file:///workspace/lib/services/video_proxy_server.dart) 加 \`winnerChosen\` 标志,
+                   输的 socket 立刻 \`destroy()\`, 不留到 OS 超时. catchError 里
+                   winner 已选就直接 return, 不再累加 errorCount 误覆盖 completer.
+                3. [_handleHttp](file:///workspace/lib/services/video_proxy_server.dart) 删掉强加的
+                   \`Connection: close\` 头, 让 HTTP/1.1 backend 自己 keep-alive.
+                   代理 client↔backend 的 listener 本来就是持久的, backend 真要
+                   断开 \`onDone: closeAll\` 兜底.
+                4. [_measureDownloadSpeedFast](file:///workspace/lib/services/m3u8_service.dart) \`receiveTimeout\`
+                   3s → 8s, 给慢网 + 跨洲 CF 路由留余量.
+              - 兼容性:
+                - 没配 CF Worker / 没优选 IP → [VideoProxyServer.tryStart](file:///workspace/lib/services/video_proxy_server.dart) 返 null, 走原 URL, 行为完全不变.
+                - 修的全是代理内部, libmpv 协议层接口 (http-proxy / CONNECT) 没动.
+                - m3u8 测速只是放宽 timeout, 不影响选源逻辑.
+              - 验证:
+                1. 装 v2.0.21 APK → 配好 CF Worker + 优选 IP → 选 HLS 源
+                2. 起播速度应该比 v2.0.20 明显快 (省掉每段 TLS 握手 + 竞速拨号)
+                3. 选源面板测速应该都拿到非 0 KB/s
+                4. 跑 60 分钟剧, 持续观察没卡顿 / 不再报 502
+
+            ---`,
               'v2.0.9': `## 更新日志
 
             ### 🐛 修复
