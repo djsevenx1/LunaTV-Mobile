@@ -232,33 +232,47 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
         child: Row(
           children: [
             // 海报缩略图
-            // v2.0.6: 改用 CachedNetworkImage + getImageRequestHeaders 替代 Image.network
-            // 之前 Image.network 不传 headers, lain.bgm.tv 看 UA 为空就 403,
-            // 整个日历图加载不出来. CachedNetworkImage 走 user_data_service 的
-            // Bangumi UA/Referer 头, lain.bgm.tv 才能正常返回图片.
+            // v2.0.10: 改用 FutureBuilder + getImageUrl 包装, 跟其他屏幕对齐
+            // v2.0.6 之前用 Image.network 不传 headers → 403
+            // v2.0.6 改 CachedNetworkImage + getImageRequestHeaders → headers 修好
+            //   但还是直传 item.cover, 没走 buildBangumiImageUrl 包装层:
+            //     - 配了 CF Worker 域名加速 → 没用上, 还是直连 lain.bgm.tv
+            //     - 选 cors_proxy / cf_worker 图片源 → 没用上, 还是直连
+            //   国内直连 lain.bgm.tv 经常 403/超时, 配了 worker 加速的用户
+            //   会觉得 "配了 worker 也不走" — 根因就是这里没走包装
+            // v2.0.10 加 getImageUrl 包装, 用户选的图片源 / worker 加速都生效
+            // 关键: getImageRequestHeaders 接收包装后 URL,
+            //   worker 模式 (https://xx.workers.dev/?url=...) 里
+            //   检测 `bgm.tv` 用 contains 仍然能命中 (URL 里还有 lain.bgm.tv)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: item.cover.isNotEmpty
-                  ? CachedNetworkImage(
-                      imageUrl: item.cover,
-                      width: 60,
-                      height: 85,
-                      fit: BoxFit.cover,
-                      httpHeaders: getImageRequestHeaders(item.cover, 'bangumi'),
-                      errorWidget: (_, __, ___) => Container(
-                        width: 60,
-                        height: 85,
-                        color: isDark
-                            ? Colors.white.withOpacity(0.1)
-                            : Colors.grey.withOpacity(0.2),
-                        child: Icon(
-                          Icons.movie_outlined,
-                          color: isDark
-                              ? Colors.white.withOpacity(0.3)
-                              : Colors.grey.withOpacity(0.5),
-                          size: 24,
-                        ),
-                      ),
+                  ? FutureBuilder<String>(
+                      future: getImageUrl(item.cover, 'bangumi'),
+                      builder: (context, snapshot) {
+                        final imageUrl = snapshot.data ?? item.cover;
+                        return CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          width: 60,
+                          height: 85,
+                          fit: BoxFit.cover,
+                          httpHeaders: getImageRequestHeaders(imageUrl, 'bangumi'),
+                          errorWidget: (_, __, ___) => Container(
+                            width: 60,
+                            height: 85,
+                            color: isDark
+                                ? Colors.white.withOpacity(0.1)
+                                : Colors.grey.withOpacity(0.2),
+                            child: Icon(
+                              Icons.movie_outlined,
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.3)
+                                  : Colors.grey.withOpacity(0.5),
+                              size: 24,
+                            ),
+                          ),
+                        );
+                      },
                     )
                   : Container(
                       width: 60,
