@@ -102,7 +102,7 @@ Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
   final bool isBangumiSource = (source == 'bangumi') ||
       imageUrl.toLowerCase().contains('bgm.tv');
   if (isBangumiSource) {
-    return <String, String>{
+    final Map<String, String> headers = {
       // lain.bgm.tv 和 api.bgm.tv 都吃 bgm.tv v0 API 同款
       // "App/Version (URL)" UA 格式,Chrome UA 反而会 403
       'User-Agent':
@@ -110,6 +110,12 @@ Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
       'Referer': 'https://bgm.tv/',
       'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     };
+    // v2.0.12: ciao-cors 代理 Bangumi 图片时必须带 X-Requested-With,
+    // 否则新 API (path 拼接) 会 403
+    if (imageUrl.contains(UserDataService.publicCorsProxyBase)) {
+      headers['X-Requested-With'] = 'XMLHttpRequest';
+    }
+    return headers;
   }
 
   return null;

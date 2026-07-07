@@ -275,6 +275,31 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.12': `## 更新日志
+
+            ### 🐛 修复
+
+            - **公共 CORS 代理 (ciao-cors) 挂了 ([user_data_service.dart#buildCiaoCorsUrl](file:///workspace/lib/services/user_data_service.dart))**
+              - 现象: 用户反馈"CF 代理 Bangumi 也有问题", 选 cors_proxy / cf_worker
+                图片源时图加载不出来, 公共代理完全失效
+              - 根因: ciao-cors.is-an.org **改了 API 接口**, 老用法 100% 失败:
+                - 旧用法 (v2.0.0 ~ v2.0.11): `https://ciao-cors.is-an.org/?url=https%3A%2F%2F...`
+                  → 返 400 "Invalid URL format"
+                - 新用法 (v2.0.12+): `https://ciao-cors.is-an.org/https://...` (path 拼接)
+                  + 必须带 `X-Requested-With: XMLHttpRequest` 或 `Origin` 头, 否则 403
+                - 同时旧用法里还做了 `Uri.encodeComponent`, 新用法不需要
+              - 修法:
+                1. 新增 \`buildCiaoCorsUrl\` 统一构造新格式 URL
+                2. 替换所有旧 `publicCorsProxyBase + Uri.encodeComponent(...)` 调用
+                   - [user_data_service.dart#buildBangumiDataUrl]
+                   - [user_data_service.dart#buildBangumiImageUrl]
+                   - [bangumi_service.dart] 两处 fallback
+                   - [image_url.dart#getImageRequestHeaders] 加 X-Requested-With
+                3. 图片请求走 \`getImageRequestHeaders\` 时, 如果检测到 ciao-cors 代理 URL,
+                   自动加 `X-Requested-With: XMLHttpRequest` (CachedNetworkImage 会带)
+              - CORSAPI 仍然 0 改动, 不受影响
+
+            ---`,
               'v2.0.11': `## 更新日志
 
             ### 🚀 CF 优选测速 (加速源 IP 优选)

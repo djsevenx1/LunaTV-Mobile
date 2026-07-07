@@ -87,8 +87,7 @@ class BangumiService {
       if (response == null || response.statusCode != 200) {
         // 用户配了 worker 但 worker 挂了 → 改走 ciao-cors
         if (isViaWorker) {
-          final fallbackUrl = UserDataService.publicCorsProxyBase +
-              Uri.encodeComponent(apiUrl);
+          final fallbackUrl = UserDataService.buildCiaoCorsUrl(apiUrl);
           final fbHeaders = Map<String, String>.from(headers);
           fbHeaders['X-Requested-With'] = 'XMLHttpRequest';
           // ignore: avoid_print
@@ -220,8 +219,7 @@ class BangumiService {
           await _fetchBangumi(requestUrl, headers, isViaWorker);
       if (response == null || response.statusCode != 200) {
         if (isViaWorker) {
-          final fallbackUrl = UserDataService.publicCorsProxyBase +
-              Uri.encodeComponent(apiUrl);
+          final fallbackUrl = UserDataService.buildCiaoCorsUrl(apiUrl);
           final fbHeaders = Map<String, String>.from(headers);
           fbHeaders['X-Requested-With'] = 'XMLHttpRequest';
           // ignore: avoid_print
