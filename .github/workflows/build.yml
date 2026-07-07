@@ -275,6 +275,49 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.17': `## 更新日志
+
+            ### ♻️ 重构
+
+            - **CF 加速与优选 拆成独立子页面 ([cf_acceleration_page.dart](file:///workspace/lib/screens/cf_acceleration_page.dart))**
+              - 现象: 之前 v2.0.11 起 CF Worker 加速 / 域名 / 优选测速 3 块全塞在
+                [user_menu.dart](file:///workspace/lib/widgets/user_menu.dart) 里,
+                菜单越来越长, 用户在手机上看要滚好几屏
+              - 拆法:
+                - 新建 [CfAccelerationPage](file:///workspace/lib/screens/cf_acceleration_page.dart)
+                  把 3 块整体搬过去 (Worker 开关 / 域名 / 优选测速 / 测速按钮 / 进度条)
+                - user_menu 里整段删掉, 换成一行可点击的入口:
+                  \`"CF 加速与优选"\` 标题 + 状态摘要 (e.g. \`example.com · 3 IP · 4 分钟前\`)
+                - 点击 push 到子页面, 关闭后回到 user_menu 时自动重算摘要
+              - 子页面 UI 重做:
+                - 顶部加说明卡片 (解释整个 CF 加速 + 优选是干嘛的, 提一句 CORSAPI 项目)
+                - 分 2 个小标题区块: **Worker 加速** / **IP 优选测速** (只配了域名才显示第二块)
+                - 域名 / IP / 时间用等宽字体 + 浅色, 跟 user_menu 风格区分开
+                - 测速按钮从 inline 灰色按钮 → 整行大绿按钮, 一眼能看清
+                - 主题用 Provider<ThemeService> 而不是 widget.isDarkMode, 跟项目其他页面统一
+              - 行为对比:
+                | 场景 | v2.0.16 | v2.0.17 |
+                |---|---|---|
+                | 打开 CF 加速开关 | 在 user_menu 里 | 在子页面里 |
+                | 配 worker 域名 | user_menu 弹窗 | 子页面弹窗 (同款) |
+                | 立即优选测速 | user_menu 灰按钮 | 子页面绿按钮 |
+                | 看 IP 列表 / 上次测速时间 | 滚动 user_menu 找到 | 子页面顶部一眼看到 |
+                | 状态摘要 | 无 | user_menu 入口行显示 |
+              - 持久化: 共享 [UserDataService](file:///workspace/lib/services/user_data_service.dart) +
+                [CfOptimizer](file:///workspace/lib/services/cf_optimizer.dart),
+                子页面改完返回 user_menu 自动重算 _cfSummary
+              - 行为兼容性: 跟 v2.0.16 完全一致, 没改任何 service / 没改播放器,
+                只是 UI 重构
+              - 验证:
+                1. 装 v2.0.17 APK → 打开 user_menu → 看 "CF 加速与优选" 入口
+                2. 入口 subtitle 应该显示当前状态 (未配置 / 已配域名 · 3 IP · X 分钟前 / etc.)
+                3. 点入口 → 跳转子页面 → 改 worker 开关 / 域名 / 优选开关
+                4. 返回 user_menu → 入口 subtitle 应该立刻反映刚才的改动
+                5. 子页面点 "立即优选测速" → 进度条 → 完成后顶部 IP 列表更新
+                6. 返回 user_menu → 入口摘要应该变成 \`example.com · 3 IP · 刚刚\`
+                7. 没开过任何 CF 功能 → 入口显示 \`未配置\`, 子页面能正常打开
+
+            ---`,
               'v2.0.16': `## 更新日志
 
             ### ✨ 新增

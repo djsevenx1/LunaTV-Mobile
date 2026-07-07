@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/screens/cf_acceleration_page.dart';
 import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
@@ -43,13 +44,9 @@ class _UserMenuState extends State<UserMenu> {
   bool _isLocalMode = false;
   bool _cfWorkerEnabled = false;
   String _cfWorkerDomain = '';
-  // v2.0.11: CF 优选
-  bool _cfOptimizerEnabled = true;
-  List<String> _cfBestIps = const [];
-  String _cfLastTestHuman = '从未测速';
-  bool _cfOptimizing = false;
-  int _cfProgressDone = 0;
-  int _cfProgressTotal = 0;
+  // v2.0.17: CF 优选 / 测速详情都搬到 CfAccelerationPage 子页面,
+  // 这边只留一行可点击的入口, 用 _cfSummary 显示一行状态摘要
+  String _cfSummary = '未配置';
 
   @override
   void initState() {
@@ -102,11 +99,56 @@ class _UserMenuState extends State<UserMenu> {
         _localSearch = localSearch;
         _cfWorkerEnabled = cfWorkerEnabled;
         _cfWorkerDomain = cfWorkerDomain;
-        _cfOptimizerEnabled = cfOptimizerEnabled;
-        _cfBestIps = cfBestIps;
-        _cfLastTestHuman = cfLastTestHuman;
+        _cfSummary = _computeCfSummary(
+          domain: cfWorkerDomain,
+          enabled: cfWorkerEnabled,
+          optEnabled: cfOptimizerEnabled,
+          bestIps: cfBestIps,
+          lastTest: cfLastTestHuman,
+        );
       });
     }
+  }
+
+  /// v2.0.17: 给 user_menu 入口行用的一行状态摘要
+  String _computeCfSummary({
+    required String domain,
+    required bool enabled,
+    required bool optEnabled,
+    required List<String> bestIps,
+    required String lastTest,
+  }) {
+    if (domain.isEmpty) return '未配置';
+    if (!enabled) return '$domain · 开关未开';
+    if (!optEnabled) return '$domain · 优选关';
+    if (bestIps.isEmpty) return '$domain · 待测速';
+    return '$domain · ${bestIps.length} IP · $lastTest';
+  }
+
+  /// v2.0.17: push CF 加速与优选 子页面, 返回时刷新一行摘要
+  Future<void> _openCfAccelerationPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CfAccelerationPage()),
+    );
+    if (!mounted) return;
+    // 从子页面返回后, 重新读 CF 状态, 刷新入口行的一行摘要
+    final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
+    final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
+    final cfOptimizerEnabled = await CfOptimizer.getEnabled();
+    final cfBestIps = await CfOptimizer.getBestIps();
+    final cfLastTestHuman = await CfOptimizer.lastTestHuman();
+    if (!mounted) return;
+    setState(() {
+      _cfWorkerEnabled = cfWorkerEnabled;
+      _cfWorkerDomain = cfWorkerDomain;
+      _cfSummary = _computeCfSummary(
+        domain: cfWorkerDomain,
+        enabled: cfWorkerEnabled,
+        optEnabled: cfOptimizerEnabled,
+        bestIps: cfBestIps,
+        lastTest: cfLastTestHuman,
+      );
+    });
   }
 
   String _parseRoleFromCookies(String? cookies) {
@@ -531,139 +573,6 @@ class _UserMenuState extends State<UserMenu> {
     ).whenComplete(controller.dispose);
   }
 
-  void _showCfWorkerDomainDialog() {
-    final controller = TextEditingController(text: _cfWorkerDomain);
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor:
-              widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
-          title: Text(
-            'CF Worker 加速域名',
-            style: FontUtils.poppins(context,
-                            fontSize: 18,
-              color: widget.isDarkMode
-                  ? const Color(0xFFffffff)
-                  : const Color(0xFF1f2937),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                style: FontUtils.poppins(context,
-                                fontSize: 14,
-                  color: widget.isDarkMode
-                      ? const Color(0xFFffffff)
-                      : const Color(0xFF1f2937),
-                ),
-                decoration: InputDecoration(
-                  hintText: 'example.workers.dev',
-                  hintStyle: FontUtils.poppins(context,
-                                    fontSize: 14,
-                    color: widget.isDarkMode
-                        ? const Color(0xFF9ca3af)
-                        : const Color(0xFF6b7280),
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: widget.isDarkMode
-                          ? const Color(0xFF374151)
-                          : const Color(0xFFe5e7eb),
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: widget.isDarkMode
-                          ? const Color(0xFF374151)
-                          : const Color(0xFFe5e7eb),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: Color(0xFF10b981),
-                      width: 2,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '填 Cloudflare Worker 自定义域名或 *.workers.dev 子域；\n仅域名，不要带 https://。\n\n此域名同时用于「源加速」和「Bangumi 代理」,\n配了即生效(后者不依赖开关)。',
-                style: FontUtils.poppins(context,
-                                    fontSize: 11,
-                  color: widget.isDarkMode
-                      ? const Color(0xFF9ca3af)
-                      : const Color(0xFF6b7280),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text(
-                '取消',
-                style: FontUtils.poppins(context,
-                                    fontSize: 14,
-                  color: widget.isDarkMode
-                      ? const Color(0xFF9ca3af)
-                      : const Color(0xFF6b7280),
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () async {
-                final domain = controller.text.trim();
-                await UserDataService.saveCfWorkerDomain(domain);
-                if (!mounted) return;
-                setState(() {
-                  _cfWorkerDomain = domain;
-                });
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                }
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        domain.isEmpty
-                            ? '已清空 CF Worker 域名(仅保留开关无效)'
-                            : '已保存 CF Worker 域名',
-                        style: FontUtils.poppins(context,
-                            color: Colors.white),
-                      ),
-                      backgroundColor: const Color(0xFF10b981),
-                    ),
-                  );
-                }
-              },
-              child: Text(
-                '保存',
-                style: FontUtils.poppins(context,
-                                    fontSize: 14,
-                  color: const Color(0xFF10b981),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    ).whenComplete(controller.dispose);
-  }
-
   Widget _buildInputOption({
     required String title,
     required String currentValue,
@@ -825,52 +734,6 @@ class _UserMenuState extends State<UserMenu> {
         ),
       ),
     );
-  }
-
-  /// v2.0.11: 跑一次 CF 优选测速, 显示进度, 测完更新 UI + HttpOverrides
-  Future<void> _runCfOptimization() async {
-    if (_cfOptimizing) return;
-    if (_cfWorkerDomain.isEmpty) return;
-    setState(() {
-      _cfOptimizing = true;
-      _cfProgressDone = 0;
-      _cfProgressTotal = 0;
-    });
-    try {
-      final ips = await CfOptimizer.runOptimization(
-        targetDomain: _cfWorkerDomain,
-        onProgress: (done, total) {
-          if (mounted) {
-            setState(() {
-              _cfProgressDone = done;
-              _cfProgressTotal = total;
-            });
-          }
-        },
-      );
-      if (!mounted) return;
-      if (ips.isNotEmpty) {
-        // 刷新 override 缓存
-        CfOptimizerHttpOverrides.refresh(
-          bestIps: ips,
-          targetDomain: _cfWorkerDomain,
-        );
-        setState(() {
-          _cfBestIps = ips;
-          _cfLastTestHuman = '刚刚';
-        });
-      }
-    } catch (e) {
-      // 静默失败
-    } finally {
-      if (mounted) {
-        setState(() {
-          _cfOptimizing = false;
-        });
-      } else {
-        _cfOptimizing = false;
-      }
-    }
   }
 
   @override
@@ -1082,202 +945,13 @@ class _UserMenuState extends State<UserMenu> {
                           ? const Color(0xFF374151)
                           : const Color(0xFFe5e7eb),
                     ),
-                    // v2.0.17: "CF 加速与优选" 区块小标题
-                    // 把 CF Worker 加速 + 域名 + 优选测速三个东西视觉上合成一组
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                      child: Row(
-                        children: [
-                          Icon(LucideIcons.rocket,
-                              size: 16,
-                              color: widget.isDarkMode
-                                  ? const Color(0xFF9ca3af)
-                                  : const Color(0xFF6b7280)),
-                          const SizedBox(width: 8),
-                          Text(
-                            'CF 加速与优选',
-                            style: FontUtils.poppins(
-                              context,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: widget.isDarkMode
-                                  ? const Color(0xFF9ca3af)
-                                  : const Color(0xFF6b7280),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // CF Worker 加速开关(整块总开关)
-                    _buildToggleOption(
-                      title: 'CF Worker 加速',
-                      subtitle: '通过自定义域名的 CF Worker 中转请求 / 视频',
-                      value: _cfWorkerEnabled,
-                      onChanged: (value) async {
-                        await UserDataService.saveCfWorkerEnabled(value);
-                        if (!mounted) return;
-                        setState(() {
-                          _cfWorkerEnabled = value;
-                        });
-                      },
+                    // v2.0.17: CF 加速与优选 入口 (点击进入子页面)
+                    _buildInputOption(
+                      title: 'CF 加速与优选',
+                      currentValue: _cfSummary,
+                      onTap: _openCfAccelerationPage,
                       icon: LucideIcons.rocket,
                     ),
-                    // CF Worker 加速源域名(同时供源加速和 Bangumi 代理用,
-                    // Bangumi 不受开关控制,只认域名)
-                    if (_cfWorkerEnabled || _cfWorkerDomain.isNotEmpty) ...[
-                      Container(
-                        height: 1,
-                        color: widget.isDarkMode
-                            ? const Color(0xFF374151)
-                            : const Color(0xFFe5e7eb),
-                      ),
-                      _buildInputOption(
-                        title: 'CF Worker 加速源域名',
-                        currentValue: _cfWorkerDomain.isEmpty
-                            ? '（点击配置）'
-                            : _cfWorkerDomain,
-                        onTap: _showCfWorkerDomainDialog,
-                        icon: LucideIcons.server,
-                      ),
-                    ],
-                    // v2.0.11: CF 优选测速 (跟上面 CF 加速合成一个区块, 去掉中间分割线)
-                    // 整段只在 CF Worker 加速开关 + 域名都配了时显示
-                    if (_cfWorkerEnabled && _cfWorkerDomain.isNotEmpty) ...[
-                      _buildToggleOption(
-                        title: 'CF 优选测速',
-                        subtitle: '测 110 个 CF IP 找最快的, 视频/图片都走它',
-                        value: _cfOptimizerEnabled,
-                        onChanged: (value) async {
-                          await CfOptimizer.setEnabled(value);
-                          if (!mounted) return;
-                          setState(() {
-                            _cfOptimizerEnabled = value;
-                          });
-                          if (!value) {
-                            await CfOptimizer.clear();
-                            CfOptimizerHttpOverrides.disable();
-                            if (mounted) {
-                              setState(() {
-                                _cfBestIps = const [];
-                                _cfLastTestHuman = '从未测速';
-                              });
-                            }
-                          }
-                        },
-                        icon: LucideIcons.zap,
-                      ),
-                      // 优选状态 + 立即测速按钮
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _cfOptimizerEnabled
-                                  ? '已选 IP: ${_cfBestIps.isEmpty ? '尚未测速' : _cfBestIps.join(', ')}'
-                                  : '优选已关闭',
-                              style: FontUtils.sourceCodePro(
-                                context,
-                                fontSize: 11,
-                                color: widget.isDarkMode
-                                    ? const Color(0xFF9ca3af)
-                                    : const Color(0xFF6b7280),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '上次测速: $_cfLastTestHuman',
-                              style: FontUtils.sourceCodePro(
-                                context,
-                                fontSize: 11,
-                                color: widget.isDarkMode
-                                    ? const Color(0xFF9ca3af)
-                                    : const Color(0xFF6b7280),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            // 进度条 / 按钮
-                            if (_cfOptimizing) ...[
-                              LinearProgressIndicator(
-                                value: _cfProgressTotal == 0
-                                    ? null
-                                    : _cfProgressDone / _cfProgressTotal,
-                                backgroundColor: widget.isDarkMode
-                                    ? const Color(0xFF374151)
-                                    : const Color(0xFFe5e7eb),
-                                valueColor: const AlwaysStoppedAnimation(
-                                  Color(0xFF27ae60),
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '测速中: $_cfProgressDone / $_cfProgressTotal',
-                                style: FontUtils.sourceCodePro(
-                                  context,
-                                  fontSize: 11,
-                                  color: widget.isDarkMode
-                                      ? const Color(0xFF9ca3af)
-                                      : const Color(0xFF6b7280),
-                                ),
-                              ),
-                            ] else
-                              Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: _cfWorkerEnabled
-                                      ? _runCfOptimization
-                                      : null,
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _cfWorkerEnabled
-                                          ? const Color(0xFF27ae60)
-                                              .withOpacity(0.12)
-                                          : (widget.isDarkMode
-                                              ? Colors.white.withOpacity(0.05)
-                                              : Colors.grey.withOpacity(0.1)),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          LucideIcons.zap,
-                                          size: 16,
-                                          color: _cfWorkerEnabled
-                                              ? const Color(0xFF27ae60)
-                                              : (widget.isDarkMode
-                                                  ? Colors.white
-                                                      .withOpacity(0.3)
-                                                  : Colors.grey),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          '立即优选测速',
-                                          style: FontUtils.poppins(context,
-                                                                              fontSize: 13,
-                                            color: _cfWorkerEnabled
-                                                ? const Color(0xFF27ae60)
-                                                : (widget.isDarkMode
-                                                    ? Colors.white
-                                                        .withOpacity(0.3)
-                                                    : Colors.grey),
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
                     // 本地搜索选项（本地模式下不显示）
                     if (!_isLocalMode) ...[
                       // 分割线
