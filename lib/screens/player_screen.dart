@@ -13,6 +13,7 @@ import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/m3u8_service.dart';
+import 'package:luna_tv/services/video_proxy_server.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -54,6 +55,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 播放器
   late final Player _player;
   late final VideoController _controller;
+  // v2.0.16: 视频代理 (让 libmpv 走优选 IP)
+  VideoProxyServer? _videoProxy;
 
   // 状态
   String _phase = 'detail'; // detail | playing
@@ -318,6 +321,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 跟 mobile_player_controls.dart:160 同模板, 否则其他场景 (detail 页面
     // 之类) 再调 setVolume 也不会弹系统 UI
     VolumeController().showSystemUI = true;
+    // v2.0.16: 关本地视频代理 (释放 127.0.0.1:PORT)
+    unawaited(_videoProxy?.stop());
+    _videoProxy = null;
     super.dispose();
   }
 
@@ -1646,6 +1652,26 @@ class _PlayerScreenState extends State<PlayerScreen>
     _playEpisode(nextIndex);
   }
 
+  /// v2.0.16: 启本地代理 + 给 libmpv 配 --http-proxy (如果条件满足)
+  ///
+  /// 条件: CF Worker 加速 + 优选测速都开 + 优选 IP 已测
+  /// 任一不满足 → 代理不起, 播放走原 URL
+  ///
+  /// 失败 / 异常 → 代理不起, 行为跟 v2.0.14 一模一样
+  Future<void> _ensureVideoProxy() async {
+    if (_videoProxy != null && _videoProxy!.isRunning) return;
+    final proxy = await VideoProxyServer.tryStart();
+    if (proxy == null) return;
+    // 给 libmpv 配 --http-proxy, 之后 _player.open() 所有 HTTP/HTTPS 请求都走代理
+    try {
+      _player.setProperty('http-proxy', proxy.proxyUrl);
+    } catch (e) {
+      await proxy.stop();
+      return;
+    }
+    _videoProxy = proxy;
+  }
+
   /// 播放指定集数
   Future<void> _playEpisode(int index) async {
     final source = _selectedSource;
@@ -1710,6 +1736,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       _isBuffering = true;
       _phase = 'playing';
     });
+
+    // v2.0.16: 先启视频代理 (条件满足才启, 失败不阻塞)
+    // 启了 → libmpv 走 --http-proxy, 视频流走优选 IP
+    // 没启 → 走原 URL, 行为跟 v2.0.14/v2.0.15 一样
+    await _ensureVideoProxy();
 
     try {
       await _player.stop();

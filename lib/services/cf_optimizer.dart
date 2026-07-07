@@ -285,6 +285,31 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
     _featureEnabled = false;
   }
 
+  /// v2.0.16: 给本地视频代理用的查表
+  ///
+  /// 输入: 任意域名
+  /// 返回: 该域名对应的"最可能最快 IP" (round-robin 在 bestIps 数组里轮)
+  ///   - domain 不等于 targetDomain (不是优选测速的那个 worker 域名) → null
+  ///   - _featureEnabled == false (开关关了) → null
+  ///   - _bestIpsCache 为空 (没测速) → null
+  ///   - 一切就绪 → 返回下一个 IP (轮询, 避免都打第一个)
+  ///
+  /// 视频代理 (video_proxy_server.dart) 用这个方法决定 CONNECT 时连哪个 IP
+  static String? pickBestIpForDomain(String domain) {
+    if (!_featureEnabled) return null;
+    final ips = _bestIpsCache;
+    final target = _targetDomainCache;
+    if (ips == null || ips.isEmpty || target == null || target.isEmpty) {
+      return null;
+    }
+    if (domain.toLowerCase() != target.toLowerCase()) return null;
+    final idx = _ipRoundRobin % ips.length;
+    _ipRoundRobin++;
+    return ips[idx];
+  }
+
+  static int _ipRoundRobin = 0;
+
   /// 安装全局 override (app 启动时调用)
   static Future<void> install() async {
     if (_globalInstalled) return;

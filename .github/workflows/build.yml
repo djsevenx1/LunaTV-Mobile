@@ -275,6 +275,71 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.16': `## 更新日志
+
+            ### ✨ 新增
+
+            - **视频流走 CF 优选 IP ([video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart) + [cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart) + [player_screen.dart](file:///workspace/lib/screens/player_screen.dart) + [video_player_widget.dart](file:///workspace/lib/widgets/video_player_widget.dart))**
+              - 现象: v2.0.11 加的 CF 优选测速只对 Dart HttpClient 生效 (图片/API
+                加载秒), 视频流 (libmpv) 完全摸不到 — 视频还是走系统 DNS 解析
+                worker 域名, 配了 CNAME 自定义域名 + 测出最快 IP, 视频还是按
+                CF Anycast 默认路由出去, 跨地区访问该慢还是慢
+              - 修法: 起一个本地 HTTP 代理, 让 libmpv 走代理拉视频
+                1. **本地代理** ([video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart)) — \`ServerSocket.bind(127.0.0.1, 0)\`
+                   监听随机端口, 处理 CONNECT (HTTPS 隧道) + GET (HTTP 代理)
+                2. **CONNECT 隧道** — 收到 \`CONNECT cdn.example.com:443\`
+                   时查 \`CfOptimizerHttpOverrides.pickBestIpForDomain()\`
+                   拿到优选 IP, \`Socket.connect(bestIp, 443)\` 出去; 优选 IP
+                   连不上 fallback 回原 hostname, 5s 超时
+                3. **关键 trick** — TLS SNI 由 libmpv (TLS client) 在握手时
+                   根据 URL hostname 填, 跟 TCP 连接到哪个 IP 无关, 所以代理把
+                   TCP 转到优选 IP, libmpv 还是会发 SNI=cdn.example.com,
+                   CF edge 看 SNI 路由 + cert 用 cdn.example.com 的, **链路
+                   不破**
+                4. **集成** — [player_screen.dart#_ensureVideoProxy](file:///workspace/lib/screens/player_screen.dart#L1658)
+                   播放前 \`tryStart()\`, 条件满足给 \`_player.setProperty('http-proxy', proxyUrl)\`;
+                   [video_player_widget.dart#_initializePlayer](file:///workspace/lib/widgets/video_player_widget.dart#L160)
+                   同模板 (覆盖直播)
+              - 守门条件 (**全部满足才启代理, 任一不满足走原 URL**):
+                1. CF Worker 加速开关打开 (用户配置)
+                2. CF Worker 域名配了
+                3. CF 优选测速开关打开
+                4. 优选 IP 已测过 (bestIps 非空) + 测速时 targetDomain 跟当前域名一致
+                - 任一不满足 → \`tryStart()\` 返回 null, 播放走原来的
+                  [buildProxiedUrl](file:///workspace/lib/services/user_data_service.dart) 拼 worker
+                  路径, 行为跟 v2.0.14/v2.0.15 一模一样
+                - 用户场景: 没开 CF 加速 / 没开优选测速 / 没测过速 → **零影响**
+              - 调试支持:
+                - \`VideoProxyServer\` 暴露 \`tunneledRequests\` / \`fallbacks\`
+                  / \`errors\` / \`activeConnections\` 计数, 之后可以接到
+                  debug overlay 看实时代理流量
+              - 已知限制:
+                1. **多代理端口**: 每次 tryStart 绑新随机端口, 多次开/关
+                   播放页可能瞬间开多个代理. 当前实现: \`_ensureVideoProxy\`
+                   检查 \`_videoProxy != null && isRunning\` 复用, 不会
+                   重复启
+                2. **HLS segment 走代理**: m3u8 playlist 和 \`.ts\` 段都走
+                   libmpv, 都配 \`--http-proxy\`, 都会经过本代理 → 整条
+                   m3u8 链路全加速
+                3. **非 worker 域名的请求也走代理**: 直播源直连 / 用户配的
+                   其他源 (没配 worker) 也配 \`--http-proxy\`, 但代理
+                   内部 \`pickBestIpForDomain\` 对未知域名返 null, 自动
+                   fallback 原 hostname, 不会变慢
+                4. **CONNECT 隧道是双向 raw bytes 转发**, HTTP/2 多路复用
+                   一个连接就行, 跟 libmpv 默认 keep-alive 兼容. m3u8
+                   一般一次性 playlist + 串行 .ts 段, 单连接够用
+                5. **代理进程常驻内存** 很小 (~几十 KB 状态), 离开播放页
+                   \`stop()\` 释放
+              - 验证:
+                1. 装 v2.0.16 APK
+                2. 确认 App 菜单里: CF Worker 加速打开 + 域名配了 + 优选测速开关打开 + 已测过速
+                3. 进任意剧集 → 选源 → 点播放
+                4. logcat 应该能看到代理日志: \`CONNECT cdn.example.com:443 → best_ip:443\`
+                5. 视频加载应该明显比 v2.0.14/v2.0.15 快 (尤其跨地区)
+                6. **没开任何条件** → 代理不起, 走原 URL, 行为跟 v2.0.14/v2.0.15 一样
+                7. 优选 IP 路由抽风 → 代理内部 fallback 到原 hostname, 不影响播放
+
+            ---`,
               'v2.0.14': `## 更新日志
 
             ### 🐛 修复

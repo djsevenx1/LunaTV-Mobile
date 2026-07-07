@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:luna_tv/services/video_proxy_server.dart';
 import 'package:luna_tv/widgets/mobile_player_controls.dart';
 import 'package:luna_tv/widgets/pc_player_controls.dart';
 import 'package:luna_tv/widgets/video_player_surface.dart';
@@ -126,6 +127,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> with WidgetsBindi
   bool _isLoadingVideo = false;
   String? _currentUrl;
   Map<String, String>? _currentHeaders;
+  // v2.0.16: 视频代理
+  VideoProxyServer? _videoProxy;
   final List<VoidCallback> _progressListeners = [];
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<bool>? _playingSubscription;
@@ -162,6 +165,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> with WidgetsBindi
       return;
     }
     _player = Player();
+    // v2.0.16: 启本地代理给 libmpv 走优选 IP (条件满足才启, 失败不阻塞)
+    final proxy = await VideoProxyServer.tryStart();
+    if (proxy != null) {
+      try {
+        _player!.setProperty('http-proxy', proxy.proxyUrl);
+        _videoProxy = proxy;
+      } catch (e) {
+        await proxy.stop();
+      }
+    }
     _videoController = VideoController(_player!);
     _setupPlayerListeners();
     if (_currentUrl != null) {
@@ -347,6 +360,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> with WidgetsBindi
     _completedSubscription?.cancel();
     _durationSubscription?.cancel();
     _progressListeners.clear();
+    // v2.0.16: 关本地视频代理
+    unawaited(_videoProxy?.stop());
+    _videoProxy = null;
     await _player?.dispose();
     _player = null;
     _videoController = null;
