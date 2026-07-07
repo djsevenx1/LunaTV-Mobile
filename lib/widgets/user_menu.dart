@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/screens/cf_acceleration_page.dart';
 import 'package:luna_tv/screens/login_screen.dart';
@@ -42,8 +41,7 @@ class _UserMenuState extends State<UserMenu> {
   bool _isLocalMode = false;
   bool _cfWorkerEnabled = false;
   String _cfWorkerDomain = '';
-  // v2.0.17: CF 优选 / 测速详情都搬到 CfAccelerationPage 子页面,
-  // 这边只留一行可点击的入口, 用 _cfSummary 显示一行状态摘要
+  // v2.0.30: 砍掉 IP 优选, 只留 CF Worker 开关, 摘要也简化
   String _cfSummary = '未配置';
 
   @override
@@ -79,9 +77,6 @@ class _UserMenuState extends State<UserMenu> {
     final localSearch = await UserDataService.getLocalSearch();
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
-    final cfOptimizerEnabled = await CfOptimizer.getEnabled();
-    final cfBestIps = await CfOptimizer.getBestIps();
-    final cfLastTestHuman = await CfOptimizer.lastTestHuman();
 
     if (mounted) {
       setState(() {
@@ -100,30 +95,23 @@ class _UserMenuState extends State<UserMenu> {
         _cfSummary = _computeCfSummary(
           domain: cfWorkerDomain,
           enabled: cfWorkerEnabled,
-          optEnabled: cfOptimizerEnabled,
-          bestIps: cfBestIps,
-          lastTest: cfLastTestHuman,
         );
       });
     }
   }
 
-  /// v2.0.17: 给 user_menu 入口行用的一行状态摘要
+  /// v2.0.17: 给 user_menu 入口行用的一行状态摘要.
+  /// v2.0.30: 简化, 不再展示优选 IP 数量和测速时间.
   String _computeCfSummary({
     required String domain,
     required bool enabled,
-    required bool optEnabled,
-    required List<String> bestIps,
-    required String lastTest,
   }) {
     if (domain.isEmpty) return '未配置';
     if (!enabled) return '$domain · 开关未开';
-    if (!optEnabled) return '$domain · 优选关';
-    if (bestIps.isEmpty) return '$domain · 待测速';
-    return '$domain · ${bestIps.length} IP · $lastTest';
+    return '$domain · 已开启';
   }
 
-  /// v2.0.17: push CF 加速与优选 子页面, 返回时刷新一行摘要
+  /// v2.0.30: push CF Worker 加速 子页面, 返回时刷新一行摘要
   Future<void> _openCfAccelerationPage() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CfAccelerationPage()),
@@ -132,9 +120,6 @@ class _UserMenuState extends State<UserMenu> {
     // 从子页面返回后, 重新读 CF 状态, 刷新入口行的一行摘要
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
-    final cfOptimizerEnabled = await CfOptimizer.getEnabled();
-    final cfBestIps = await CfOptimizer.getBestIps();
-    final cfLastTestHuman = await CfOptimizer.lastTestHuman();
     if (!mounted) return;
     setState(() {
       _cfWorkerEnabled = cfWorkerEnabled;
@@ -142,9 +127,6 @@ class _UserMenuState extends State<UserMenu> {
       _cfSummary = _computeCfSummary(
         domain: cfWorkerDomain,
         enabled: cfWorkerEnabled,
-        optEnabled: cfOptimizerEnabled,
-        bestIps: cfBestIps,
-        lastTest: cfLastTestHuman,
       );
     });
   }
@@ -1137,9 +1119,9 @@ class _UserMenuState extends State<UserMenu> {
           _buildSectionHeader('加速'),
           _buildCard(
             children: [
-              // v2.0.17: CF 加速与优选 入口 (点击进入子页面)
+              // v2.0.30: CF Worker 加速 入口 (点击进入子页面)
               _buildInputOption(
-                title: 'CF 加速与优选',
+                title: 'CF Worker 加速',
                 currentValue: _cfSummary,
                 onTap: _openCfAccelerationPage,
                 icon: LucideIcons.rocket,

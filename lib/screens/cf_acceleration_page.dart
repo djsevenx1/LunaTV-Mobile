@@ -2,18 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
-import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 
-/// v2.0.17: CF 加速与优选 独立子页面
-///
-/// 把之前塞在 user_menu 里的 3 块 (Worker 加速 / 域名 / 优选测速) 整体
-/// 搬到一个独立页面, user_menu 里只留一行可点击的入口 + 状态摘要.
-///
-/// 行为完全等价 v2.0.16: 共享 [UserDataService] / [CfOptimizer] 持久化,
-/// 改完即时生效, 关闭页面不需要保存.
+/// v2.0.30: 砍掉「IP 优选测速」+「视频走优选 IP 代理」两块, 只留 CF Worker
+/// 加速开关 + 域名配置. CORSAPI worker (v2.0.28b) 已自带 CF edge cache, 是
+/// 当前的唯一加速通道.
 class CfAccelerationPage extends StatefulWidget {
   const CfAccelerationPage({super.key});
 
@@ -24,15 +19,7 @@ class CfAccelerationPage extends StatefulWidget {
 class _CfAccelerationPageState extends State<CfAccelerationPage> {
   bool _cfWorkerEnabled = false;
   String _cfWorkerDomain = '';
-  bool _cfOptimizerEnabled = true;
-  List<String> _cfBestIps = const [];
-  String _cfLastTestHuman = '从未测速';
-  bool _cfOptimizing = false;
-  int _cfProgressDone = 0;
-  int _cfProgressTotal = 0;
   bool _loading = true;
-  // v2.0.27: 视频代理开关 (默认关, 用户手动开)
-  bool _videoProxyEnabled = false;
 
   @override
   void initState() {
@@ -43,18 +30,10 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
   Future<void> _load() async {
     final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
-    final cfOptimizerEnabled = await CfOptimizer.getEnabled();
-    final cfBestIps = await CfOptimizer.getBestIps();
-    final cfLastTestHuman = await CfOptimizer.lastTestHuman();
-    final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
     if (mounted) {
       setState(() {
         _cfWorkerEnabled = cfWorkerEnabled;
         _cfWorkerDomain = cfWorkerDomain;
-        _cfOptimizerEnabled = cfOptimizerEnabled;
-        _cfBestIps = cfBestIps;
-        _cfLastTestHuman = cfLastTestHuman;
-        _videoProxyEnabled = videoProxyEnabled;
         _loading = false;
       });
     }
@@ -66,69 +45,6 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     setState(() {
       _cfWorkerEnabled = v;
     });
-  }
-
-  Future<void> _setOptimizerEnabled(bool v) async {
-    await CfOptimizer.setEnabled(v);
-    if (!mounted) return;
-    setState(() {
-      _cfOptimizerEnabled = v;
-    });
-    if (!v) {
-      await CfOptimizer.clear();
-      CfOptimizerHttpOverrides.disable();
-      if (mounted) {
-        setState(() {
-          _cfBestIps = const [];
-          _cfLastTestHuman = '从未测速';
-        });
-      }
-    }
-  }
-
-  /// v2.0.11: 跑一次 CF 优选测速
-  Future<void> _runOptimization() async {
-    if (_cfOptimizing) return;
-    if (_cfWorkerDomain.isEmpty) return;
-    setState(() {
-      _cfOptimizing = true;
-      _cfProgressDone = 0;
-      _cfProgressTotal = 0;
-    });
-    try {
-      final ips = await CfOptimizer.runOptimization(
-        targetDomain: _cfWorkerDomain,
-        onProgress: (done, total) {
-          if (mounted) {
-            setState(() {
-              _cfProgressDone = done;
-              _cfProgressTotal = total;
-            });
-          }
-        },
-      );
-      if (!mounted) return;
-      if (ips.isNotEmpty) {
-        CfOptimizerHttpOverrides.refresh(
-          bestIps: ips,
-          targetDomain: _cfWorkerDomain,
-        );
-        setState(() {
-          _cfBestIps = ips;
-          _cfLastTestHuman = '刚刚';
-        });
-      }
-    } catch (_) {
-      // 静默失败
-    } finally {
-      if (mounted) {
-        setState(() {
-          _cfOptimizing = false;
-        });
-      } else {
-        _cfOptimizing = false;
-      }
-    }
   }
 
   // ============== 弹窗 ==============
@@ -266,9 +182,7 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
         children: [
           Icon(icon,
               size: 18,
-              color: isDark
-                  ? const Color(0xFF27ae60)
-                  : const Color(0xFF27ae60)),
+              color: const Color(0xFF27ae60)),
           const SizedBox(width: 8),
           Text(
             text,
@@ -309,9 +223,9 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '通过自定义域名的 CF Worker 中转请求 / 视频；可选开启 IP 优选'
-              '测速让请求走国内更快的 CF Anycast 节点。需要先准备一个 Cloudflare '
-              'Worker，参考 CORSAPI 项目。',
+              '通过自定义域名的 CF Worker 中转请求 / 视频；Worker 走 CF '
+              'backbone 加速, .ts 段被 CF edge 缓存, 重复拉取近瞬时. '
+              '需要先准备一个 Cloudflare Worker, 参考 CORSAPI 项目.',
               style: FontUtils.poppins(context,
                   fontSize: 12,
                   color: isDark
@@ -479,151 +393,6 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     );
   }
 
-  Widget _buildOptimizerStatus(bool isDark) {
-    final ipText = _cfOptimizerEnabled
-        ? '已选 IP: ${_cfBestIps.isEmpty ? '尚未测速' : _cfBestIps.join(', ')}'
-        : '优选已关闭';
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1e1e1e) : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(LucideIcons.signal,
-                  size: 14,
-                  color: isDark
-                      ? const Color(0xFF9ca3af)
-                      : const Color(0xFF6b7280)),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(ipText,
-                    style: FontUtils.sourceCodePro(context,
-                        fontSize: 12,
-                        color: isDark
-                            ? const Color(0xFFd1d5db)
-                            : const Color(0xFF374151)),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Icon(LucideIcons.clock,
-                  size: 14,
-                  color: isDark
-                      ? const Color(0xFF9ca3af)
-                      : const Color(0xFF6b7280)),
-              const SizedBox(width: 6),
-              Text('上次测速: $_cfLastTestHuman',
-                  style: FontUtils.sourceCodePro(context,
-                      fontSize: 12,
-                      color: isDark
-                          ? const Color(0xFF9ca3af)
-                          : const Color(0xFF6b7280))),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProgressOrButton(bool isDark) {
-    if (_cfOptimizing) {
-      return Container(
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1e1e1e) : Colors.white,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            LinearProgressIndicator(
-              value: _cfProgressTotal == 0
-                  ? null
-                  : _cfProgressDone / _cfProgressTotal,
-              backgroundColor: isDark
-                  ? const Color(0xFF374151)
-                  : const Color(0xFFe5e7eb),
-              valueColor:
-                  const AlwaysStoppedAnimation(Color(0xFF27ae60)),
-            ),
-            const SizedBox(height: 6),
-            Text('测速中: $_cfProgressDone / $_cfProgressTotal',
-                style: FontUtils.sourceCodePro(context,
-                    fontSize: 12,
-                    color: isDark
-                        ? const Color(0xFF9ca3af)
-                        : const Color(0xFF6b7280))),
-          ],
-        ),
-      );
-    }
-    final canRun = _cfWorkerEnabled && _cfWorkerDomain.isNotEmpty;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      width: double.infinity,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: canRun ? _runOptimization : null,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: canRun
-                  ? const Color(0xFF27ae60).withOpacity(0.12)
-                  : (isDark
-                      ? Colors.white.withOpacity(0.05)
-                      : Colors.grey.withOpacity(0.1)),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: canRun
-                    ? const Color(0xFF27ae60).withOpacity(0.4)
-                    : Colors.transparent,
-                width: 1,
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(LucideIcons.zap,
-                    size: 18,
-                    color: canRun
-                        ? const Color(0xFF27ae60)
-                        : (isDark
-                            ? Colors.white.withOpacity(0.3)
-                            : Colors.grey)),
-                const SizedBox(width: 8),
-                Text(
-                  canRun ? '立即优选测速' : '需打开 CF Worker 加速 + 配置域名',
-                  style: FontUtils.poppins(context,
-                      fontSize: 14,
-                      color: canRun
-                          ? const Color(0xFF27ae60)
-                          : (isDark
-                              ? Colors.white.withOpacity(0.3)
-                              : Colors.grey),
-                      fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   // ============== Build ==============
 
   @override
@@ -637,7 +406,7 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
           appBar: AppBar(
             backgroundColor: bg,
             elevation: 0,
-            title: Text('CF 加速与优选',
+            title: Text('CF Worker 加速',
                 style: FontUtils.poppins(context,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -660,7 +429,7 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                     _buildToggleTile(
                       title: 'CF Worker 加速',
                       subtitle:
-                          '通过自定义域名的 CF Worker 中转请求 / 视频',
+                          '打开后请求 / 视频走 Worker, .ts 段被 CF edge 缓存',
                       value: _cfWorkerEnabled,
                       onChanged: _setWorkerEnabled,
                       icon: LucideIcons.rocket,
@@ -675,38 +444,6 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       icon: LucideIcons.server,
                       isDark: isDark,
                     ),
-                    if (_cfWorkerEnabled && _cfWorkerDomain.isNotEmpty) ...[
-                      _buildSectionHeader(
-                          'IP 优选测速', LucideIcons.zap, isDark),
-                      _buildToggleTile(
-                        title: 'CF 优选测速',
-                        subtitle: '测 110 个 CF IP 找最快的, 视频/图片都走它',
-                        value: _cfOptimizerEnabled,
-                        onChanged: _setOptimizerEnabled,
-                        icon: LucideIcons.zap,
-                        isDark: isDark,
-                      ),
-                      const SizedBox(height: 8),
-                      _buildOptimizerStatus(isDark),
-                      _buildProgressOrButton(isDark),
-                      // v2.0.27: 视频代理加速开关
-                      _buildSectionHeader(
-                          '视频代理加速', LucideIcons.video, isDark),
-                      _buildToggleTile(
-                        title: '视频走优选 IP 代理',
-                        subtitle: '通过本地代理让视频流走优选 IP (实验性, 可能不兼容部分源)',
-                        value: _videoProxyEnabled,
-                        onChanged: (v) async {
-                          await UserDataService.saveVideoProxyEnabled(v);
-                          if (!mounted) return;
-                          setState(() {
-                            _videoProxyEnabled = v;
-                          });
-                        },
-                        icon: LucideIcons.video,
-                        isDark: isDark,
-                      ),
-                    ],
                   ],
                 ),
         );
