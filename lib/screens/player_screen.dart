@@ -1761,15 +1761,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _phase = 'playing';
     });
 
-    // v2.0.24: 禁用 VideoProxyServer
-    //   v2.0.16 引入的本地 Dart 代理 (给 libmpv 配 --http-proxy 走优选 IP)
-    //   本质上是手写 CONNECT 隧道, TLS 握手数据转发竞态多, 修了几轮
-    //   (v2.0.21/v2.0.22/v2.0.23) 还是脆弱.
-    //   用户反馈 "关掉优选 IP 可以, 打开不行" 直接指向代理本身.
-    //   修法: 回退到 v1.0.77 行为 — 视频直连, CF Worker + 优选 IP 只给
-    //   API 请求 / 测速 / 图片用 (走 Dart HttpClient + HttpOverrides).
-    //   代码保留 _ensureVideoProxy / VideoProxyServer 供未来修好后再启用.
-    // await _ensureVideoProxy();
+    // v2.0.16: 先启视频代理 (条件满足才启, 失败不阻塞)
+    // 启了 → libmpv 走 --http-proxy, 视频流走优选 IP
+    // 没启 → 走原 URL, 行为跟 v2.0.14/v2.0.15 一样
+    await _ensureVideoProxy();
 
     try {
       await _player.stop();

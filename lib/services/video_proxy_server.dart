@@ -168,11 +168,20 @@ class VideoProxyServer {
     }
 
     try {
-      return await completer.future;
+      final socket = await completer.future;
+      // v2.0.25: backend 也设 TCP_NODELAY
+      try {
+        socket.setOption(SocketOption.tcpNoDelay, true);
+      } catch (_) {}
+      return socket;
     } catch (_) {
       // 全部 IP 都失败, fallback 到原 host
-      return await Socket.connect(originalHost, port,
+      final socket = await Socket.connect(originalHost, port,
           timeout: const Duration(seconds: 5));
+      try {
+        socket.setOption(SocketOption.tcpNoDelay, true);
+      } catch (_) {}
+      return socket;
     }
   }
 
@@ -181,6 +190,12 @@ class VideoProxyServer {
       client.destroy();
       return;
     }
+    // v2.0.25: 设 TCP_NODELAY 避免小包被 Nagle 延迟
+    //   TLS ClientHello / ServerHello 是小包, Nagle 算法会延迟发送,
+    //   导致 TLS 握手慢/超时 → "没速度"
+    try {
+      client.setOption(SocketOption.tcpNoDelay, true);
+    } catch (_) {}
     _connCount++;
     final state = _ProxyState();
     StreamSubscription<List<int>>? clientSub;
@@ -394,7 +409,14 @@ class VideoProxyServer {
 
     // v2.0.19: 修 bug — request line + Host header 都用原 host, 不要用 IP
     // IP 只用来做 TCP 路由, 服务端通过 Host header 找 vhost
-    final requestLine = '${state.method} $uri HTTP/1.1';
+    // v2.0.25 修: 请求行用相对 path, 不用绝对 URI
+    //   旧代码 '${state.method} $uri HTTP/1.1' 会生成
+    //   'GET http://video.cdn.com/path HTTP/1.1' (absolute-form)
+    //   这是代理格式, 源服务器不认 → 返回 400 → 没数据 → "没速度"
+    //   正确格式: 'GET /path?query HTTP/1.1' (origin-form) + Host header
+    final requestPath = uri.path.isEmpty ? '/' : uri.path;
+    final requestLine =
+        '${state.method} $requestPath${uri.query.isEmpty ? '' : '?${uri.query}'} HTTP/1.1';
 
     final headerLines = <String>[];
     var hostHeaderSet = false;

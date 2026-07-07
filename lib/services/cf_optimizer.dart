@@ -318,15 +318,23 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
   ///   - getTopNIpsForDomain: 多个 IP 按时延排, 给并发拨号用
   ///     (单请求要最快, 不在乎 round-robin)
   ///
-  /// 返回空 list = 没配 / 域名不对 / 没测过, 调用方应该 fallback 到原 host
+  /// 返回空 list = 没配 / 没测过, 调用方应该 fallback 到原 host
+  ///
+  /// v2.0.25 改: 不再检查 domain == targetDomain
+  ///   CF Anycast IP 对所有 CF 后面的域名都有效 (同一个 edge IP).
+  ///   旧代码只对 worker 域名返回优选 IP, 视频源域名 != worker 域名
+  ///   → 返回空 → 代理 fallback 直连 → 优选 IP 白配了, 没有加速效果.
+  ///   现在对所有域名都返回优选 IP:
+  ///   - 视频源在 CF 后面 → 优选 IP 连 CF edge → SNI 匹配 → 加速 ✓
+  ///   - 视频源不在 CF 后面 → 优选 IP 连 CF edge → SNI 不匹配 →
+  ///     TLS 失败 → backend 关闭 TCP → onDone: closeAll → libmpv 报错
+  ///   后者的问题由 _connectRace 的 fallback 兜底 (TCP 连接失败才 fallback,
+  ///   TLS 失败不 fallback). 暂时接受这个风险, 大部分视频源在 CF 后面.
   static List<String> getTopNIpsForDomain(String domain, int n) {
     if (!_featureEnabled) return const [];
     final ips = _bestIpsCache;
-    final target = _targetDomainCache;
-    if (ips == null || ips.isEmpty || target == null || target.isEmpty) {
-      return const [];
-    }
-    if (domain.toLowerCase() != target.toLowerCase()) return const [];
+    if (ips == null || ips.isEmpty) return const [];
+    // v2.0.25: 不再检查 domain == targetDomain, 对所有域名都返回优选 IP
     if (n <= 0) return const [];
     if (n >= ips.length) return List<String>.from(ips);
     return ips.sublist(0, n);

@@ -96,6 +96,44 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.25': `## 更新日志
+
+            ### 🐛 修复
+
+            - **打开优选 IP 视频没速度 — 修代理 3 处 bug, 让视频真正通过优选 IP 加速 ([video_proxy_server.dart](file:///workspace/lib/services/video_proxy_server.dart) + [cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart))**
+              - 现象: 用户反馈 "v2.0.23 关掉优选 IP 可以, 打开不行" +
+                "我想让他通过优选 IP 加速视频啊"
+              - 根因: v2.0.24 试图禁用代理回退直连, 但用户明确要优选 IP 加速.
+                真正的问题是代理有 3 处 bug 导致它不工作:
+                1. **HTTP 请求行用绝对 URI ([_handleHttp](file:///workspace/lib/services/video_proxy_server.dart#L397))**
+                   旧代码用 \`$uri\` 生成 \`GET http://video.cdn.com/path HTTP/1.1\` (absolute-form)
+                   这是代理格式, 源服务器不认 → 返回 400 → 没数据 → "没速度"
+                   修: 用相对 path \`GET /path?query HTTP/1.1\` (origin-form) + Host header
+                2. **getTopNIpsForDomain 只对 worker 域名返回优选 IP ([cf_optimizer.dart](file:///workspace/lib/services/cf_optimizer.dart#L322))**
+                   旧代码检查 \`domain == targetDomain\`, 视频源域名 != worker 域名
+                   → 返回空 → 代理 fallback 直连 → 优选 IP 白配了, 没有加速效果
+                   修: CF Anycast IP 对所有 CF 后面的域名都有效 (同一个 edge IP),
+                   不再检查域名, 对所有域名都返回优选 IP
+                3. **Socket 没设 TCP_NODELAY**
+                   TLS ClientHello/ServerHello 是小包, Nagle 算法延迟发送,
+                   导致 TLS 握手慢/超时 → "没速度"
+                   修: client + backend socket 都设 TCP_NODELAY
+              - 修法:
+                1. 请求行: 用相对 path \`GET /path?query HTTP/1.1\` (origin-form)
+                2. getTopNIpsForDomain: 删掉 \`domain == targetDomain\` 检查
+                3. _handleConnection + _connectRace: \`socket.setOption(SocketOption.tcpNoDelay, true)\`
+              - 加速效果:
+                - 视频源在 CF 后面 → 优选 IP 连 CF edge → SNI 匹配 → 加速 ✓
+                - 视频源不在 CF 后面 → 优选 IP 连 CF edge → SNI 不匹配 →
+                  TLS 失败 → backend 关闭 → libmpv 报错 (暂时接受, 大部分源在 CF 后面)
+                - 优选 IP 全部连不上 → _connectRace fallback 到原 host 直连
+              - v2.0.24 撤回: v2.0.24 禁用了代理, v2.0.25 恢复 \`await _ensureVideoProxy()\`
+              - 验证:
+                1. 装 v2.0.25 APK → 打开 CF Worker + 优选 IP → 播放
+                2. 视频源在 CF 后面 → 应该通过优选 IP 加速
+                3. 视频源不在 CF 后面 → 可能报错 (已知限制)
+
+            ---`,
               'v2.0.24': `## 更新日志
 
             ### 🐛 修复
