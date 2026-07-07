@@ -1,9 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/release_calendar_service.dart';
 import 'package:luna_tv/models/release_item.dart';
 import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/utils/image_url.dart';
 
 class ReleaseCalendarScreen extends StatefulWidget {
   const ReleaseCalendarScreen({super.key});
@@ -230,15 +232,20 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
         child: Row(
           children: [
             // 海报缩略图
+            // v2.0.6: 改用 CachedNetworkImage + getImageRequestHeaders 替代 Image.network
+            // 之前 Image.network 不传 headers, lain.bgm.tv 看 UA 为空就 403,
+            // 整个日历图加载不出来. CachedNetworkImage 走 user_data_service 的
+            // Bangumi UA/Referer 头, lain.bgm.tv 才能正常返回图片.
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: item.cover.isNotEmpty
-                  ? Image.network(
-                      item.cover,
+                  ? CachedNetworkImage(
+                      imageUrl: item.cover,
                       width: 60,
                       height: 85,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      httpHeaders: getImageRequestHeaders(item.cover, 'bangumi'),
+                      errorWidget: (_, __, ___) => Container(
                         width: 60,
                         height: 85,
                         color: isDark

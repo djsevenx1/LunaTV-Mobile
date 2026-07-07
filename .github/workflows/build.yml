@@ -214,6 +214,35 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.6': `## 更新日志
+
+            ### 🐛 修复
+
+            - **Bangumi 放送日历图片加载不出来 ([release_calendar_screen.dart](file:///workspace/lib/screens/release_calendar_screen.dart))**
+              - 现象: 用户反馈"选直连也不行" (其实是选啥都不行), 放送日历页的番剧封面图
+                一直是空白占位符, 没图. 用户有代理, 浏览器直连 lain.bgm.tv 能加载, 但
+                app 里选 "直连" 选 "cf_worker" 选 "cors_proxy" 都不行
+              - 根因: 之前 release_calendar_screen 用了 \`Image.network(item.cover, ...)\`,
+                **没传 httpHeaders**. \`Image.network\` 默认 UA 是 \`Dart/3.x\`,
+                lain.bgm.tv 看 UA 不是 \`App/Version (URL)\` 格式直接 **403**.
+                这跟 v2.0.5 修的 buildBangumiImageUrl 缺 cf_worker case 是**两个不同 bug**,
+                v2.0.5 修的是 URL 包装 (代理), v2.0.6 修的是**没传 headers** (UA/Referer)
+              - 修法: 改用 \`CachedNetworkImage\` + \`getImageRequestHeaders(item.cover, 'bangumi')\`
+                - \`getImageRequestHeaders\` (image_url.dart) 已经为 Bangumi 域
+                  准备好头: \`User-Agent: LunaTV-Mobile/1.0 (...)\` + \`Referer: https://bgm.tv/\`,
+                  lain.bgm.tv 吃这套
+                - 跟 video_card / hero_banner / continue_watching / player_details
+                  / fullscreen_image_viewer 的修法一致, 之前所有加载 Bangumi 图的
+                  widget 都已经用 CachedNetworkImage + getImageRequestHeaders,
+                  只有 release_calendar 漏了, 现在补上
+              - 行为对比:
+                - 之前 \`Image.network\` → 默认 UA \`Dart/3.x\` → lain.bgm.tv **403** → 空白
+                - 现在 \`CachedNetworkImage + headers\` → UA \`LunaTV-Mobile/1.0\` →
+                  lain.bgm.tv **200** → 正常加载
+              - 注意: 这只影响**放送日历页**的 Bangumi 番剧封面. 首页 "新番放送" /
+                Bangumi 详情 / Bangumi grid 都用的 VideoCard, 修法一致, 没受影响
+
+            ---`,
               'v2.0.5': `## 更新日志
 
             ### 🐛 修复
