@@ -96,6 +96,18 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             // 各版本 changelog 集中在这里, 后续 v1.0.30 直接 push 这个 array 就行
             const changelogs = {
+              'v2.0.26': `## 更新日志
+
+            ### ✨ 改进
+
+            - **用户菜单改为完整设置页面 ([user_menu.dart](file:///workspace/lib/widgets/user_menu.dart) + [main_layout.dart](file:///workspace/lib/widgets/main_layout.dart))**
+              - 旧: 点击用户图标弹出 280px 宽的浮动卡片 (overlay)
+              - 新: 点击用户图标 push 一个完整 Scaffold 设置页面, 有 AppBar + 返回按钮
+              - 设置项分组: 数据源 (豆瓣/Bangumi/M3U8) / 加速 (CF) / 其他 (搜索/缓存/更新/登出)
+              - 全宽布局, 可滚动, 信息密度更高
+              - 清除缓存后留在设置页显示 SnackBar, 不再自动关闭
+
+            ---`,
               'v2.0.25': `## 更新日志
 
             ### 🐛 修复

@@ -54,7 +54,6 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> {
   bool _isSearchButtonPressed = false;
-  bool _showUserMenu = false;
 
   // 用于跟踪底部导航栏按钮的 hover 状态
   int? _hoveredNavIndex;
@@ -321,17 +320,7 @@ class _MainLayoutState extends State<MainLayout> {
                         _buildBottomNavBar(themeService),
                     ],
                   ),
-                // 用户菜单覆盖层 - 现在会覆盖整个屏幕包括navbar
-                if (_showUserMenu)
-                  UserMenu(
-                    isDarkMode: themeService.isDarkMode,
-                    onClose: () {
-                      setState(() {
-                        _showUserMenu = false;
-                      });
-                    },
-                  ),
-              ],
+                ],
               ),
             ),
           ),
@@ -856,9 +845,13 @@ class _MainLayoutState extends State<MainLayout> {
               : null,
           child: GestureDetector(
             onTap: () {
-              setState(() {
-                _showUserMenu = true;
-              });
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => UserMenu(
+                    isDarkMode: themeService.isDarkMode,
+                  ),
+                ),
+              );
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
