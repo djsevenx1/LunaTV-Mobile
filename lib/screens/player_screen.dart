@@ -1663,8 +1663,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     final proxy = await VideoProxyServer.tryStart();
     if (proxy == null) return;
     // 给 libmpv 配 --http-proxy, 之后 _player.open() 所有 HTTP/HTTPS 请求都走代理
+    // media_kit 1.2.6 没有 setProperty, 用 raw mpv command: set <prop> <value>
     try {
-      _player.setProperty('http-proxy', proxy.proxyUrl);
+      _player.command(['set', 'http-proxy', proxy.proxyUrl]);
     } catch (e) {
       await proxy.stop();
       return;

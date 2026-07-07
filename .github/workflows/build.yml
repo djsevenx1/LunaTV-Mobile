@@ -275,6 +275,25 @@ jobs:
               - 本地构建命令简化, 去掉 build.sh 引用
 
             ---`,
+              'v2.0.18': `## 更新日志
+
+            ### 🐛 修复
+
+            - **v2.0.16 视频代理编译失败 ([player_screen.dart](file:///workspace/lib/screens/player_screen.dart) + [video_player_widget.dart](file:///workspace/lib/widgets/video_player_widget.dart))**
+              - 现象: v2.0.17 / v2.0.16 装包后 CI 编译报
+                \`The method 'setProperty' isn't defined for the class 'Player'\`
+              - 根因: [media_kit](https://pub.dev/packages/media_kit) 1.2.6 的 [Player](file:///workspace/lib/screens/player_screen.dart#L177)
+                类**没有** \`setProperty\` 方法 (我只看了 v1 老文档以为有)
+              - 正确调 libmpv 选项的方式是 raw mpv command: \`command(['set', '<prop>', '<value>'])\`
+              - 修法: 把两处 \`_player.setProperty('http-proxy', proxy.proxyUrl)\` 改成
+                \`_player.command(['set', 'http-proxy', proxy.proxyUrl])\`
+              - 验证:
+                1. 装 v2.0.18 APK → 打开有 CF 加速 + 优选 IP + 域名的剧集
+                2. logcat 应该看到 \`CONNECT cdn.example.com:443 → best_ip:443\`
+                3. 视频能播 + 走优选 IP
+                4. 条件不满足 → 编译过 + 行为跟 v2.0.14 一模一样 (走原始 URL)
+
+            ---`,
               'v2.0.17': `## 更新日志
 
             ### ♻️ 重构

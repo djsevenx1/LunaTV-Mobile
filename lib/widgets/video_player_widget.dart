@@ -169,7 +169,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> with WidgetsBindi
     final proxy = await VideoProxyServer.tryStart();
     if (proxy != null) {
       try {
-        _player!.setProperty('http-proxy', proxy.proxyUrl);
+        // media_kit 1.2.6 没有 setProperty, 用 raw mpv command
+        _player!.command(['set', 'http-proxy', proxy.proxyUrl]);
         _videoProxy = proxy;
       } catch (e) {
         await proxy.stop();
