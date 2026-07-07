@@ -31,6 +31,8 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
   int _cfProgressDone = 0;
   int _cfProgressTotal = 0;
   bool _loading = true;
+  // v2.0.27: 视频代理开关 (默认关, 用户手动开)
+  bool _videoProxyEnabled = false;
 
   @override
   void initState() {
@@ -44,6 +46,7 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     final cfOptimizerEnabled = await CfOptimizer.getEnabled();
     final cfBestIps = await CfOptimizer.getBestIps();
     final cfLastTestHuman = await CfOptimizer.lastTestHuman();
+    final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
     if (mounted) {
       setState(() {
         _cfWorkerEnabled = cfWorkerEnabled;
@@ -51,6 +54,7 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
         _cfOptimizerEnabled = cfOptimizerEnabled;
         _cfBestIps = cfBestIps;
         _cfLastTestHuman = cfLastTestHuman;
+        _videoProxyEnabled = videoProxyEnabled;
         _loading = false;
       });
     }
@@ -685,6 +689,23 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       const SizedBox(height: 8),
                       _buildOptimizerStatus(isDark),
                       _buildProgressOrButton(isDark),
+                      // v2.0.27: 视频代理加速开关
+                      _buildSectionHeader(
+                          '视频代理加速', LucideIcons.video, isDark),
+                      _buildToggleTile(
+                        title: '视频走优选 IP 代理',
+                        subtitle: '通过本地代理让视频流走优选 IP (实验性, 可能不兼容部分源)',
+                        value: _videoProxyEnabled,
+                        onChanged: (v) async {
+                          await UserDataService.saveVideoProxyEnabled(v);
+                          if (!mounted) return;
+                          setState(() {
+                            _videoProxyEnabled = v;
+                          });
+                        },
+                        icon: LucideIcons.video,
+                        isDark: isDark,
+                      ),
                     ],
                   ],
                 ),

@@ -1662,6 +1662,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///
   /// 失败 / 异常 → 代理不起, 行为跟 v2.0.14 一模一样
   Future<void> _ensureVideoProxy() async {
+    // v2.0.27: 默认不启视频代理 (Dart Socket 代理不可靠)
+    // 用户在设置里手动开"视频代理加速"才启
+    final enabled = await UserDataService.getVideoProxyEnabled();
+    if (!enabled) return;
     if (_videoProxy != null && _videoProxy!.isRunning) return;
     final proxy = await VideoProxyServer.tryStart();
     if (proxy == null) return;

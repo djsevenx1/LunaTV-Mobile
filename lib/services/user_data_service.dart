@@ -15,6 +15,7 @@ class UserDataService {
   static const String _isLocalModeKey = 'is_local_mode';
   static const String _cfWorkerEnabledKey = 'cf_worker_enabled';
   static const String _cfWorkerDomainKey = 'cf_worker_domain';
+  static const String _videoProxyEnabledKey = 'video_proxy_enabled';
 
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -325,6 +326,18 @@ class UserDataService {
   // 同步获取 CF Worker 开关
   static bool getCfWorkerEnabledSync() {
     return _cfWorkerEnabledCache ?? false;
+  }
+
+  // v2.0.27: 视频代理开关 (默认 false — 视频直连, 不走 Dart Socket 代理)
+  // 用户想通过优选 IP 加速视频时手动开, 开了之后视频走 VideoProxyServer
+  static Future<void> saveVideoProxyEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_videoProxyEnabledKey, enabled);
+  }
+
+  static Future<bool> getVideoProxyEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_videoProxyEnabledKey) ?? false;
   }
 
   // 保存 CF Worker 域名（不含 https:// 前缀）
