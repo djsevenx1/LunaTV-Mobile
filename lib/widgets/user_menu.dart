@@ -1082,9 +1082,36 @@ class _UserMenuState extends State<UserMenu> {
                           ? const Color(0xFF374151)
                           : const Color(0xFFe5e7eb),
                     ),
-                    // CF Worker 加速开关(只控制播放器源测速/m3u8 等)
+                    // v2.0.17: "CF 加速与优选" 区块小标题
+                    // 把 CF Worker 加速 + 域名 + 优选测速三个东西视觉上合成一组
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.rocket,
+                              size: 16,
+                              color: widget.isDarkMode
+                                  ? const Color(0xFF9ca3af)
+                                  : const Color(0xFF6b7280)),
+                          const SizedBox(width: 8),
+                          Text(
+                            'CF 加速与优选',
+                            style: FontUtils.poppins(
+                              context,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: widget.isDarkMode
+                                  ? const Color(0xFF9ca3af)
+                                  : const Color(0xFF6b7280),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // CF Worker 加速开关(整块总开关)
                     _buildToggleOption(
                       title: 'CF Worker 加速',
+                      subtitle: '通过自定义域名的 CF Worker 中转请求 / 视频',
                       value: _cfWorkerEnabled,
                       onChanged: (value) async {
                         await UserDataService.saveCfWorkerEnabled(value);
@@ -1113,21 +1140,12 @@ class _UserMenuState extends State<UserMenu> {
                         icon: LucideIcons.server,
                       ),
                     ],
-                    // 分割线
-                    Container(
-                      height: 1,
-                      color: widget.isDarkMode
-                          ? const Color(0xFF374151)
-                          : const Color(0xFFe5e7eb),
-                    ),
-                    // v2.0.11: CF 优选测速
-                    // 整段只在配了 CF Worker 域名时显示 (没域名没意义)
-                    if (_cfWorkerDomain.isNotEmpty) ...[
+                    // v2.0.11: CF 优选测速 (跟上面 CF 加速合成一个区块, 去掉中间分割线)
+                    // 整段只在 CF Worker 加速开关 + 域名都配了时显示
+                    if (_cfWorkerEnabled && _cfWorkerDomain.isNotEmpty) ...[
                       _buildToggleOption(
                         title: 'CF 优选测速',
-                        subtitle: _cfWorkerEnabled
-                            ? '仅在打开 CF Worker 加速时生效'
-                            : '需先打开 CF Worker 加速',
+                        subtitle: '测 110 个 CF IP 找最快的, 视频/图片都走它',
                         value: _cfOptimizerEnabled,
                         onChanged: (value) async {
                           await CfOptimizer.setEnabled(value);
@@ -1155,11 +1173,9 @@ class _UserMenuState extends State<UserMenu> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _cfOptimizerEnabled && _cfWorkerEnabled
+                              _cfOptimizerEnabled
                                   ? '已选 IP: ${_cfBestIps.isEmpty ? '尚未测速' : _cfBestIps.join(', ')}'
-                                  : (_cfWorkerEnabled
-                                      ? '优选已关闭'
-                                      : '需打开 CF Worker 加速'),
+                                  : '优选已关闭',
                               style: FontUtils.sourceCodePro(
                                 context,
                                 fontSize: 11,
