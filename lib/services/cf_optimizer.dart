@@ -259,7 +259,35 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
   static bool _featureEnabled = false;
   // v2.0.31: 用户手动填的优选 IP. 优先级最高, 不依赖测速, 不依赖开关.
   // 一旦设置, 所有指向 targetDomain 的 Dart HTTP 请求都强制用这个 IP.
+  // v2.0.32: 接受 IP 或优选域名 (cf.877774.xyz 这类 CF 智能调度域名).
+  //   - IPv4: 直接用
+  //   - 域名: 启动时 / 5min 周期 DNS 解析取第一个 A 记录, 缓存到 [_resolvedManualIp]
   static String? _manualPreferredIp;
+  // v2.0.32: 域名解析后的实际 IP (IP 模式下跟 _manualPreferredIp 一样)
+  static String? _resolvedManualIp;
+  // v2.0.32: 解析时间戳 (millisSinceEpoch), 0 = 从未解析过
+  static int _resolvedAt = 0;
+  // v2.0.32: 解析失败时的错误信息 (UI 显示用)
+  static String? _resolveError;
+  // v2.0.32: 域名解析 TTL (5 分钟, 过期重新解析)
+  static const Duration _resolveTtl = Duration(minutes: 5);
+
+  /// v2.0.32: 拿到手动优选实际生效的 IP (null = 没配 / 解析失败)
+  static String? getResolvedManualIp() => _resolvedManualIp;
+
+  /// v2.0.32: 上次解析时间 (人类可读, UI 显示用)
+  static String getResolvedAtHuman() {
+    if (_resolvedAt == 0) return '从未解析';
+    final dt = DateTime.fromMillisecondsSinceEpoch(_resolvedAt);
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return '刚刚';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
+    if (diff.inHours < 24) return '${diff.inHours} 小时前';
+    return '${dt.year}/${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')}';
+  }
+
+  /// v2.0.32: 上次解析错误 (null = 无错)
+  static String? getResolveError() => _resolveError;
 
   /// app 启动时 warmup 缓存 (主线程读 SharedPreferences 后调用)
   static void warmup({
@@ -272,6 +300,10 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
     _targetDomainCache = targetDomain;
     _featureEnabled = featureEnabled;
     _manualPreferredIp = manualPreferredIp;
+    // v2.0.32: 启动时清掉旧解析结果, 让后台 re-resolve
+    _resolvedManualIp = null;
+    _resolvedAt = 0;
+    _resolveError = null;
   }
 
   /// 刷新缓存 (优选测速完后调用)
@@ -283,13 +315,90 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
     _targetDomainCache = targetDomain;
   }
 
-  /// v2.0.31: 用户在设置页改了手动优选 IP, 立即生效 (不用重启 App)
-  static void setManualPreferredIp(String? ip) {
-    if (ip == null || ip.isEmpty) {
+  /// v2.0.31: 用户在设置页改了手动优选 IP / 域名, 立即生效 (不用重启 App)
+  /// v2.0.32: 接受 IP 或优选域名
+  static void setManualPreferredIp(String? input) {
+    if (input == null || input.isEmpty) {
       _manualPreferredIp = null;
-    } else {
-      _manualPreferredIp = ip;
+      _resolvedManualIp = null;
+      _resolvedAt = 0;
+      _resolveError = null;
+      return;
     }
+    _manualPreferredIp = input;
+    // v2.0.32: 如果是 IPv4, 立即生效; 域名要等 resolveManualPreferred
+    if (_isIpv4(input)) {
+      _resolvedManualIp = input;
+      _resolvedAt = DateTime.now().millisecondsSinceEpoch;
+      _resolveError = null;
+    } else {
+      _resolvedManualIp = null;
+      _resolvedAt = 0;
+      _resolveError = '待解析';
+    }
+  }
+
+  /// v2.0.32: 解析手动优选 (域名 → IP). 立即返回, 异步执行.
+  /// - IPv4: 直接用
+  /// - 域名: DNS lookup, 取第一个 IPv4 结果
+  /// - 失败: 保持旧值, 设置 _resolveError
+  ///
+  /// 使用方式:
+  ///   - App 启动 warmup 后调用一次
+  ///   - 用户改了手动优选后调用一次
+  ///   - 5 分钟周期 Timer 调用一次
+  static Future<void> resolveManualPreferred() async {
+    final input = _manualPreferredIp;
+    if (input == null || input.isEmpty) {
+      _resolvedManualIp = null;
+      _resolvedAt = 0;
+      _resolveError = null;
+      return;
+    }
+    if (_isIpv4(input)) {
+      _resolvedManualIp = input;
+      _resolvedAt = DateTime.now().millisecondsSinceEpoch;
+      _resolveError = null;
+      return;
+    }
+    // 域名解析
+    try {
+      final addrs = await InternetAddress.lookup(input,
+              type: InternetAddressType.IPv4)
+          .timeout(const Duration(seconds: 5));
+      if (addrs.isNotEmpty) {
+        _resolvedManualIp = addrs.first.address;
+        _resolvedAt = DateTime.now().millisecondsSinceEpoch;
+        _resolveError = null;
+      } else {
+        _resolveError = '解析无结果';
+        // 保留旧 IP (避免因为一次失败就断流)
+      }
+    } catch (e) {
+      _resolveError = '解析失败: $e';
+      // 保留旧 IP
+    }
+  }
+
+  /// v2.0.32: 是否需要重新解析 (过期 / 从未解析 / 是域名)
+  static bool needsResolve() {
+    final input = _manualPreferredIp;
+    if (input == null || input.isEmpty) return false;
+    if (_isIpv4(input)) return false; // IPv4 永不重解析
+    if (_resolvedAt == 0) return true; // 从未解析
+    final elapsed = DateTime.now().millisecondsSinceEpoch - _resolvedAt;
+    return elapsed > _resolveTtl.inMilliseconds;
+  }
+
+  /// v2.0.32: IPv4 校验
+  static bool _isIpv4(String s) {
+    final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$').firstMatch(s);
+    if (m == null) return false;
+    for (var i = 1; i <= 4; i++) {
+      final n = int.parse(m.group(i)!);
+      if (n < 0 || n > 255) return false;
+    }
+    return true;
   }
 
   /// 关闭优选 (开关关了 / 优选 IP 清空)
@@ -378,10 +487,11 @@ class _OptimizingHttpClient implements HttpClient {
     final host = uri.host.toLowerCase();
     if (host != target.toLowerCase()) return null;
 
-    // v2.0.31: 手动优选 IP 优先级最高, 不受 featureEnabled 控制
-    final manualIp = CfOptimizerHttpOverrides._manualPreferredIp;
-    if (manualIp != null && manualIp.isNotEmpty) {
-      return InternetAddress(manualIp, type: InternetAddressType.IPv4);
+    // v2.0.32: 手动优选优先级最高, 不受 featureEnabled 控制
+    // 用 _resolvedManualIp 而不是 _manualPreferredIp, 这样域名已经被解析成 IP
+    final resolved = CfOptimizerHttpOverrides._resolvedManualIp;
+    if (resolved != null && resolved.isNotEmpty) {
+      return InternetAddress(resolved, type: InternetAddressType.IPv4);
     }
 
     // 退回测速结果 (需要 featureEnabled + 测速结果)

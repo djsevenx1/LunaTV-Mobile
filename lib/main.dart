@@ -82,7 +82,7 @@ Future<void> _warmupCfOptimizer() async {
 
   // 装 override (内部 _tryOverrideAddress 决定走手动 IP / 测速 IP / 不走)
   if (manualIp != null && manualIp.isNotEmpty) {
-    // 手动优选 IP 模式
+    // 手动优选 IP / 域名 模式
     CfOptimizerHttpOverrides.warmup(
       bestIps: bestIps,
       targetDomain: domain,
@@ -90,6 +90,11 @@ Future<void> _warmupCfOptimizer() async {
       manualPreferredIp: manualIp,
     );
     CfOptimizerHttpOverrides.install();
+    // v2.0.32: 域名模式需要 DNS 解析, 启动时立刻解析一次
+    // 解析是 fire-and-forget, 不阻塞 app 启动
+    if (!_isIpv4(manualIp)) {
+      unawaited(_resolveAndSchedule(manualIp));
+    }
   } else if (bestIps.isNotEmpty && storedDomain == domain && optimizerEnabled) {
     // 测速结果模式
     CfOptimizerHttpOverrides.warmup(
@@ -113,6 +118,33 @@ Future<void> _warmupCfOptimizer() async {
     // fire-and-forget, 不 await, 让 app 启动不被优选阻塞
     unawaited(_runBackgroundOptimization(domain));
   }
+}
+
+/// v2.0.32: 解析手动优选域名 + 启动 5min 周期 re-resolve 定时器
+Timer? _resolveTimer;
+
+Future<void> _resolveAndSchedule(String domain) async {
+  await CfOptimizerHttpOverrides.resolveManualPreferred();
+  // 5 分钟 re-resolve 一次
+  _resolveTimer?.cancel();
+  _resolveTimer = Timer.periodic(
+    const Duration(minutes: 5),
+    (_) async {
+      if (CfOptimizerHttpOverrides.needsResolve()) {
+        await CfOptimizerHttpOverrides.resolveManualPreferred();
+      }
+    },
+  );
+}
+
+bool _isIpv4(String s) {
+  final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$').firstMatch(s);
+  if (m == null) return false;
+  for (var i = 1; i <= 4; i++) {
+    final n = int.parse(m.group(i)!);
+    if (n < 0 || n > 255) return false;
+  }
+  return true;
 }
 
 Future<void> _runBackgroundOptimization(String domain) async {

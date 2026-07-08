@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/screens/cf_acceleration_page.dart';
 import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
@@ -97,6 +98,7 @@ class _UserMenuState extends State<UserMenu> {
           domain: cfWorkerDomain,
           enabled: cfWorkerEnabled,
           bestIp: cfBestIp,
+          resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
         );
       });
     }
@@ -105,22 +107,48 @@ class _UserMenuState extends State<UserMenu> {
   /// v2.0.17: 给 user_menu 入口行用的一行状态摘要.
   /// v2.0.30: 简化, 不再展示优选 IP 数量和测速时间.
   /// v2.0.31: 展示手动优选 IP (如有).
+  /// v2.0.32: 支持优选域名, 展示"域名 → 解析 IP", 实时反映 DNS 解析结果.
   String _computeCfSummary({
     required String domain,
     required bool enabled,
     String? bestIp,
+    String? resolvedIp,
   }) {
     if (domain.isEmpty) return '未配置';
+    final bestIpDisplay = _formatBestIpDisplay(bestIp, resolvedIp);
     if (!enabled) {
-      if (bestIp != null && bestIp.isNotEmpty) {
-        return '$domain · 开关未开 · IP $bestIp';
+      if (bestIpDisplay != null) {
+        return '$domain · 开关未开 · $bestIpDisplay';
       }
       return '$domain · 开关未开';
     }
-    if (bestIp != null && bestIp.isNotEmpty) {
-      return '$domain · IP $bestIp';
+    if (bestIpDisplay != null) {
+      return '$domain · $bestIpDisplay';
     }
     return '$domain · 已开启';
+  }
+
+  /// v2.0.32: 把"IP / 域名"格式化成"IP xxx" 或 "域名 → IP xxx" 形式
+  String? _formatBestIpDisplay(String? bestIp, String? resolvedIp) {
+    if (bestIp == null || bestIp.isEmpty) return null;
+    if (_isIpv4(bestIp)) {
+      return 'IP $bestIp';
+    }
+    // 域名模式
+    if (resolvedIp != null && resolvedIp.isNotEmpty) {
+      return '域名 $bestIp → $resolvedIp';
+    }
+    return '域名 $bestIp (解析中)';
+  }
+
+  bool _isIpv4(String s) {
+    final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$').firstMatch(s);
+    if (m == null) return false;
+    for (var i = 1; i <= 4; i++) {
+      final n = int.parse(m.group(i)!);
+      if (n < 0 || n > 255) return false;
+    }
+    return true;
   }
 
   /// v2.0.30: push CF Worker 加速 子页面, 返回时刷新一行摘要
@@ -141,6 +169,7 @@ class _UserMenuState extends State<UserMenu> {
         domain: cfWorkerDomain,
         enabled: cfWorkerEnabled,
         bestIp: cfBestIp,
+        resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
       );
     });
   }

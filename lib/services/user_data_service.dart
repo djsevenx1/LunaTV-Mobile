@@ -365,21 +365,23 @@ class UserDataService {
     return v;
   }
 
-  // ===== v2.0.31: 手动优选 IP (优先级高于测速结果) =====
+  // ===== v2.0.32: 手动优选 (支持 IP 或优选域名, 例如 cf.877774.xyz) =====
 
-  /// 保存用户手动填的优选 IP. 空串 = 清空.
-  static Future<void> saveCfBestIp(String ip) async {
-    final cleaned = _cleanIp(ip);
+  /// 保存用户手动填的优选 IP / 域名. 空串 = 清空.
+  /// 返回清理后的字符串, null 表示输入无效.
+  static Future<String?> saveCfBestIp(String input) async {
+    final cleaned = _cleanIpOrDomain(input);
     final prefs = await SharedPreferences.getInstance();
-    if (cleaned.isEmpty) {
+    if (cleaned == null) {
       await prefs.remove(_cfBestIpKey);
     } else {
       await prefs.setString(_cfBestIpKey, cleaned);
     }
-    _cfBestIpCache = cleaned.isEmpty ? null : cleaned;
+    _cfBestIpCache = cleaned;
+    return cleaned;
   }
 
-  /// 异步读优选 IP. 没填 = null.
+  /// 异步读优选 IP / 域名. 没填 = null.
   static Future<String?> getCfBestIp() async {
     if (_cfBestIpCache != null) return _cfBestIpCache;
     final prefs = await SharedPreferences.getInstance();
@@ -397,19 +399,29 @@ class UserDataService {
     return _cfBestIpCache;
   }
 
-  /// 校验/清理 IP. 接受 IPv4 字符串, 其他原样返回空串.
-  static String _cleanIp(String input) {
+  /// 校验/清理 IP 或域名. 返回 null = 无效 (清空).
+  /// - IPv4 (1.2.3.4) → 原样返回
+  /// - 域名 (cf.877774.xyz) → 原样返回
+  /// - 其他 → null
+  static String? _cleanIpOrDomain(String input) {
     final s = input.trim();
-    if (s.isEmpty) return '';
-    // IPv4 简单校验
+    if (s.isEmpty) return null;
+    // IPv4
     final ipv4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$');
     final m = ipv4.firstMatch(s);
-    if (m == null) return '';
-    for (var i = 1; i <= 4; i++) {
-      final n = int.parse(m.group(i)!);
-      if (n < 0 || n > 255) return '';
+    if (m != null) {
+      for (var i = 1; i <= 4; i++) {
+        final n = int.parse(m.group(i)!);
+        if (n < 0 || n > 255) return null;
+      }
+      return s;
     }
-    return s;
+    // 域名: 简单校验. 至少一个点, 标签 1-63 字符 [a-z0-9-], 总长 ≤ 253
+    final domain = RegExp(
+      r'^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$',
+    );
+    if (domain.hasMatch(s)) return s.toLowerCase();
+    return null;
   }
 
   // 清理域名：去掉尾部斜杠、协议前缀、空白

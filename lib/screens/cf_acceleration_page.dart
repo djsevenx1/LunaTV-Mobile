@@ -52,15 +52,35 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
   }
 
   Future<void> _setBestIp(String ip) async {
-    await UserDataService.saveCfBestIp(ip);
+    // v2.0.32: 返回清理后的字符串, null = 无效输入
+    final cleaned = await UserDataService.saveCfBestIp(ip);
     if (!mounted) return;
     setState(() {
-      _cfBestIp = ip;
+      _cfBestIp = cleaned ?? '';
     });
     // 立即生效 (不用重启 App), 把手动 IP 推到 override
-    CfOptimizerHttpOverrides.setManualPreferredIp(
-      ip.isEmpty ? null : ip,
-    );
+    final effective = cleaned == null || cleaned.isEmpty ? null : cleaned;
+    CfOptimizerHttpOverrides.setManualPreferredIp(effective);
+    // v2.0.32: 如果是域名, 立刻解析一次 (不阻塞 UI, 解析中显示"待解析")
+    if (effective != null && !_isIpv4(effective)) {
+      // ignore: discarded_futures
+      CfOptimizerHttpOverrides.resolveManualPreferred().then((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      if (mounted) setState(() {});
+    }
+  }
+
+  bool _isIpv4(String s) {
+    final m =
+        RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$').firstMatch(s);
+    if (m == null) return false;
+    for (var i = 1; i <= 4; i++) {
+      final n = int.parse(m.group(i)!);
+      if (n < 0 || n > 255) return false;
+    }
+    return true;
   }
 
   // ============== 弹窗 ==============
@@ -189,127 +209,191 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     ).whenComplete(controller.dispose);
   }
 
-  // v2.0.31: 手动优选 IP 输入弹窗
+  // v2.0.32: 手动优选 IP / 优选域名 输入弹窗
   void _showBestIpDialog(bool isDark) {
     final controller = TextEditingController(text: _cfBestIp);
     showDialog(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF2c2c2c) : Colors.white,
-          title: Text(
-            '优选 IP（可选）',
-            style: FontUtils.poppins(ctx,
-                fontSize: 18,
-                color: isDark
-                    ? const Color(0xFFffffff)
-                    : const Color(0xFF1f2937),
-                fontWeight: FontWeight.w600),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            // 弹窗里也显示当前解析状态, 解析完用户能立刻看到 IP
+            final resolved = CfOptimizerHttpOverrides.getResolvedManualIp();
+            final resolvedAt = CfOptimizerHttpOverrides.getResolvedAtHuman();
+            final err = CfOptimizerHttpOverrides.getResolveError();
+            return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF2c2c2c) : Colors.white,
+              title: Text(
+                '优选 IP（可选）',
                 style: FontUtils.poppins(ctx,
-                    fontSize: 14,
+                    fontSize: 18,
                     color: isDark
                         ? const Color(0xFFffffff)
-                        : const Color(0xFF1f2937)),
-                decoration: InputDecoration(
-                  hintText: '104.16.123.45',
-                  hintStyle: FontUtils.poppins(ctx,
-                      fontSize: 14,
-                      color: isDark
-                          ? const Color(0xFF9ca3af)
-                          : const Color(0xFF6b7280)),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: isDark
-                          ? const Color(0xFF374151)
-                          : const Color(0xFFe5e7eb),
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: isDark
-                          ? const Color(0xFF374151)
-                          : const Color(0xFFe5e7eb),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: Color(0xFF10b981),
-                      width: 2,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '填一个 Cloudflare anycast IPv4 (104.16.0.0/12, 172.64.0.0/13 '
-                '等), 留空 = 不使用. 优选 IP 必须是 CF 公共段, 否则 worker '
-                '域名连不上.\n\n'
-                '效果: App 内所有 HTTP 请求 (豆瓣/Bangumi/图片/元数据) '
-                '强制走这个 IP, 跳过 DNS 解析, 解决某些 CF POP 慢的问题.\n\n'
-                '推荐: 拿 CloudflareScanner / cloudflare-better-ip 项目扫一下, '
-                '把延迟最低的填进来.\n\n'
-                '⚠️ 视频走 libmpv (原生 C), 不受 Dart 优选 IP 影响. '
-                '视频加速靠 worker 自带的 CF edge cache.',
-                style: FontUtils.poppins(ctx,
-                    fontSize: 11,
-                    color: isDark
-                        ? const Color(0xFF9ca3af)
-                        : const Color(0xFF6b7280),
-                    height: 1.5),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(
-                '取消',
-                style: FontUtils.poppins(ctx,
-                    fontSize: 14,
-                    color: isDark
-                        ? const Color(0xFF9ca3af)
-                        : const Color(0xFF6b7280)),
-              ),
-            ),
-            TextButton(
-              onPressed: () async {
-                final ip = controller.text.trim();
-                await _setBestIp(ip);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        ip.isEmpty ? '已清空优选 IP' : '已保存优选 IP $ip',
-                        style:
-                            FontUtils.poppins(ctx, color: Colors.white),
-                      ),
-                      backgroundColor: const Color(0xFF10b981),
-                    ),
-                  );
-                }
-              },
-              child: Text(
-                '保存',
-                style: FontUtils.poppins(ctx,
-                    fontSize: 14,
-                    color: const Color(0xFF10b981),
+                        : const Color(0xFF1f2937),
                     fontWeight: FontWeight.w600),
               ),
-            ),
-          ],
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    // v2.0.32: 不再限制 numberWithOptions, 因为支持域名
+                    keyboardType: TextInputType.text,
+                    style: FontUtils.poppins(ctx,
+                        fontSize: 14,
+                        color: isDark
+                            ? const Color(0xFFffffff)
+                            : const Color(0xFF1f2937)),
+                    decoration: InputDecoration(
+                      hintText: '104.16.123.45 或 cf.877774.xyz',
+                      hintStyle: FontUtils.poppins(ctx,
+                          fontSize: 14,
+                          color: isDark
+                              ? const Color(0xFF9ca3af)
+                              : const Color(0xFF6b7280)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF374151)
+                              : const Color(0xFFe5e7eb),
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF374151)
+                              : const Color(0xFFe5e7eb),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: Color(0xFF10b981),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // v2.0.32: 显示当前解析状态 (实时)
+                  if (_cfBestIp.isNotEmpty) ...[
+                    Text(
+                      _isIpv4(_cfBestIp)
+                          ? '类型: IPv4 (静态)\n生效 IP: $_cfBestIp'
+                          : '类型: 优选域名 (动态解析)\n'
+                              '用户输入: $_cfBestIp\n'
+                              '当前 IP: ${resolved ?? "解析中..."}\n'
+                              '上次解析: $resolvedAt'
+                              '${err != null ? "\n错误: $err" : ""}',
+                      style: FontUtils.sourceCodePro(ctx,
+                          fontSize: 11,
+                          color: isDark
+                              ? const Color(0xFF10b981)
+                              : const Color(0xFF059669),
+                          height: 1.4),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Text(
+                    '支持两种格式:\n'
+                    '• IPv4: 104.16.123.45 (静态, 写死不刷新)\n'
+                    '• 优选域名: cf.877774.xyz / cloudflare.182682.xyz 等 '
+                    '(动态解析, App 启动 + 每 5 分钟自动重新解析, '
+                    '每次拿到不同的 CF IP, 避开 DNS 污染)\n\n'
+                    '留空 = 不使用, 走系统 DNS.\n\n'
+                    '效果: App 内所有 HTTP 请求 (豆瓣 / Bangumi / 图片 / 元数据) '
+                    '强制走解析出来的 IP, 跳过系统 DNS 解析.\n\n'
+                    '⚠️ 视频走 libmpv (原生 C), 不受 Dart 优选 IP 影响. '
+                    '视频加速靠 worker 自带的 CF edge cache.',
+                    style: FontUtils.poppins(ctx,
+                        fontSize: 11,
+                        color: isDark
+                            ? const Color(0xFF9ca3af)
+                            : const Color(0xFF6b7280),
+                        height: 1.5),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text(
+                    '取消',
+                    style: FontUtils.poppins(ctx,
+                        fontSize: 14,
+                        color: isDark
+                            ? const Color(0xFF9ca3af)
+                            : const Color(0xFF6b7280)),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final input = controller.text.trim();
+                    final cleaned = await UserDataService.saveCfBestIp(input);
+                    if (cleaned == null && input.isNotEmpty) {
+                      // 输入非空但格式错, 提示一下
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '格式无效, 必须是 IPv4 (104.16.123.45) '
+                              '或域名 (cf.877774.xyz)',
+                              style: FontUtils.poppins(ctx,
+                                  color: Colors.white),
+                            ),
+                            backgroundColor: const Color(0xFFef4444),
+                          ),
+                        );
+                      }
+                      return; // 不关弹窗, 让用户改
+                    }
+                    if (!mounted) return;
+                    setState(() {
+                      _cfBestIp = cleaned ?? '';
+                    });
+                    final effective =
+                        cleaned == null || cleaned.isEmpty ? null : cleaned;
+                    CfOptimizerHttpOverrides.setManualPreferredIp(effective);
+                    if (effective != null && !_isIpv4(effective)) {
+                      // ignore: discarded_futures
+                      CfOptimizerHttpOverrides.resolveManualPreferred()
+                          .then((_) {
+                        if (mounted) setState(() {});
+                      });
+                    }
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            cleaned == null || cleaned.isEmpty
+                                ? '已清空优选'
+                                : _isIpv4(cleaned)
+                                    ? '已保存 IP $cleaned (静态)'
+                                    : '已保存域名 $cleaned (动态解析, 5min 刷新)',
+                            style:
+                                FontUtils.poppins(ctx, color: Colors.white),
+                          ),
+                          backgroundColor: const Color(0xFF10b981),
+                        ),
+                      );
+                    }
+                  },
+                  child: Text(
+                    '保存',
+                    style: FontUtils.poppins(ctx,
+                        fontSize: 14,
+                        color: const Color(0xFF10b981),
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     ).whenComplete(controller.dispose);
@@ -589,7 +673,13 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                     const SizedBox(height: 8),
                     _buildInputTile(
                       title: '优选 IP（可选）',
-                      currentValue: _cfBestIp,
+                      currentValue: _cfBestIp.isEmpty
+                          ? ''
+                          : _isIpv4(_cfBestIp)
+                              ? _cfBestIp
+                              // v2.0.32: 域名模式显示"域名 → 解析 IP"
+                              : '${_cfBestIp} → '
+                                  '${CfOptimizerHttpOverrides.getResolvedManualIp() ?? "解析中..."}',
                       emptyHint: '（未设置，使用 DNS 解析）',
                       onTap: () => _showBestIpDialog(isDark),
                       icon: LucideIcons.zap,
