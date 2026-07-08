@@ -127,8 +127,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   _lastDurationForAdDetect: duration stream 每帧更新, 记的是"上
   //     一次的总时长", 用作对比: 当前 dur vs 上一次 dur, 突然变小超
   //     60s 就是切广告。
+  //
+  // v2.0.33: 加 position 倒退检测 (兜底). 场景: 视频源在某些广告位
+  // 是「嵌入主片 m3u8」, duration 不变, 上面 duration 跳变检测抓不到.
+  // 但有的源会让 position 跳回 0 (或近 0) 一瞬间再继续. 这种情况
+  // position stream 会出现「pos 突然从 1200 跳到 5」, 且 _scrubbingValue
+  // 是 null (用户没在拖), 且最近 3s 没触发过广告检测 (冷却) — 就当广告
+  // 处理, seek 回 _lastKnownPosition.  限制:
+  //   - 用户主动 seek 回 0 / 开头 → 走 _scrubbingValue != null 守门
+  //   - m3u8 切流已经在 duration listener 处理, 不会到这
+  //   - 完全嵌入 (position 连续不跳) 的广告这个检测也抓不到, 那是源
+  //     端 m3u8 格式决定, 客户端无解, 得 worker 改
   Duration _lastKnownPosition = Duration.zero;
   Duration _lastDurationForAdDetect = Duration.zero;
+  DateTime _lastAdDetectAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   // 自动播下一集: 防止 position/completed 重复触发
   bool _autoPlayedThisEpisode = false;
@@ -213,6 +225,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _positionSub = _player.streams.position.listen((pos) {
       if (!mounted) return;
       if (_scrubbingValue == null) {
+        final prevPos = _lastKnownPosition;
         _currentPosition = pos;
         // v1.0.77: 撤回 v1.0.75/v1.0.76 的反方向 recovery seek (用户反馈
         // "播放到广告位死循环/重头播广告" 根因). 旧逻辑用 position 跳变
@@ -227,6 +240,30 @@ class _PlayerScreenState extends State<PlayerScreen>
         // (有 `pos > 0` 守门), _lastKnownPosition 保持广告前的 28min.
         if (pos > Duration.zero) {
           _lastKnownPosition = pos;
+        }
+        // v2.0.33: position 倒退检测 (兜底 — 抓 m3u8 内嵌广告且会让
+        // pos 跳回 0/小值的源). 跟 duration 跳变检测互补:
+        //   - duration 跳变: 抓「m3u8 切流」(1 个广告 30s 单独 m3u8)
+        //   - position 倒退: 抓「内嵌但让 pos 重置」的广告
+        // 守门:
+        //   - _scrubbingValue == null: 用户没在拖进度条
+        //   - prevPos > 10s: 已经在主片播了一段, 不是开场
+        //   - pos < 5s: 突然回到开头附近
+        //   - 倒退幅度 > 5s: 真的跳了, 不是抖动
+        //   - 冷却 3s: 避免连续触发
+        if (_scrubbingValue == null &&
+            prevPos > const Duration(seconds: 10) &&
+            pos < const Duration(seconds: 5) &&
+            prevPos - pos > const Duration(seconds: 5) &&
+            DateTime.now().difference(_lastAdDetectAt) >
+                const Duration(seconds: 3)) {
+          // 兜底 seek 回 prevPos. 注意 _currentPosition 已经被设成
+          // pos (广告流的 0) 了, 这里强行覆盖回去避免 UI 闪到 0
+          _currentPosition = prevPos;
+          _player.seek(prevPos);
+          _lastAdDetectAt = DateTime.now();
+          // ignore: avoid_print
+          print('[ad-skip v2.0.33] position 倒退检测: ${prevPos.inSeconds}s → ${pos.inSeconds}s, seek 回 ${prevPos.inSeconds}s');
         }
         // v1.0.52: 实时刷新时间文字 + 进度条
         // 之前只更新 _currentPosition 但不 setState, 底部栏的
@@ -1653,6 +1690,31 @@ class _PlayerScreenState extends State<PlayerScreen>
     _playEpisode(nextIndex);
   }
 
+  /// v2.0.33: 手动「下一集」— 用户主动点播控上的 skip_next 按钮.
+  /// 跟 _autoPlayNextEpisode 区别: 不要 pos / dur 守门, 用户点的时候
+  /// 不管看到哪里都直接切. 也用 _autoPlayedThisEpisode 锁防止后续
+  /// streams.completed 误触.
+  void _playNextEpisode() {
+    if (_autoPlayedThisEpisode) return;
+    if (_phase != 'playing') return;
+    final source = _selectedSource;
+    if (source == null) return;
+    final nextIndex = _currentEpisodeIndex + 1;
+    if (nextIndex >= source.episodes.length) return; // 最后一集
+    if (source.episodes[nextIndex].isEmpty) return; // 下一集没 url
+    _autoPlayedThisEpisode = true;
+    _playEpisode(nextIndex);
+    // 给个轻提示 (主路是控制栏图标变了, 提示只是兜底)
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('正在切换下一集…'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
   /// v2.0.16: 启本地代理 + 给 libmpv 配 --http-proxy (如果条件满足)
   /// v2.0.20: media_kit 1.2.6 Player 类没有 setProperty / command 方法,
   ///   改用 dart:ffi 直接调 libmpv 的 mpv_set_property_string (MpvFFI).
@@ -1723,8 +1785,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 判成广告. (新一集 open 时 duration stream 会从 0 变到新一集总时长,
     // 此时上一集的 _lastDurationForAdDetect 还是 0, 不会触发, 但保险起
     // 见显式清零, 跟之前 v1.0.75 的 _lastKnownPosition 清零逻辑同模式)
+    // v2.0.33: 同样清零 _lastAdDetectAt 让新一集能立刻触发 position 倒退
+    // 检测 (不需要等冷却)
     _lastKnownPosition = Duration.zero;
     _lastDurationForAdDetect = Duration.zero;
+    _lastAdDetectAt = DateTime.fromMillisecondsSinceEpoch(0);
 
     // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
     // 仅在用户主动开新集时且和云记忆吻合的那次才用
@@ -2904,7 +2969,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 圆形小按钮 (40x40, LunaTV Web 控制按钮)
-  Widget _iconBtn({required IconData icon, required VoidCallback? onTap}) {
+  /// v2.0.33: 加 [iconColor] 可选参数, 「下一集」按钮用绿色突出
+  Widget _iconBtn({
+    required IconData icon,
+    required VoidCallback? onTap,
+    Color? iconColor,
+  }) {
     return Material(
       color: Colors.transparent,
       shape: const CircleBorder(),
@@ -2916,8 +2986,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           height: 40,
           child: Icon(
             icon,
-            color:
-                onTap == null ? Colors.white.withOpacity(0.3) : Colors.white,
+            color: iconColor ??
+                (onTap == null ? Colors.white.withOpacity(0.3) : Colors.white),
             size: 22,
           ),
         ),
@@ -3075,6 +3145,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                             icon: Icons.format_list_bulleted,
                             onTap: _showEpisodeSelectorSheet,
                           ),
+                          // v2.0.33: 手动「下一集」按钮 — 跟自动播下一集用同一播放逻辑
+                          // 只在「还有下一集」时显示, 最后一集隐藏
+                          if (_selectedSource != null &&
+                              _currentEpisodeIndex <
+                                  _selectedSource!.episodes.length - 1)
+                            _iconBtn(
+                              icon: Icons.skip_next,
+                              iconColor: const Color(0xFF10b981),
+                              onTap: _playNextEpisode,
+                            ),
                           // 全屏
                           _iconBtn(
                             icon: _isFullscreen
