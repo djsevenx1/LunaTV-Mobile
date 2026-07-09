@@ -2,7 +2,7 @@
 //
 // 背景:
 //   - 配了 TMDB key 的用户在 player_screen 详情页看到 TMDB 大背景 + 大海报 + 简介
-//   - 没配 key / 拿不到结果 / 短剧 / 标题不匹配 → 走默认海报 (灰色电影 icon + 标题)
+//   - 没配 key / 拿不到结果 / 短剧 / 标题不匹配 → 走 fallback 海报 (源 cover + 标题)
 //
 // 数据流:
 //   1. TmdbService.search(type, title, year) → 拿第一个匹配结果的 ID
@@ -11,13 +11,18 @@
 //   3. TmdbService.getDetails(type, id) → 拿完整 metadata (overview, backdrop, voteAverage)
 //   4. 1 天本地缓存兜底, 重复打开详情页几乎零网络
 //
-// 配了 key 拿不到结果 (TMDB 没收录 / 标题不一样) → 退化为默认海报
-// (灰色电影 icon + 标题), 不展示 douban 海报 (避免封面/标题不符时
-// 给用户错误的视觉暗示). 短剧 (sourceName == '') → 直接走默认海报,
-// 不发 TMDB 请求, 因为 TMDB 几乎没收录短剧.
+// Fallback 行为 (v2.0.49):
+//   - 有源 cover (`widget.fallbackCover` 非空): 展示源 cover + 标题 + tag (短剧 / 年份) + sourceName
+//   - 没源 cover: 灰色电影 icon 占位 + 标题 + tag
+//   - 短剧: 跳过 TMDB 请求 (TMDB 几乎没收录短剧), 走 fallback
 //
-// v2.0.46: 短剧 / TMDB 没资源 → 统一用默认海报 (灰色 icon + 标题),
-//   不再用 douban 海报 (douban 海报跟实际视频可能差很多, 反而误导).
+// v2.0.46 改过 fallback: 直接用灰色占位, 不用源 cover. 用户反馈:
+//   - 短剧: 列表里能看到图, 点进去看不到了 (源 cover 被丢, 太激进)
+//   - TMDB 没资源: 源 cover 经常是对的 (用户已经在列表看到, 期望详情里也看到),
+//     用灰色占位反而跟列表视觉不一致
+// v2.0.49 修法: 恢复 v2.0.38 ~ v2.0.45 的源 cover 行为, 保留 v2.0.46 的
+//   短剧 tag 和"源 cover 也为空才用占位"逻辑.
+//
 // v2.0.47: TMDB 搜不到精准匹配时 (返回"最接近"的结果), 标题相似度校验
 //   不过也走默认海报, 不显示错的剧 (e.g. 搜「山村医馆」返回「千香」).
 //
@@ -26,9 +31,9 @@
 //     title: widget.videoInfo.title,
 //     year: widget.videoInfo.year,
 //     kind: widget.kind ?? (widget.videoInfo.sourceName == '豆瓣' ? 'movie' : 'tv'),
-//     fallbackCover: widget.videoInfo.cover,  // v2.0.46 起不再使用, 保留兼容
+//     fallbackCover: widget.videoInfo.cover,
 //     fallbackSource: widget.videoInfo.source,
-//     sourceName: widget.videoInfo.sourceName,  // 短剧 = '' 自动用默认海报
+//     sourceName: widget.videoInfo.sourceName,  // 短剧 = '' 自动跳过 TMDB
 //   )
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -36,6 +41,7 @@ import 'package:flutter/material.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
 /// v2.0.38: TMDB 详情大头部
@@ -482,44 +488,58 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
     );
   }
 
-  /// v2.0.46: 默认海报 — 短剧 / TMDB 没资源统一走这里.
+  /// v2.0.49 (回滚 v2.0.46): 海报 fallback — 优先用源 cover, 没了再默认占位.
   ///
-  /// 之前 v2.0.38 ~ v2.0.45 用原 douban 海报当 fallback, 但 douban 海报跟实际视频
-  /// 经常差很远 (TMDB 拿不到结果时, douban 也不一定对得上), 用户看着会觉得
-  /// "这是另一个电影", 反而误导. 改成纯灰色电影 icon + 标题, 直白地告诉
-  /// 用户"没匹配到 TMDB 资源".
+  /// v2.0.46 把 fallback 改成纯灰色电影 icon, 用户反馈:
+  ///   1. 短剧: 列表里能看到图, 点进去看不到了 (源 cover 被丢了, 太激进)
+  ///   2. TMDB 没资源: 源 cover 经常是对的 (用户已经在列表看到, 期望详情里也看到),
+  ///      用灰色占位反而跟列表视觉不一致
   ///
-  /// 布局: 110x150 占位 (内含 lucide film icon) + 标题 + 年份/类型 tag + sourceName.
+  /// v2.0.49 修法: 恢复 v2.0.38 ~ v2.0.45 的源 cover 行为 (有就用源 cover),
+  ///   但保留 v2.0.46 的两个增量:
+  ///     - 短剧 tag (橙色, _isShortDrama 为 true 时显示)
+  ///     - 当源 cover 也为空时, 才显示灰色电影 icon 占位
+  ///
+  /// 布局: 110x150 海报 (源 cover 或灰色占位) + 标题 + 年份/类型/短剧 tag + sourceName.
   Widget _buildPosterFallback(bool isDark) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 110x150 占位: 灰色背景 + lucide film icon
+          // 110x150 海报: 优先源 cover, 没有走灰色占位
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Container(
+            child: SizedBox(
               width: 110,
               height: 150,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isDark
-                      ? const [Color(0xFF374151), Color(0xFF1F2937)]
-                      : const [Color(0xFFE5E7EB), Color(0xFFD1D5DB)],
-                ),
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.movie_outlined,
-                  color: isDark
-                      ? Colors.white.withOpacity(0.4)
-                      : Colors.black.withOpacity(0.35),
-                  size: 48,
-                ),
-              ),
+              child: widget.fallbackCover.isNotEmpty
+                  ? FutureBuilder<String>(
+                      future: getImageUrl(
+                          widget.fallbackCover, widget.fallbackSource),
+                      builder: (context, snapshot) {
+                        final imageUrl =
+                            snapshot.data ?? widget.fallbackCover;
+                        final headers = getImageRequestHeaders(
+                            imageUrl, widget.fallbackSource);
+                        return CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          fit: BoxFit.cover,
+                          width: 110,
+                          height: 150,
+                          httpHeaders: headers,
+                          memCacheWidth: (110 *
+                                  MediaQuery.of(context).devicePixelRatio)
+                              .round(),
+                          memCacheHeight: (150 *
+                                  MediaQuery.of(context).devicePixelRatio)
+                              .round(),
+                          placeholder: (c, u) => _buildDefaultPoster(isDark),
+                          errorWidget: (c, u, e) => _buildDefaultPoster(isDark),
+                        );
+                      },
+                    )
+                  : _buildDefaultPoster(isDark),
             ),
           ),
           const SizedBox(width: 12),
@@ -545,7 +565,7 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
                   children: [
                     if (widget.year != null && widget.year!.isNotEmpty)
                       _buildFallbackTag(widget.year!, isDark),
-                    // v2.0.46: 短剧标识 tag
+                    // v2.0.49: 保留 v2.0.46 的短剧 tag
                     if (_isShortDrama)
                       _buildFallbackTag('短剧', isDark,
                           color: const Color(0xFFf59e0b)),
@@ -574,6 +594,32 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// v2.0.49: 默认灰色电影 icon 占位 (110x150, 短剧 / 源 cover 也为空时用).
+  Widget _buildDefaultPoster(bool isDark) {
+    return Container(
+      width: 110,
+      height: 150,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? const [Color(0xFF374151), Color(0xFF1F2937)]
+              : const [Color(0xFFE5E7EB), Color(0xFFD1D5DB)],
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.movie_outlined,
+          color: isDark
+              ? Colors.white.withOpacity(0.4)
+              : Colors.black.withOpacity(0.35),
+          size: 48,
+        ),
       ),
     );
   }
