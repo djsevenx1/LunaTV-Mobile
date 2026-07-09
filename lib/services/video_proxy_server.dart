@@ -412,7 +412,6 @@ class VideoProxyServer {
 
   /// 等 socket 收到数据. 有数据返 true, 超时或断开返 false.
   static Future<bool> _waitForSocketData(Socket socket, Duration timeout) async {
-    if (socket.isClosed) return false;
     final completer = Completer<bool>();
     late StreamSubscription sub;
     Timer? timer;
