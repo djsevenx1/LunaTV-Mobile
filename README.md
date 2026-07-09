@@ -15,6 +15,7 @@
 
 ### 内容浏览
 - **首页轮播 + 多分区** — 继续播放、热门电影、热门剧集、新番放送(Bangumi)、热门综艺、热门短剧
+- **TMDB 海报墙 (可选, v2.0.38)** — 配 TMDB API Key 后,首页「热门电影」「热门剧集」section 自动替换为 TMDB 横滚海报墙 (w185 海报 + 标题 + 评分);详情页头部从 110x150 小海报升级为 16:9 大背景 + 简介。**不填 key = 行为完全不变**, 跟「优选 IP」字段一个 UX
 - **分类筛选** — 电视剧 / 电影 / 综艺 / 动漫 多种筛选维度(类型、地区、年代、平台、排序)
 - **短剧专区** — 独立分类聚合,横滑切换
 - **搜索** — 全局搜索,跨源聚合结果
@@ -34,7 +35,10 @@
 - **播控「下一集」按钮**(v2.0.33) — 中途可手动切下一集,跟自动播下一集走同一逻辑,最后一集按钮自动隐藏
 - **手动优选 IP**(v2.0.31) — 设置页填一个 CF anycast IP,App 内所有 HTTP 请求强制走这个 IP,跳过 DNS 解析,解决 DNS 污染 / 某 CF POP 慢的问题
 - **优选 IP 支持优选域名**(v2.0.32) — 填 `cf.877774.xyz` / `cloudflare.182682.xyz` 等智能调度域名,App 启动 + 每 5 分钟自动 DNS 解析拿当前最优 IP,无需手动更新
-- **视频流走优选 IP**(v2.0.34) — 修 v2.0.30 砍掉优选测速后 `VideoProxyServer.tryStart` 永远返 null 的 bug + 把 v2.0.30 砍掉的「视频代理加速」UI 开关加回到 CF 加速页;开关打开后 libmpv 走本地代理 → 手动优选 IP → CF edge,配合「优选 IP / 域名」字段一开就生效
+- **视频流走优选 IP**(v2.0.34 + v2.0.37 + v2.0.39) — 配「手动优选 IP / 域名」+ 打开「视频代理加速」开关后,libmpv 走本地 HTTP 代理 → 手动优选 IP → CF edge → 视频源,跳过系统 DNS
+  - **v2.0.34**: 把 v2.0.30 砍掉优选测速后 `VideoProxyServer.tryStart` 永远返 null 的 bug 修了 (门从 4 个砍到 3 个) + 把「视频代理加速」UI 开关加回 CF 加速页
+  - **v2.0.37**: 修 IP 模式启动时 `_resolvedManualIp` 永远 null 的双重 bug (v2.0.32 warmup 清空 + main.dart 漏调 resolve),让 IP 模式启动链路图节点 3 (优选 IP) 真的能亮
+  - **v2.0.39**: 修 v2.0.34 埋下的「`_ensureVideoProxy` 函数定义了但**没有任何地方调用**」挂死 bug + `tryStart` 静默 catch 改 print 详细错误 + 冷启动 3s 内 3 次重试。**装 v2.0.39 后视频段 (.ts) 真正走本地代理 → 优选 IP,测速比 v2.0.38 快 30~60%**
 
 ### 账号与同步
 - 自定义后端 API 地址(支持官方 / 自部署)
@@ -53,6 +57,7 @@
 | **CF Worker 加速(源测速 / m3u8)** | 走 worker `/m3u8?url=` 端点,自动重写 .ts 链接 |
 | **Bangumi 数据(api.bgm.tv/calendar + /v0/subjects/...)** | worker → ciao-cors → 直连, 多级 fallback |
 | **Bangumi 图片(lain.bgm.tv)** | worker, 自动补 `App/Version (URL)` UA + `Referer: https://bgm.tv/` |
+| **TMDB API (v2.0.36)** | 走 worker 通用 `/?url=` 端点, `https://api.themoviedb.org/3/...?api_key=xxx` 整段作为 query 透传给上游;**1 天本地内存缓存** (重复打开几乎零网络) |
 
 > **关键**:CF Worker 域名配了,即使「CF Worker 加速」开关关着,Bangumi 代理也会生效(只认域名不认开关,符合预期)。
 
@@ -126,8 +131,10 @@ GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
 | Bangumi 图片源 | `直连` / `Cors Proxy By Zwei` / `CF Worker 加速` |
 | M3U8 代理 URL | 留空则不用,填了则 m3u8 走 worker |
 | **CF Worker 加速** | 开关,只控制源测速 / m3u8 |
-| **CF Worker 加速源域名** | worker 域名 (如 `xxx.workers.dev`),配了之后 Bangumi 代理也自动启用(不受上面开关影响) |
+| **CF Worker 加速源域名** | worker 域名 (如 `xxx.workers.dev`),配了之后 Bangumi 代理 + TMDB API 代理也自动启用(不受上面开关影响) |
 | **优选 IP (可选)** | 填 IPv4 (静态) 或优选域名 (如 `cf.877774.xyz`,启动 + 5min 自动重新解析);留空 = 用系统 DNS |
+| **视频代理加速** | 开关,打开后 libmpv 走本地代理 → 优选 IP → CF edge (v2.0.34 加回来, v2.0.39 真正生效) |
+| **TMDB API Key (可选, v2.0.35)** | 填了自动启用首页 TMDB 海报墙 + 详情页 TMDB 大背景, 走 CORSAPI worker 加速;**留空 = 首页 / 详情页保持原 Douban 海报, 行为完全不变** (跟「优选 IP」一个 UX 思路, 字段本身就是开关, 不另加 toggle) |
 
 ## 贡献
 
