@@ -400,7 +400,6 @@ class VideoProxyServer {
             // 和 clientSub 老的 cancel 都有机会先释放, 不然后面的
             // listen 全抛 "Stream has already been listened to"
             Future.microtask(() {
-              if (resolved) return;
               try {
                 final oldClientSub = clientSub;
                 clientSub = null;
