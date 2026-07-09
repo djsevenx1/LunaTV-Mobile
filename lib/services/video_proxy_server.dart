@@ -196,7 +196,7 @@ class VideoProxyServer {
         throw Exception('no IPv4 address for $target');
       }
       // 顺序拨, 第一个成功即返回
-      Socket? lastError;
+      Exception? lastError;
       for (final addr in addrs) {
         try {
           return await Socket.connect(addr, port,
