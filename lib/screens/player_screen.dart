@@ -21,6 +21,7 @@ import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/widgets/tmdb_detail_header.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -2158,6 +2159,16 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   // ================= 详情视图 =================
 
+  /// v2.0.38: 推断 kind: 多集 → tv (剧集/综艺/番剧), 1 集 → movie
+  /// 兜底: sourceName 含 bangumi → tv, 其他 → movie
+  String get _kind {
+    if (widget.videoInfo.totalEpisodes > 1) return 'tv';
+    if (widget.videoInfo.sourceName.toLowerCase().contains('bangumi')) {
+      return 'tv';
+    }
+    return 'movie';
+  }
+
   Widget _buildDetailView(bool isDark) {
     return Column(
       children: [
@@ -2169,8 +2180,19 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 海报 + 信息头部
-                _buildPosterHeader(isDark),
+                // v2.0.38: 配了 TMDB key → 大头部 (TMDB backdrop + 海报 + 简介),
+                //            没配 → 原 110x150 小海报 + 标题/年份
+                if (isTmdbPosterWallEnabled())
+                  TmdbDetailHeader(
+                    title: widget.videoInfo.title,
+                    year: widget.videoInfo.year,
+                    kind: _kind,
+                    fallbackCover: widget.videoInfo.cover,
+                    fallbackSource: widget.videoInfo.source,
+                    sourceName: widget.videoInfo.sourceName,
+                  )
+                else
+                  _buildPosterHeader(isDark),
                 // 集数 (放在源上面,LunaTV Web 风格)
                 _buildEpisodeSection(isDark),
                 // 源 + 测速

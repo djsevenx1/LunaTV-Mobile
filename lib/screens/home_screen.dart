@@ -8,6 +8,8 @@ import 'package:luna_tv/widgets/hot_show_section.dart';
 import 'package:luna_tv/widgets/bangumi_section.dart';
 import 'package:luna_tv/widgets/hot_short_drama_section.dart';
 import 'package:luna_tv/widgets/main_layout.dart';
+import 'package:luna_tv/widgets/section_title.dart';
+import 'package:luna_tv/widgets/tmdb_poster_wall.dart';
 import 'package:luna_tv/widgets/top_tab_switcher.dart';
 import 'package:luna_tv/widgets/favorites_grid.dart';
 import 'package:luna_tv/widgets/history_grid.dart';
@@ -218,10 +220,19 @@ class _HomeScreenState extends State<HomeScreen> {
       await FavoritesGrid.refreshFavorites();
 
       // 刷新热门电影组件
-      await HotMoviesSection.refreshHotMovies();
+      if (isTmdbPosterWallEnabled()) {
+        // v2.0.38: 配了 TMDB key → 刷新海报墙, 不刷新原 Douban
+        await TmdbPosterWall.refreshAll();
+      } else {
+        await HotMoviesSection.refreshHotMovies();
+      }
 
       // 刷新热门剧集组件
-      await HotTvSection.refreshHotTvShows();
+      if (isTmdbPosterWallEnabled()) {
+        await TmdbPosterWall.refreshAll();
+      } else {
+        await HotTvSection.refreshHotTvShows();
+      }
 
       // 刷新新番放送组件
       await BangumiSection.refreshBangumiCalendar();
@@ -341,42 +352,62 @@ class _HomeScreenState extends State<HomeScreen> {
                 _onTopTabChanged('播放历史');
               },
             ),
-            // 热门电影组件
-            HotMoviesSection(
-              onMovieTap: (playRecord) {
-                _navigateToPlayer(
-                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
-                );
-              },
-              onMoreTap: () => _onBottomNavChanged(1),
-              onGlobalMenuAction: (videoInfo, action) {
-                if (action == VideoMenuAction.play) {
+            // v2.0.38: 配了 TMDB key → 海报墙, 没配 → 原 HotMoviesSection
+            if (isTmdbPosterWallEnabled())
+              TmdbPosterWall(
+                mediaType: TmdbMediaType.movie,
+                title: '热门电影',
+                subtitle: 'TMDB 热门',
+                icon: Icons.movie_outlined,
+                sectionColor: SectionColor.amber,
+                onMoreTap: () => _onBottomNavChanged(1),
+              )
+            else
+              HotMoviesSection(
+                onMovieTap: (playRecord) {
                   _navigateToPlayer(
-                    PlayerScreen(videoInfo: videoInfo),
+                    PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
                   );
-                } else {
-                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                }
-              },
-            ),
-            // 热门剧集组件
-            HotTvSection(
-              onTvTap: (playRecord) {
-                _navigateToPlayer(
-                  PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
-                );
-              },
-              onMoreTap: () => _onBottomNavChanged(2),
-              onGlobalMenuAction: (videoInfo, action) {
-                if (action == VideoMenuAction.play) {
+                },
+                onMoreTap: () => _onBottomNavChanged(1),
+                onGlobalMenuAction: (videoInfo, action) {
+                  if (action == VideoMenuAction.play) {
+                    _navigateToPlayer(
+                      PlayerScreen(videoInfo: videoInfo),
+                    );
+                  } else {
+                    _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                  }
+                },
+              ),
+            // v2.0.38: 配了 TMDB key → 海报墙, 没配 → 原 HotTvSection
+            if (isTmdbPosterWallEnabled())
+              TmdbPosterWall(
+                mediaType: TmdbMediaType.tv,
+                title: '热门剧集',
+                subtitle: 'TMDB 热门',
+                icon: Icons.tv_outlined,
+                sectionColor: SectionColor.blue,
+                onMoreTap: () => _onBottomNavChanged(2),
+              )
+            else
+              HotTvSection(
+                onTvTap: (playRecord) {
                   _navigateToPlayer(
-                    PlayerScreen(videoInfo: videoInfo),
+                    PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
                   );
-                } else {
-                  _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                }
-              },
-            ),
+                },
+                onMoreTap: () => _onBottomNavChanged(2),
+                onGlobalMenuAction: (videoInfo, action) {
+                  if (action == VideoMenuAction.play) {
+                    _navigateToPlayer(
+                      PlayerScreen(videoInfo: videoInfo),
+                    );
+                  } else {
+                    _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                  }
+                },
+              ),
             // 新番放送组件
             BangumiSection(
               onBangumiTap: (playRecord) {
