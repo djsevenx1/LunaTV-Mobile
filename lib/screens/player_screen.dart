@@ -19,6 +19,7 @@ import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -362,6 +363,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     // v2.0.16: 关本地视频代理 (释放 127.0.0.1:PORT)
     unawaited(_videoProxy?.stop());
     _videoProxy = null;
+    _videoProxyActive = false;
     super.dispose();
   }
 
@@ -1779,6 +1781,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     print('[VideoProxy] 启用成功: ${proxy.proxyUrl} '
         '(libmpv --http-proxy 已设, .ts 段都走本地代理 → 优选 IP)');
     _videoProxy = proxy;
+    // v2.0.34: 通知顶部「加速状态」指示器重算
+    setState(() {
+      _videoProxyActive = true;
+    });
   }
 
   /// 播放指定集数
@@ -2812,6 +2818,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                 icon: _isFavorite ? Icons.favorite : Icons.favorite_border,
                 onTap: _toggleFavorite,
               ),
+              // v2.0.34: 加速状态指示器 (CF Worker + 优选 IP)
+              //   颜色编码: 绿=都启用 / 黄=只 CF Worker / 灰=都没开
+              //   点击弹出 dialog 显示详细状态 (是否走优选 IP / CF 加速)
+              _buildAccelStatusIcon(),
               // 设置
               _iconBtn(
                 icon: Icons.settings_outlined,
