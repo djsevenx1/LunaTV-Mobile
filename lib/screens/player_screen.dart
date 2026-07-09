@@ -2212,7 +2212,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               children: [
                 // v2.0.38: 配了 TMDB key → 大头部 (TMDB backdrop + 海报 + 简介),
                 //            没配 → 原 110x150 小海报 + 标题/年份
-                if (isTmdbPosterWallEnabled())
+                if (UserDataService.isTmdbApiKeyConfigured())
                   TmdbDetailHeader(
                     title: widget.videoInfo.title,
                     year: widget.videoInfo.year,

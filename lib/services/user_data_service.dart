@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UserDataService {
@@ -34,19 +33,10 @@ class UserDataService {
   static String? _cfBestIpCache;
   // v2.0.35
   static String? _tmdbApiKeyCache;
-  // v2.0.41: TMDB key 变化通知器, 配 / 清 key 时 .value = cleaned 通知所有监听 widget rebuild
-  //
-  // 背景: 之前只有 static String? _tmdbApiKeyCache, home_screen build 时调
-  //   isTmdbPosterWallEnabled() 拿一次快照. 配 / 清 key 时 cache 被 saveTmdbApiKey
-  //   同步更新, 但 HomeScreen 在 user_menu 之下, 不会感知 cache 变化, rebuild
-  //   不触发, 仍显示原 HotMoviesSection / HotTvSection, 用户看不到海报墙.
-  //
-  // 修法: ValueNotifier<String?> 替代裸 String? 字段. saveTmdbApiKey 时
-  //   notifier.value = cleaned, 监听它的 ValueListenableBuilder 自动 rebuild.
-  //   home_screen _buildHomeTabContent 用 ValueListenableBuilder<String?>(valueListenable:
-  //   UserDataService.tmdbApiKeyNotifier) 包住 2 个 TMDB section, 配 key 立即看到海报墙.
-  static final ValueNotifier<String?> tmdbApiKeyNotifier =
-      ValueNotifier<String?>(_tmdbApiKeyCache);
+  // v2.0.41 加了 ValueNotifier 触发 HomeScreen rebuild, v2.0.43 砍掉首页 TMDB
+  //   后没人监听, 字段也回滚. 保持单一 static String? 缓存, getTmdbApiKeySync
+  //   同步读, saveTmdbApiKey 同步写. 详情页 push 时 build 拿最新 cache, 不需要
+  //   通知器 (跟前 v2.0.38 一样).
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -419,57 +409,47 @@ class UserDataService {
 
   /// 异步读 TMDB API key. 没填 = null.
   ///
-  /// 配 key 即等价于「启用 TMDB 海报墙」开关. 首页 _buildHomeTabContent 在 build 时
-  /// 同步读 [getTmdbApiKeySync], 配了走 TmdbPosterWall, 没配走原 HotMoviesSection / HotTvSection.
-  ///
-  /// v2.0.41: 同步通知 [tmdbApiKeyNotifier], 让预配 key 的用户第一次进首页就能
-  /// 看到海报墙. 修法见字段注释.
+  /// 配 key 即等价于「启用 TMDB 海报墙 / 大头部」开关. 详情页 (player_screen)
+  /// build 时同步读 [getTmdbApiKeySync], 配了走 TmdbDetailHeader, 没配走原
+  /// _buildPosterHeader. (v2.0.41 曾把首页热门 2 个 section 也切 TMDB,
+  /// v2.0.43 砍掉, 改回 Douban section.)
   static Future<String?> getTmdbApiKey() async {
     if (_tmdbApiKeyCache != null) return _tmdbApiKeyCache;
     final prefs = await SharedPreferences.getInstance();
     final v = prefs.getString(_tmdbApiKeyKey);
-    String? next;
     if (v == null || v.isEmpty) {
       _tmdbApiKeyCache = null;
-      next = null;
-    } else {
-      _tmdbApiKeyCache = v;
-      next = v;
+      return null;
     }
-    // v2.0.41: 同步 notifier, 避免预配 key 的用户第一次进首页拿到 null 快照
-    // (static final notifier 是在第一次访问时初始化的, 当时 _cache 还没 warmup)
-    if (tmdbApiKeyNotifier.value != next) {
-      tmdbApiKeyNotifier.value = next;
-    }
-    return next;
+    _tmdbApiKeyCache = v;
+    return v;
   }
 
   /// 同步读 TMDB API key (build 时用, 避免 Future). null = 未配 / 未初始化.
   static String? getTmdbApiKeySync() => _tmdbApiKeyCache;
 
+  /// v2.0.43: 同步判断 TMDB key 是否配了 — 给 player_screen / tmdb_detail_header
+  ///   build 时用, 决定走 TMDB 大头部还是 fallback.
+  ///   (之前是 tmdb_poster_wall.dart 里的顶级函数, v2.0.43 砍掉首页 TMDB
+  ///   后 poster_wall 文件没意义了, 把这个 1 行 helper 移到这里.)
+  static bool isTmdbApiKeyConfigured() {
+    final k = _tmdbApiKeyCache;
+    return k != null && k.isNotEmpty;
+  }
+
   /// 保存 TMDB API key. trim + 非空校验. 传 null 或空字符串 = 删除.
   ///
   /// 不做严格格式校验 (v3 key 32 字符 hex / v4 JWT 长字符串),
   /// 等调用 TMDB API 失败时再提示用户重填.
-  ///
-  /// v2.0.41: 同步通知 [tmdbApiKeyNotifier], 触发监听它的 widget rebuild
-  /// (e.g. home_screen 配 key 后立即看到 TMDB 海报墙).
   static Future<void> saveTmdbApiKey(String? input) async {
     final cleaned = (input ?? '').trim();
     final prefs = await SharedPreferences.getInstance();
-    String? next;
     if (cleaned.isEmpty) {
       await prefs.remove(_tmdbApiKeyKey);
       _tmdbApiKeyCache = null;
-      next = null;
     } else {
       await prefs.setString(_tmdbApiKeyKey, cleaned);
       _tmdbApiKeyCache = cleaned;
-      next = cleaned;
-    }
-    // v2.0.41: 通知 home_screen / player_screen / user_menu 等所有监听者
-    if (tmdbApiKeyNotifier.value != next) {
-      tmdbApiKeyNotifier.value = next;
     }
   }
 

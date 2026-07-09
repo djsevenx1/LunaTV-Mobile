@@ -27,7 +27,6 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/image_url.dart';
-import 'package:luna_tv/widgets/tmdb_poster_wall.dart';
 import 'package:provider/provider.dart';
 
 /// v2.0.38: TMDB 详情大头部
@@ -164,9 +163,13 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
   }
 
   /// 配 key + 拿到结果: TMDB 大背景 + 大海报 + 标题 + 评分 + 简介
+  ///
+  /// v2.0.43: 升级为更突出的大竖海报 (150x225 主元素) + 右侧大标题/评分/简介.
+  ///   之前 v2.0.38 是 16:9 backdrop 兜着 90x135 小海报浮在上面, 不够"大".
+  ///   用户反馈 "选源播放里面放 tmdb 大海报啊", 改成主元素就是大竖海报, 直观好看.
   Widget _buildTmdbHero(TmdbItem item, TmdbConfiguration cfg, bool isDark) {
     final backdropUrl = cfg.backdropUrl(item.backdropPath, size: 'w1280');
-    final posterUrl = cfg.posterUrl(item.posterPath, size: 'w342');
+    final posterUrl = cfg.posterUrl(item.posterPath, size: 'w500');
     final hasBackdrop = backdropUrl.isNotEmpty;
 
     return Container(
@@ -185,7 +188,7 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
       ),
       child: Stack(
         children: [
-          // 1) 背景: backdrop 大图 (16:9) + 渐变蒙版
+          // 1) 背景: backdrop 大图 (16:9) + 重度渐变蒙版 (大竖海报在前景, 背景压暗)
           AspectRatio(
             aspectRatio: 16 / 9,
             child: Stack(
@@ -212,16 +215,16 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
                         ? const Color(0xFF1F2937)
                         : const Color(0xFFE5E7EB),
                   ),
-                // 渐变蒙版: 顶部透明, 底部深色, 保证下方文字可读
+                // 重度渐变: 顶部更暗 (让大竖海报更突出), 底部深色
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.black.withOpacity(0.05),
-                        Colors.black.withOpacity(0.55),
-                        Colors.black.withOpacity(0.85),
+                        Colors.black.withOpacity(0.35),
+                        Colors.black.withOpacity(0.65),
+                        Colors.black.withOpacity(0.90),
                       ],
                       stops: const [0.0, 0.55, 1.0],
                     ),
@@ -230,150 +233,149 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
               ],
             ),
           ),
-          // 2) 前景: 大海报 (浮在背景上) + 标题 + 元信息 + 简介
+          // 2) 前景: 大竖海报 (主元素, 150x225) + 右侧大标题/评分/简介
           Positioned.fill(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              child: Column(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Spacer(),
-                  // 大海报 (110x150) + 标题/评分
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: SizedBox(
-                          width: 90,
-                          height: 135,
-                          child: posterUrl.isNotEmpty
-                              ? CachedNetworkImage(
-                                  imageUrl: posterUrl,
-                                  fit: BoxFit.cover,
-                                  memCacheWidth: (90 *
-                                          MediaQuery.of(context)
-                                              .devicePixelRatio)
-                                      .round(),
-                                  memCacheHeight: (135 *
-                                          MediaQuery.of(context)
-                                              .devicePixelRatio)
-                                      .round(),
-                                  placeholder: (c, u) => Container(
-                                    color: isDark
-                                        ? const Color(0xFF1F2937)
-                                        : const Color(0xFFE5E7EB),
-                                  ),
-                                  errorWidget: (c, u, e) => Container(
-                                    color: isDark
-                                        ? const Color(0xFF1F2937)
-                                        : const Color(0xFFE5E7EB),
-                                    child: const Icon(
-                                        Icons.movie_outlined,
-                                        color: Colors.grey,
-                                        size: 32),
-                                  ),
-                                )
-                              : Container(
-                                  color: isDark
-                                      ? const Color(0xFF1F2937)
-                                      : const Color(0xFFE5E7EB),
-                                ),
+                  // 大竖海报 (主元素, 150x225 = 2:3 海报比例)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 150,
+                      height: 225,
+                      child: posterUrl.isNotEmpty
+                          ? CachedNetworkImage(
+                              imageUrl: posterUrl,
+                              fit: BoxFit.cover,
+                              memCacheWidth: (150 *
+                                      MediaQuery.of(context)
+                                          .devicePixelRatio)
+                                  .round(),
+                              memCacheHeight: (225 *
+                                      MediaQuery.of(context)
+                                          .devicePixelRatio)
+                                  .round(),
+                              placeholder: (c, u) => Container(
+                                color: isDark
+                                    ? const Color(0xFF1F2937)
+                                    : const Color(0xFFE5E7EB),
+                              ),
+                              errorWidget: (c, u, e) => Container(
+                                color: isDark
+                                    ? const Color(0xFF1F2937)
+                                    : const Color(0xFFE5E7EB),
+                                child: const Icon(
+                                    Icons.movie_outlined,
+                                    color: Colors.grey,
+                                    size: 48),
+                              ),
+                            )
+                          : Container(
+                              color: isDark
+                                  ? const Color(0xFF1F2937)
+                                  : const Color(0xFFE5E7EB),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  // 右侧: 大标题 + 年份/评分 + 简介 + 「默认: 豆瓣」
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        // 大标题
+                        Text(
+                          item.title,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            height: 1.2,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black87,
+                                blurRadius: 6,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
+                        if (item.originalTitle.isNotEmpty &&
+                            item.originalTitle != item.title) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            item.originalTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withOpacity(0.75),
+                              fontStyle: FontStyle.italic,
+                              shadows: const [
+                                Shadow(
+                                  color: Colors.black54,
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        // 年份 + 评分
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
                           children: [
-                            Text(
-                              item.title,
-                              maxLines: 2,
+                            if (item.year != null)
+                              _buildMetaChip('${item.year}'),
+                            if (item.voteAverage > 0)
+                              _buildRatingChip(item.voteAverage),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // 简介 (3 行)
+                        if (item.overview.isNotEmpty)
+                          Expanded(
+                            child: Text(
+                              item.overview,
+                              maxLines: 4,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                height: 1.2,
-                                shadows: [
-                                  Shadow(
-                                    color: Colors.black54,
-                                    blurRadius: 6,
-                                  ),
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.45,
+                                color: Colors.white.withOpacity(0.9),
+                                shadows: const [
+                                  Shadow(color: Colors.black54, blurRadius: 4),
                                 ],
                               ),
                             ),
-                            if (item.originalTitle.isNotEmpty &&
-                                item.originalTitle != item.title) ...[
-                              const SizedBox(height: 2),
+                          ),
+                        // 「默认: 豆瓣」行 (底部对齐)
+                        if (widget.sourceName != null &&
+                            widget.sourceName!.isNotEmpty)
+                          Row(
+                            children: [
+                              Icon(Icons.cloud_outlined,
+                                  size: 11,
+                                  color: Colors.white.withOpacity(0.7)),
+                              const SizedBox(width: 3),
                               Text(
-                                item.originalTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                '默认: ${widget.sourceName}',
                                 style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   color: Colors.white.withOpacity(0.7),
-                                  shadows: const [
-                                    Shadow(
-                                      color: Colors.black54,
-                                      blurRadius: 4,
-                                    ),
-                                  ],
                                 ),
                               ),
                             ],
-                            const SizedBox(height: 6),
-                            Row(
-                              children: [
-                                if (item.year != null) ...[
-                                  _buildMetaChip('${item.year}'),
-                                  const SizedBox(width: 6),
-                                ],
-                                if (item.voteAverage > 0)
-                                  _buildRatingChip(item.voteAverage),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  // 简介
-                  if (item.overview.isNotEmpty)
-                    Text(
-                      item.overview,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.5,
-                        color: Colors.white.withOpacity(0.88),
-                        shadows: const [
-                          Shadow(color: Colors.black54, blurRadius: 4),
-                        ],
-                      ),
-                    ),
-                  if (widget.sourceName != null &&
-                      widget.sourceName!.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(Icons.cloud_outlined,
-                            size: 11,
-                            color: Colors.white.withOpacity(0.7)),
-                        const SizedBox(width: 3),
-                        Text(
-                          '默认: ${widget.sourceName}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.white.withOpacity(0.7),
                           ),
-                        ),
                       ],
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
