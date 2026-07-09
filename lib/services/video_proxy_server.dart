@@ -235,50 +235,18 @@ class VideoProxyServer {
       VideoProxyLog.append('[VideoProxy] _connectRace: 拨 $originalHost:$port (无候选 IP, 走原 host)');
     }
 
-    // v2.0.46: 顺序拨号, 优先 host IP (跟 SNI 匹配的 CF edge IP, 候选
-    //   列表里通常排前面), 失败再拨 manual. 解决"race 选 15ms 但 TLS
-    //   失败的 IP"问题.
-    // v2.0.19 race 注释保留, 旧逻辑 (race 并发) 注释在下面以备回滚.
+    // v2.0.53: race 并发 + 200ms TLS ServerHello 校验.
+    //   v2.0.19 单纯 race 选最快 — 快但可能拨上 cert 错的 IP → 0KB.
+    //   v2.0.46/48 改顺序拨号 host 永远第一 — 稳但优选 IP 永远拨不到
+    //   (用户场景: 配 50ms 的 优选 IP, host DNS 是 286ms, 顺序拨号
+    //   永远先拨 host, manual 完全用不到, 优选白设了).
+    //   折中: 多个 IP race 并发拨号, 拨上的 socket 立即等 200ms 看有
+    //   没有数据进来 (libmpv 收到 200 后立刻发 TLS ClientHello, 那边
+    //   就该回 ServerHello). 第一个拿到数据的 IP 当 winner, 其余 destroy.
+    //   200ms 内没数据 → "拨上但不通" (cert 错的 edge), destroy 它,
+    //   race 选下一个. 这样优选 IP 能赢 (快), 万一没 cert 也兜得住.
     if (candidateIps.length > 1) {
-      // 顺序拨, 第一个成功的用
-      for (var i = 0; i < candidateIps.length; i++) {
-        final ip = candidateIps[i];
-        try {
-          // v2.0.50: 强制 IPv4 — `Socket.connect(hostname, port)` 默认
-          //   会同时返回 IPv4 + IPv6, 系统按 Happy Eyeballs 选最快,
-          //   IPv6 经常赢 (用户网络 IPv6 优先). 但 CF anycast IPv6
-          //   edge 跟 IPv4 不是同一组 cert 池, 自定义 CF Worker
-          //   域名 (e.g. api.xx.fn0.qzz.io) 的 cert 经常只在 IPv4
-          //   edge 上, IPv6 edge 没那个 SNI 的 cert → TLS 失败 →
-          //   libmpv 0KB. 修法: 候选是 hostname 时, 显式做
-          //   `InternetAddress.lookup(host, type: IPv4)` 拿到 IPv4
-          //   列表, 按顺序拨, 不让 Happy Eyeballs 选 IPv6.
-          //   候选是 IP (v4 或 v6) 时, 不解析, 直接拨 — 用户
-          //   配的 优选 IP 可能是 v4 也可能是 v6, 保持原行为.
-          final socket = await _connectOne(ip, port);
-          // v2.0.25: backend 也设 TCP_NODELAY
-          try {
-            socket.setOption(SocketOption.tcpNoDelay, true);
-          } catch (_) {}
-          // ignore: avoid_print
-          VideoProxyLog.append('[VideoProxy] _connectRace: 拨号成功 ($i/${candidateIps.length}) → ${socket.remoteAddress.address}:${socket.remotePort}');
-          return socket;
-        } catch (e) {
-          // ignore: avoid_print
-          VideoProxyLog.append('[VideoProxy] _connectRace: 拨 $ip 失败 ($e), 试下一个');
-          continue;
-        }
-      }
-      // 全部 IP 都失败, fallback 到原 host
-      // ignore: avoid_print
-      VideoProxyLog.append('[VideoProxy] _connectRace: 全部 ${candidateIps.length} IP 失败, fallback 原 host $originalHost:$port');
-      final socket = await _connectOne(originalHost, port);
-      try {
-        socket.setOption(SocketOption.tcpNoDelay, true);
-      } catch (_) {}
-      // ignore: avoid_print
-      VideoProxyLog.append('[VideoProxy] _connectRace: fallback 原 host 拨号成功 → ${socket.remoteAddress.address}:${socket.remotePort}');
-      return socket;
+      return await _raceWithTlsVerify(originalHost, port, candidateIps);
     }
 
     // 1 个候选: 用 v2.0.19 race 逻辑 (直接拨, 失败 fallback)
@@ -339,6 +307,147 @@ class VideoProxyServer {
       VideoProxyLog.append('[VideoProxy] _connectRace: fallback 原 host 拨号成功 → ${socket.remoteAddress.address}:${socket.remotePort}');
       return socket;
     }
+  }
+
+  /// v2.0.53: race 并发拨号 + 200ms TLS ServerHello 校验.
+  ///   每个 IP 拨上后立即等 200ms 拿数据, 第一个拿到数据的当 winner.
+  ///   没数据的当 "拨上但不通" (cert 错的 edge), destroy, 让 race 选下一个.
+  ///   全部 IP 都失败 → fallback 原 host.
+  static Future<Socket> _raceWithTlsVerify(
+    String originalHost,
+    int port,
+    List<String> candidateIps,
+  ) async {
+    if (candidateIps.isEmpty) {
+      return await _connectOne(originalHost, port);
+    }
+
+    final completer = Completer<Socket>();
+    final connectedSockets = <String, Socket>{};
+    final failedIps = <String>{};
+    int dialErrorCount = 0;
+    bool resolved = false;
+    String? winnerIp;
+
+    void tryFallback() {
+      if (resolved) return;
+      // 还在 dial 中就不 fallback
+      if (dialErrorCount + failedIps.length + connectedSockets.length <
+          candidateIps.length) {
+        return;
+      }
+      // 全部 IP 都失败了
+      resolved = true;
+      _connectOne(originalHost, port).then((socket) {
+        try {
+          socket.setOption(SocketOption.tcpNoDelay, true);
+        } catch (_) {}
+        // ignore: avoid_print
+        VideoProxyLog.append(
+            '[VideoProxy] _raceWithTlsVerify: 全部 ${candidateIps.length} IP verify 失败, fallback 原 host $originalHost:$port 拨号成功');
+        completer.complete(socket);
+      }).catchError((e) {
+        completer.completeError(e);
+      });
+    }
+
+    for (final ip in candidateIps) {
+      _connectOne(ip, port).then((socket) async {
+        if (resolved) {
+          socket.destroy();
+          return;
+        }
+        connectedSockets[ip] = socket;
+
+        // 立即等 200ms 拿数据 (TLS ServerHello)
+        final hasData = await _waitForSocketData(
+            socket, const Duration(milliseconds: 200));
+        if (resolved) {
+          if (connectedSockets[ip] == socket && ip != winnerIp) {
+            socket.destroy();
+            connectedSockets.remove(ip);
+          }
+          return;
+        }
+        if (hasData) {
+          // 拿到数据了! 这个 IP 通
+          resolved = true;
+          winnerIp = ip;
+          // ignore: avoid_print
+          VideoProxyLog.append(
+              '[VideoProxy] _raceWithTlsVerify: 拨号 + TLS 200ms 内成功 → ${socket.remoteAddress.address}:${socket.remotePort} (winner: $ip)');
+          // destroy 其他所有 IP
+          for (final entry in connectedSockets.entries) {
+            if (entry.key != ip) {
+              entry.value.destroy();
+            }
+          }
+          connectedSockets.clear();
+          try {
+            socket.setOption(SocketOption.tcpNoDelay, true);
+          } catch (_) {}
+          completer.complete(socket);
+        } else {
+          // 200ms 内没数据, 这个 IP 拨上但不通 (cert 错的 edge)
+          // ignore: avoid_print
+          VideoProxyLog.append(
+              '[VideoProxy] _raceWithTlsVerify: $ip 200ms 内没数据 (拨上但 TLS 不通), destroy, 让其他 IP 接');
+          socket.destroy();
+          connectedSockets.remove(ip);
+          failedIps.add(ip);
+          tryFallback();
+        }
+      }).catchError((e) {
+        if (resolved) return;
+        dialErrorCount++;
+        // ignore: avoid_print
+        VideoProxyLog.append(
+            '[VideoProxy] _raceWithTlsVerify: 拨 $ip 直接失败 ($e)');
+        tryFallback();
+      });
+    }
+
+    return await completer.future;
+  }
+
+  /// 等 socket 收到数据. 有数据返 true, 超时或断开返 false.
+  static Future<bool> _waitForSocketData(Socket socket, Duration timeout) async {
+    if (socket.isClosed) return false;
+    final completer = Completer<bool>();
+    late StreamSubscription sub;
+    Timer? timer;
+
+    sub = socket.listen(
+      (_) {
+        if (!completer.isCompleted) {
+          timer?.cancel();
+          completer.complete(true);
+        }
+        sub.cancel();
+      },
+      onError: (_) {
+        if (!completer.isCompleted) {
+          timer?.cancel();
+          completer.complete(false);
+        }
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          timer?.cancel();
+          completer.complete(false);
+        }
+      },
+      cancelOnError: true,
+    );
+
+    timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        sub.cancel();
+        completer.complete(false);
+      }
+    });
+
+    return completer.future;
   }
 
   void _handleConnection(Socket client) {
