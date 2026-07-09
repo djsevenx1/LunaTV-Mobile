@@ -480,6 +480,53 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     );
   }
 
+  /// v2.0.45: 静态 IP 优选 0KB 警告
+  ///
+  /// 场景: 用户填了 162.159.x.x 这种通用 CF IP, 但视频 host 是 worker
+  ///   自定义域 (api.xx.fn0.qzz.io). 静态 IP 跟 host 不在同一个 CF zone,
+  ///   TLS 握手失败但 TCP 拨上, race 已返回 → libmpv 拿到空 backend → 0KB.
+  /// 修法: 把 host 加进 race 候选 + 推荐用优选域名 (自动 re-resolve).
+  Widget _buildIpOptimizationWarning(bool isDark) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF3a2a1e)
+            : const Color(0xFFfef3e8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: const Color(0xFFf59e0b).withOpacity(0.4),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(LucideIcons.alertTriangle,
+              size: 16,
+              color: isDark
+                  ? const Color(0xFFfcd34d)
+                  : const Color(0xFFd97706)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '静态 IP 优选可能因 IP 跟目标 host 不在同一个 CF zone 而 0KB. '
+              '建议改用优选域名 (cf.877774.xyz / cloudflare.182682.xyz), '
+              'App 会每 5 分钟自动 re-resolve, 避开下线的 IP.',
+              style: FontUtils.poppins(context,
+                  fontSize: 11,
+                  color: isDark
+                      ? const Color(0xFFfcd34d)
+                      : const Color(0xFF92400e),
+                  height: 1.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildToggleTile({
     required String title,
     required String? subtitle,
@@ -700,6 +747,16 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       icon: LucideIcons.zap,
                       isDark: isDark,
                     ),
+                    // v2.0.45: 单 IP 优选的 0KB 提示 — 静态 IP 跟目标 host
+                    //   不在同一个 CF zone 时, TLS 握手失败但 TCP 拨上,
+                    //   race 已返回 → libmpv 拿到一个空 backend → 0KB 死链.
+                    //   race 内部已经加了 [manual_ip, original_host] 双候选,
+                    //   但不是 100% 解决. 强烈建议改成优选域名 (cf.877774.xyz)
+                    //   让系统 DNS 周期性 re-resolve, 避开下线的 IP.
+                    if (_cfBestIp.isNotEmpty && _isIpv4(_cfBestIp)) ...[
+                      const SizedBox(height: 8),
+                      _buildIpOptimizationWarning(isDark),
+                    ],
                     // v2.0.34: 视频代理加速开关 UI 入口
                     //   v2.0.30 砍优选测速时把入口一起砍了, 用户找不到开关.
                     //   默认 false: Dart 手写 CONNECT 隧道代理历史上不太稳

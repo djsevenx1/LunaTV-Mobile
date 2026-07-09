@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
+import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/screens/cf_acceleration_page.dart';
 import 'package:luna_tv/screens/tmdb_settings_page.dart';
 import 'package:luna_tv/screens/login_screen.dart';
@@ -36,6 +37,8 @@ class _UserMenuState extends State<UserMenu> {
   String _doubanImageSource = '直连';
   String _bangumiDataSource = '直连';
   String _bangumiImageSource = '直连';
+  // v2.0.45: TMDB 数据源 (跟豆瓣/Bangumi 对齐, 默认 CF Worker 加速)
+  String _tmdbDataSource = 'CF Worker 加速';
   String _m3u8ProxyUrl = '';
   String _version = '';
   bool _preferSpeedTest = true;
@@ -85,6 +88,8 @@ class _UserMenuState extends State<UserMenu> {
     final cfBestIp = await UserDataService.getCfBestIp();
     // v2.0.35: TMDB 海报墙 (单独 section, 配 key 启用首页海报墙)
     final tmdbApiKey = await UserDataService.getTmdbApiKey();
+    // v2.0.45: TMDB 数据源 (跟豆瓣/Bangumi 对齐, 在数据源 section 显示)
+    final tmdbDataSource = await UserDataService.getTmdbDataSourceDisplayName();
 
     if (mounted) {
       setState(() {
@@ -108,6 +113,7 @@ class _UserMenuState extends State<UserMenu> {
         );
         _tmdbApiKey = tmdbApiKey ?? '';
         _tmdbSummary = _computeTmdbSummary(tmdbApiKey);
+        _tmdbDataSource = tmdbDataSource;
       });
     }
   }
@@ -1177,6 +1183,34 @@ class _UserMenuState extends State<UserMenu> {
                 },
                 icon: LucideIcons.image,
                 iconColor: const Color(0xFFf43f5e),
+              ),
+              _buildDivider(),
+              // v2.0.45: TMDB 数据源选项 (跟豆瓣/Bangumi 数据源选择器对齐)
+              //   - 直连: 走 api.themoviedb.org 原 URL (国内几乎不可达)
+              //   - CF Worker 加速: 走用户配的 CF Worker 域名 (跟 Bangumi
+              //     一样, 配了域名就生效, 不依赖 CF Worker 加速总开关)
+              // 跟 TMDB API Key 是正交的: Key 控制"开不开 TMDB 海报墙",
+              //   数据源控制"TMDB 请求走哪条链路", 跟豆瓣/Bangumi 模式一致.
+              _buildOptionSelector(
+                title: 'TMDB 数据源',
+                currentValue: _tmdbDataSource,
+                options: const [
+                  'CF Worker 加速',
+                  '直连',
+                ],
+                onChanged: (value) async {
+                  final key = UserDataService
+                      .getTmdbDataSourceKeyFromDisplayName(value);
+                  await UserDataService.saveTmdbDataSource(key);
+                  if (!mounted) return;
+                  setState(() {
+                    _tmdbDataSource = value;
+                  });
+                  // 清 TMDB 缓存, 强制下次拉取走新数据源
+                  await TmdbService.clearCache();
+                },
+                icon: LucideIcons.film,
+                iconColor: const Color(0xFF0ea5e9),
               ),
               _buildDivider(),
               // M3U8 代理 URL 选项

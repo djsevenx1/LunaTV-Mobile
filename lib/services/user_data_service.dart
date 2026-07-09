@@ -22,6 +22,10 @@ class UserDataService {
   //   section (热门电影 / 热门剧集) 自动切 TMDB 横滚海报墙 + 评分
   //   申请地址 https://www.themoviedb.org/settings/api (免费, 立即审核)
   static const String _tmdbApiKeyKey = 'tmdb_api_key';
+  // v2.0.45: TMDB 数据源 (直连 / CF Worker 加速), 跟豆瓣/Bangumi 对齐
+  //   key: direct / cf_worker, 默认 cf_worker (跟 Bangumi 默认对齐,
+  //   因为 api.themoviedb.org 在国内几乎不可达, 直连基本是 0% 命中)
+  static const String _tmdbDataSourceKey = 'tmdb_data_source';
 
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -33,6 +37,8 @@ class UserDataService {
   static String? _cfBestIpCache;
   // v2.0.35
   static String? _tmdbApiKeyCache;
+  // v2.0.45
+  static String? _tmdbDataSourceCache;
   // v2.0.41 加了 ValueNotifier 触发 HomeScreen rebuild, v2.0.43 砍掉首页 TMDB
   //   后没人监听, 字段也回滚. 保持单一 static String? 缓存, getTmdbApiKeySync
   //   同步读, saveTmdbApiKey 同步写. 详情页 push 时 build 拿最新 cache, 不需要
@@ -453,6 +459,56 @@ class UserDataService {
     }
   }
 
+  // ===== TMDB 数据源 (v2.0.45) =====
+  //
+  // 跟豆瓣/Bangumi 的数据源选择器对齐: 用户选「直连」或「CF Worker 加速」,
+  //   默认 cf_worker (api.themoviedb.org 在国内几乎不可达, 直连基本 0% 命中).
+  //   CF Worker 模式依赖用户配的 CF Worker 域名 (跟 Bangumi 一样, 配了就用,
+  //   不依赖 CF Worker 加速总开关).
+  //
+  // 存储 key: direct / cf_worker
+  static const String _tmdbDataSourceDefault = 'cf_worker';
+
+  static Future<String> getTmdbDataSourceKey() async {
+    if (_tmdbDataSourceCache != null) return _tmdbDataSourceCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_tmdbDataSourceKey) ?? _tmdbDataSourceDefault;
+    _tmdbDataSourceCache = v;
+    return v;
+  }
+
+  static String getTmdbDataSourceKeySync() {
+    return _tmdbDataSourceCache ?? _tmdbDataSourceDefault;
+  }
+
+  static Future<String> getTmdbDataSourceDisplayName() async {
+    final key = await getTmdbDataSourceKey();
+    switch (key) {
+      case 'cf_worker':
+        return 'CF Worker 加速';
+      case 'direct':
+      default:
+        return '直连';
+    }
+  }
+
+  static String getTmdbDataSourceKeyFromDisplayName(String name) {
+    switch (name) {
+      case 'CF Worker 加速':
+        return 'cf_worker';
+      case '直连':
+      default:
+        return 'direct';
+    }
+  }
+
+  static Future<void> saveTmdbDataSource(String key) async {
+    final cleaned = key == 'cf_worker' ? 'cf_worker' : 'direct';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_tmdbDataSourceKey, cleaned);
+    _tmdbDataSourceCache = cleaned;
+  }
+
   /// 同步读 (启动 warmup 后用)
   static String? getCfBestIpSync() {
     return _cfBestIpCache;
@@ -720,6 +776,29 @@ class UserDataService {
     return originalUrl;
   }
 
+  /// v2.0.45: 构造 TMDB 数据请求 URL
+  ///
+  /// 跟 [buildBangumiDataUrl] 风格一致:
+  ///   - 用户选 "直连" → 原 URL (api.themoviedb.org 直连, 国内基本不可达)
+  ///   - 用户选 "CF Worker 加速" → 走用户配的 CF Worker 域名 (只要配了就用,
+  ///     不依赖 CF Worker 加速总开关 — 跟 Bangumi 行为对齐)
+  ///   - CF Worker 域名没配 → 退化成直连 (跟 Bangumi 行为对齐)
+  ///
+  /// 这是同步版, 跟 buildBangumiDataUrl / buildProxiedUrl 保持一致.
+  /// 异步版 TmdbService._wrap 走 getTmdbDataSourceKey + buildProxiedUrlAsync.
+  static String buildTmdbDataUrl(String originalUrl) {
+    final key = getTmdbDataSourceKeySync();
+    if (key == 'direct') return originalUrl;
+
+    // cf_worker: 走 CF Worker 域名 (跟 Bangumi 一样, 配了就用)
+    final worker = _cfWorkerDomainCache;
+    if (worker != null && worker.isNotEmpty) {
+      return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
+    }
+    // 域名没配, 退化成直连
+    return originalUrl;
+  }
+
   /// 构造 Bangumi 图片请求 URL
   ///
   /// 优先级（和 Bangumi 数据源对齐）：
@@ -801,5 +880,11 @@ class UserDataService {
   static Future<void> warmupCfWorkerConfig() async {
     await _ensureCfWorkerCache();
     await warmupBangumiConfig();
+    // v2.0.45: 缓存 TMDB 数据源 (跟 Bangumi 一样, build 阶段同步读)
+    if (_tmdbDataSourceCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _tmdbDataSourceCache =
+          prefs.getString(_tmdbDataSourceKey) ?? _tmdbDataSourceDefault;
+    }
   }
 }

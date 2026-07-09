@@ -483,11 +483,24 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
   /// 注意: 手动优选只有 1 个 IP, _connectRace 单 IP 拨号失败时
   /// fallback 到原 host. 不像 3 IP 并发那么稳, 但 v2.0.32 域名模式下
   /// 域名自带多 IP 调度, 也算补偿了.
+  ///
+  /// v2.0.45: 把原 host 加进候选. 解决"单 IP 优选 0KB"问题 —
+  ///   用户配的 IP 跟目标 host 不在同一个 CF zone / IP 已下线 →
+  ///   TLS 握手失败 → libmpv 0KB 死. 把原 host 加进 race, 至少能让
+  ///   系统 DNS 解析的 IP 跟 TLS SNI 走同一个 CF edge (CF anycast
+  ///   按 SNI 路由证书). 缺点: 多一次 DNS lookup, 多个并发 socket.
+  ///   实测 162.159.x.x 这种通用 CF IP, 拨上后 TLS 还是 0KB,
+  ///   必须 fallback 到 host 让系统 DNS 选一个跟 SNI 匹配的 edge.
   static List<String> getTopNIpsForVideoProxy(String host, int n) {
     // 手动优选优先 (v2.0.32+: 可能是 IP, 也可能是已 resolve 的域名)
     final manual = _resolvedManualIp;
     if (manual != null && manual.isNotEmpty) {
-      return [manual];
+      // v2.0.45: 同时返回手动 IP + 原 host. 原 host 在 _connectRace 里走
+      // Socket.connect 时会触发系统 DNS 解析, 拿到跟 SNI 匹配的 CF edge IP.
+      // 手动 IP 排第一 (低延迟优先), 原 host 排第二 (TLS 兜底).
+      // v2.0.32+ 域名模式下, _resolvedManualIp 已经是域名解析后的 IP,
+      //   同样存在"IP 跟 host zone 不匹配"的问题, 一并兜底.
+      return [manual, host];
     }
     // fallback: 测速优选
     return getTopNIpsForDomain(host, n);

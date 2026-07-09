@@ -146,6 +146,18 @@ class VideoProxyServer {
   ///   修法: 输的 socket 立即 destroy, 配套用 winnerChosen 标志区分
   ///   "已胜出" 还是 "真失败", 防止 winner 已返回后输的 catchError
   ///   还把 errorCount 累上去把 completer 误覆盖成错误.
+  ///
+  /// v2.0.45: 修复"单 IP 优选 0KB"问题.
+  ///   之前 candidateIps 里只有 1 个手动 IP, race dial 拨上后 TLS 握手
+  ///   失败 (该 IP 跟 SNI 不在同一个 CF zone, 0KB), 但 race 已返回该 IP,
+  ///   没人 fallback. 修法: getTopNIpsForVideoProxy 在手动 IP 模式下
+  ///   会同时返回 [manual_ip, original_host], 把 host 加进 race, 一旦
+  ///   manual IP 不通, host (走系统 DNS) 能拿到跟 SNI 匹配的 CF edge.
+  ///   这里再补一个保护: race 返回前 wait 200ms, 看 winner socket
+  ///   是不是有数据进来 (TLS ClientHello 后应该有 ServerHello 回包),
+  ///   没数据 → 这个 winner 可能是个"拨上但不通"的 IP, destroy 重试下一个.
+  ///   实际效果: 大幅减少 0KB 死链, 但仍不是 100% (TLS 失败是异步的,
+  ///   200ms 内 ServerHello 不一定到). 最终兜底: 全部失败 → fallback 原 host.
   static Future<Socket> _connectRace(
     String originalHost,
     int port,

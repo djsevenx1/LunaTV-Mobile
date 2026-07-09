@@ -252,6 +252,11 @@ class TmdbService {
   TmdbService._();
 
   static const String _baseUrl = 'https://api.themoviedb.org/3';
+  // v2.0.45: 改成中文资源. TMDB 支持 language 参数指定返回字段的语言,
+  //   zh-CN 返回简体中文标题/简介; region=CN 让海报/人气榜单偏向国内观众.
+  //   之前没传 → 英文标题 + 英文 overview, 跟"海报墙"墙不匹配.
+  static const String _language = 'zh-CN';
+  static const String _region = 'CN';
   static const Duration _cacheTtl = Duration(days: 1);
   // TMDB free API: 40 req/10s, 1 天缓存命中率应该 90%+, 压力很小
 
@@ -264,7 +269,8 @@ class TmdbService {
   ///
   /// 这个调用频次很低 (App 启动一次, 或 key 变了一次), 1 天缓存
   static Future<TmdbConfiguration> getConfiguration() async {
-    final json = await _httpGet('/configuration', const {}, useCache: true);
+    final json = await _httpGet('/configuration',
+        {'language': _language}, useCache: true);
     return TmdbConfiguration.fromJson(json as Map<String, dynamic>);
   }
 
@@ -280,7 +286,11 @@ class TmdbService {
         'getPopular only supports movie/tv');
     final json = await _httpGet(
       '/${type.value}/popular',
-      {'page': '$page'},
+      {
+        'page': '$page',
+        'language': _language,
+        'region': _region,
+      },
       useCache: true,
     );
     return TmdbPagedResult.fromJson(
@@ -295,7 +305,10 @@ class TmdbService {
   }) async {
     final json = await _httpGet(
       '/trending/${type.value}/${window.value}',
-      {'page': '$page'},
+      {
+        'page': '$page',
+        'language': _language,
+      },
       useCache: true,
     );
     return TmdbPagedResult.fromJson(
@@ -312,6 +325,7 @@ class TmdbService {
     final params = <String, String>{
       'query': query,
       'page': '$page',
+      'language': _language,
     };
     if (year != null) {
       params[type == TmdbMediaType.movie ? 'year' : 'first_air_date_year'] =
@@ -334,7 +348,7 @@ class TmdbService {
     try {
       final json = await _httpGet(
         '/${type.value}/$id',
-        const {},
+        {'language': _language},
         useCache: true,
       );
       // 详情返回不带 media_type, 根据 type 字段缺失推断
@@ -359,14 +373,23 @@ class TmdbService {
 
   // ===== 内部 =====
 
-  /// v2.0.36: 拼 URL + 走 CORSAPI 包装
+  /// v2.0.45: 拼 URL + 走 CORSAPI 包装
   ///
   ///   tmdb_url -> https://{cf-worker}/?url={encoded(tmdb_url)}
-  ///   如果 CF Worker 不可用 (没配域名 / 开关关) -> 返回原 URL (直连)
+  ///   如果 CF Worker 不可用 (没配域名 / 用户选直连) -> 返回原 URL (直连)
+  ///
+  /// 跟 [UserDataService.buildProxiedUrlAsync] 不同: 多了"用户选的 TMDB 数据源"
+  /// 判断 — 用户选"直连"时强制走原 URL, 选"CF Worker 加速"时走 buildProxiedUrl.
+  /// 跟豆瓣/Bangumi 的数据源选择器对齐 (v2.0.45).
   static Future<String> _wrap(String tmdbUrl) async {
-    // 走 buildProxiedUrlAsync, 内部会判断 CF Worker 是否可用
-    // 不可用时 buildProxiedUrl 直接返回原 URL (跟现有 buildProxiedUrl 行为一致)
-    return await UserDataService.buildProxiedUrlAsync(tmdbUrl);
+    // v2.0.45: 走 UserDataService.buildTmdbDataUrl (同步)
+    //   - 用户选"直连" → 原 URL
+    //   - 用户选"CF Worker 加速" + 域名配了 → 走 worker
+    //   - 用户选"CF Worker 加速" + 域名没配 → 退化成直连
+    // buildTmdbDataUrl 内部读 _tmdbDataSourceCache (warmupCfWorkerConfig 时初始化),
+    //   这里 await 一次保证 cache 已就绪.
+    await UserDataService.getTmdbDataSourceKey();
+    return UserDataService.buildTmdbDataUrl(tmdbUrl);
   }
 
   /// v2.0.36: HTTP GET + 1 天本地缓存
