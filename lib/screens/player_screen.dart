@@ -22,6 +22,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/tmdb_detail_header.dart';
+import 'package:luna_tv/widgets/tmdb_poster_wall.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

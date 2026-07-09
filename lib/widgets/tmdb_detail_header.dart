@@ -27,6 +27,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/widgets/tmdb_poster_wall.dart';
 import 'package:provider/provider.dart';
 
 /// v2.0.38: TMDB 详情大头部
