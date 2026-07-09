@@ -1,0 +1,153 @@
+# LunaTV Mobile
+
+> 一款基于 Flutter 的 LunaTV Android 客户端。
+
+主打开箱即用的多源聚合搜索 + 高质量本地播放,搭配 **[CORSAPI](https://github.com/djsevenx1/CORSAPI)** 配套 CF Worker 解决 Bangumi / 源加速 / m3u8 重写。
+
+## 平台支持
+
+| 平台 | 状态 | 说明 |
+|---|---|---|
+| Android | ✅ | 主目标, GitHub Actions 自动出 APK 发 Release |
+| iOS | ❌ | 不再维护 (v2.0.8 起撤回 iOS 编译) |
+
+## 主要功能
+
+### 内容浏览
+- **首页轮播 + 多分区** — 继续播放、热门电影、热门剧集、新番放送(Bangumi)、热门综艺、热门短剧
+- **分类筛选** — 电视剧 / 电影 / 综艺 / 动漫 多种筛选维度(类型、地区、年代、平台、排序)
+- **短剧专区** — 独立分类聚合,横滑切换
+- **搜索** — 全局搜索,跨源聚合结果
+- **排行榜** — 豆瓣热门内容
+
+### 播放能力
+- 基于 [media_kit](https://github.com/media-kit/media-kit) 的高性能播放器
+- 自动判断视频横竖屏比例(`AspectRatio` + `SystemChrome`)
+- 全屏沉浸式 + 系统 UI 自动隐藏/恢复
+- 多源搜索播放(短剧点击直接进 PlayerScreen 走多源聚合)
+- **播放源去重** — 后端同 `source` key 注册多个 API 时,前端按 key 去重保留集数最多的(避免 3 个「爱奇艺」)
+- 断点续看 + 播放进度同步
+- DLNA 投屏支持(`dlna_dart`)
+- 选集 / 选源 / 详情面板一体化
+- **返回时主动 stop player** — 从播放视图返回详情视图时 player.stop() + 退全屏,后台不再继续播
+- **广告自动跳过** — 双层检测:① `streams.duration` 突然变小 > 60s 识别 m3u8 切流(v1.0.77) ② `streams.position` 突然倒退 > 5s 且回到 0 附近识别内嵌广告(v2.0.33,兜底部分源);自动 seek 回主片位置,用户无感
+- **播控「下一集」按钮**(v2.0.33) — 中途可手动切下一集,跟自动播下一集走同一逻辑,最后一集按钮自动隐藏
+- **手动优选 IP**(v2.0.31) — 设置页填一个 CF anycast IP,App 内所有 HTTP 请求强制走这个 IP,跳过 DNS 解析,解决 DNS 污染 / 某 CF POP 慢的问题
+- **优选 IP 支持优选域名**(v2.0.32) — 填 `cf.877774.xyz` / `cloudflare.182682.xyz` 等智能调度域名,App 启动 + 每 5 分钟自动 DNS 解析拿当前最优 IP,无需手动更新
+- **视频流走优选 IP**(v2.0.34) — 修 v2.0.30 砍掉优选测速后 `VideoProxyServer.tryStart` 永远返 null 的 bug + 把 v2.0.30 砍掉的「视频代理加速」UI 开关加回到 CF 加速页;开关打开后 libmpv 走本地代理 → 手动优选 IP → CF edge,配合「优选 IP / 域名」字段一开就生效
+
+### 账号与同步
+- 自定义后端 API 地址(支持官方 / 自部署)
+- 收藏 / 播放历史 / 搜索记录 本地持久化 + 服务器同步
+- 多用户隔离(UserDataService)
+- 主题切换(深色 / 浅色)
+
+### 高级特性
+
+#### CF Worker 加速 + Bangumi 代理
+
+搭配配套的 [CORSAPI](https://github.com/djsevenx1/CORSAPI) Cloudflare Worker,菜单填入 worker 域名即可启用:
+
+| 模块 | 走法 |
+|---|---|
+| **CF Worker 加速(源测速 / m3u8)** | 走 worker `/m3u8?url=` 端点,自动重写 .ts 链接 |
+| **Bangumi 数据(api.bgm.tv/calendar + /v0/subjects/...)** | worker → ciao-cors → 直连, 多级 fallback |
+| **Bangumi 图片(lain.bgm.tv)** | worker, 自动补 `App/Version (URL)` UA + `Referer: https://bgm.tv/` |
+
+> **关键**:CF Worker 域名配了,即使「CF Worker 加速」开关关着,Bangumi 代理也会生效(只认域名不认开关,符合预期)。
+
+#### 图片源
+- **豆瓣图片源**:`official_cdn` / `cdn_tencent` / `cdn_aliyun` / `direct`
+- **Bangumi 数据源**:`直连` / `Cors Proxy By Zwei` / `CF Worker 加速`
+- **Bangumi 图片源**:`直连` / `Cors Proxy By Zwei` / `CF Worker 加速`
+- Bangumi 强制补 `LunaTV-Mobile/1.0 (https://github.com/...)` UA(api.bgm.tv v0 API 严格校验)
+- 豆瓣小图自动升级为 `l_ratio_poster` 大图(首页轮播等大图场景)
+- 图片内存缓存按 `devicePixelRatio × 显示尺寸` 精确解码,避免模糊与内存浪费
+
+#### 软件更新
+- 检查更新从 GitHub API `assets` 抽 `.apk` 直链
+- 「下载并安装 vX.X.X」按钮直接走系统下载管理器,不用跳浏览器
+- 拿不到 apk 链接才 fallback 到 release 详情页
+
+## 快速开始
+
+### 环境要求
+
+- Flutter SDK `3.22.2` 或更高
+- Java JDK 17
+- Android SDK Platform 36 + Build-Tools 34.0.0
+- Android NDK `29.0.14033849`(可选,媒体插件需要)
+
+### 拉取代码
+
+```bash
+git clone https://github.com/djsevenx1/LunaTV-Mobile.git
+cd LunaTV-Mobile
+flutter pub get
+```
+
+### 本地构建
+
+```bash
+flutter build apk --release
+```
+
+### 输出产物
+
+- Android APK: `build/app/outputs/flutter-apk/app-release.apk`
+
+## CI/CD
+
+GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
+
+工作流文件: [.github/workflows/build.yml](.github/workflows/build.yml)
+
+- **Android**: ubuntu-latest, APK 上传到 GitHub Release
+- Flutter: `3.22.2` / JDK: Temurin 17 / Android SDK: 36 / Build-Tools: 34.0.0 / NDK: 29.0.14033849
+- v2.0.8 起撤回 iOS 编译 (用户决定), CI 改单 job 模式, 时间减半
+
+## 配置说明
+
+应用首次启动会引导用户配置:
+- **API 地址** — 你的 LunaTV 服务地址(官方或自部署)
+- **豆瓣图片源** — `official_cdn` / `cdn_tencent` / `cdn_aliyun` / `direct`
+- **主题** — 浅色 / 深色 / 跟随系统
+
+可在「设置」页面随时修改。
+
+### 进阶配置(用户菜单)
+
+| 配置 | 说明 |
+|---|---|
+| 本地搜索 | 启用本地缓存加速搜索 |
+| 豆瓣数据源 | `直连` / 4 种 CDN 切换 |
+| 豆瓣图片源 | `直连` / 4 种 CDN 切换 |
+| Bangumi 数据源 | `直连` / `Cors Proxy By Zwei` / `CF Worker 加速` |
+| Bangumi 图片源 | `直连` / `Cors Proxy By Zwei` / `CF Worker 加速` |
+| M3U8 代理 URL | 留空则不用,填了则 m3u8 走 worker |
+| **CF Worker 加速** | 开关,只控制源测速 / m3u8 |
+| **CF Worker 加速源域名** | worker 域名 (如 `xxx.workers.dev`),配了之后 Bangumi 代理也自动启用(不受上面开关影响) |
+| **优选 IP (可选)** | 填 IPv4 (静态) 或优选域名 (如 `cf.877774.xyz`,启动 + 5min 自动重新解析);留空 = 用系统 DNS |
+
+## 贡献
+
+欢迎 PR / Issue。请确保:
+1. 通过 `flutter analyze`
+2. 通过 `flutter test`(如添加了测试)
+3. Commit 消息清晰,符合项目历史风格(参考 `feat: ...` / `fix: ...` / `refactor: ...`)
+
+## 许可证
+
+本项目使用 AGPL-3.0 许可证,与上游 LunaTV 保持一致。
+
+## 致谢
+
+- [LunaTV](https://github.com/MoonTechLab/LunaTV) — 原始 Web 项目
+- [Selene](https://github.com/MoonTechLab/Selene) — Flutter 移动端/桌面端源起项目
+- [CORSAPI](https://github.com/djsevenx1/CORSAPI) — 配套 CF Worker 后端,处理 Bangumi 代理 / m3u8 重写
+- [media_kit](https://github.com/media-kit/media-kit) — Flutter 媒体播放
+- [dlna_dart](https://github.com/dlna-dart/dlna_dart) — DLNA 投屏
+- [cached_network_image](https://github.com/Baseflow/flutter_cached_network_image) — 网络图片缓存
+- [Bangumi](https://bangumi.tv/) — 番剧数据源
+- [豆瓣](https://movie.douban.com/) — 影评与海报源
+- [ciao-cors](https://ciao-cors.is-an.org/) — 公共 CORS 代理,Bangumi 数据 fallback

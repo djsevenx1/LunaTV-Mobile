@@ -1,0 +1,112 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, 'trae/**' ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# v2.0.8: 撤回 iOS 编译, 只编 Android
+# 之前 v2.0.1 ~ v2.0.7 试过 windows / macos / ios, 全失败或太折腾:
+#   - v2.0.0 windows + macos: 编译报错
+#   - v2.0.1 iOS: BSD sed 失败 (已修)
+#   - v2.0.2 / v2.0.3 iOS: artifact 上传失败
+#   - v2.0.4 iOS xcodebuild archive: 失败
+#   - v2.0.7 iOS zip 打包: 成功但用户装法跟 ad-hoc IPA 一样
+# 用户决定: iOS 撤回, 只编 Android
+jobs:
+  # 单一 job 模式, build-android 直接做 release
+  build:
+    name: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;34.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "ndk;29.0.14033849"
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.2'
+
+      - run: flutter pub get
+
+      # tag 触发时, 把 git tag 同步到 pubspec.yaml (build.gradle.kts 解析 pubspec 拿 version)
+      # 注意: 不能用 `sed -i "..."` (macOS BSD sed 要求 -i 后带 backup 扩展名, e.g. `sed -i ''`,
+      # 否则报 "undefined label" 错; GNU sed 不要求 -i 参数, 所以 Android runner OK,
+      # macOS / Windows runner 必挂). 改用 perl -i -pe (perl 跨平台, Linux/macOS 都预装).
+      - name: Sync version from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          if [[ "$TAG" == *"+"* ]]; then
+            VERSION=${TAG%+*}
+            BUILD=${TAG#*+}
+            perl -i -pe "s/^version: .*/version: $VERSION+$BUILD/" pubspec.yaml
+          else
+            perl -i -pe "s/^version: .*/version: $TAG+1/" pubspec.yaml
+          fi
+          head -5 pubspec.yaml
+
+      # release 签名: keystore 已提交在 android/app/release.keystore
+      # build.gradle.kts 直接读取, 每次 CI 构建签名一致
+      # 镜像 502 时 Flutter 会自动重试 1 次, 但 Aliyun/Huawei/Tencent 同步挂的时候
+      # 重试不够, 这里用 nick-fields/retry 兜底网络瞬时故障
+      - name: Build Android APK (release)
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 3
+          retry_on: error
+          retry_wait_seconds: 30
+          timeout_minutes: 60
+          command: flutter build apk --release
+
+      - name: Create GitHub Release (APK)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: build/app/outputs/flutter-apk/app-release.apk
+
+      # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
+      # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
+      - name: Set release body
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const tagName = context.ref.replace('refs/tags/', '');
+            const fs = require('fs');
+            // 各版本 changelog 已移到 .github/changelogs.json, 避免内联超长字符串超过 OS 参数长度限制 (Argument list too long)
+            const changelogs = JSON.parse(fs.readFileSync(process.env.GITHUB_WORKSPACE + '/.github/changelogs.json', 'utf8'));
+            const body = changelogs[tagName] || `Release ${tagName}`;
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tagName,
+            });
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              body: body,
+            });
+            core.info(`set body for ${tagName} (id=${release.data.id}, ${body.length} chars)`);

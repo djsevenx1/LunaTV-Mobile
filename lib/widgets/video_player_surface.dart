@@ -1,0 +1,4 @@
+enum VideoPlayerSurface {
+  mobile,
+  desktop,
+}

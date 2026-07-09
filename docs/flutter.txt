@@ -1,0 +1,1 @@
+This project uses Flutter. Config can be adjusted in pubspec.yaml; docs placeholders are provided.
