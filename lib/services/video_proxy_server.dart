@@ -348,23 +348,40 @@ class VideoProxyServer {
     } catch (_) {}
     _connCount++;
     final state = _ProxyState();
-    StreamSubscription<List<int>>? clientSub;
+    // v2.0.56: clientSub 是 final (整个连接生命周期只 listen 1 次, 不取消
+    //   不重建). 用 backendReady flag 切换 listener 行为, 避开 Socket
+    //   single-subscription 不能 listen 第二次的坑.
+    late final StreamSubscription<List<int>> clientSub;
     StreamSubscription<List<int>>? backendSub;
     int clientToBackendBytes = 0;
     int backendToClientBytes = 0;
     DateTime? firstClientDataAt;
     DateTime? firstBackendDataAt;
+    Socket? backend;
+    bool backendReady = false;
 
     void closeAll() {
       // ignore: avoid_print
       VideoProxyLog.append(
           '[VideoProxy] [$connId] 连接关闭, client→backend $clientToBackendBytes bytes, backend→client $backendToClientBytes bytes, 存活 ${DateTime.now().difference(connT0).inMilliseconds}ms');
-      clientSub?.cancel();
-      backendSub?.cancel();
-      client.destroy();
+      try {
+        clientSub.cancel();
+      } catch (_) {}
+      try {
+        backendSub?.cancel();
+      } catch (_) {}
+      try {
+        client.destroy();
+      } catch (_) {}
       _connCount--;
     }
 
+    // v2.0.56: clientSub 是 client socket 的 SINGLE listener, 整个连接
+    //   生命周期不变. 不取消不重建. 行为按 backendReady 切换:
+    //   - Phase 1 (backendReady = false): 调 _onClientData 解析 header,
+    //     期间累积的数据在 onBackendReady 里推到 backend.
+    //   - Phase 2 (backendReady = true): 直接 backend.add(data) 转发.
+    //   这是唯一不撞 Socket single-subscription 的写法.
     clientSub = client.listen(
       (data) {
         if (firstClientDataAt == null) {
@@ -373,154 +390,91 @@ class VideoProxyServer {
           VideoProxyLog.append(
               '[VideoProxy] [$connId] libmpv 首次发数据 ${data.length}B, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 头几个字节: ${_hexPreview(data, 16)}');
         }
+        // Phase 2: backend 已就绪, 直接转发
+        if (backendReady && backend != null) {
+          clientToBackendBytes += data.length;
+          try {
+            backend!.add(data);
+          } catch (_) {
+            closeAll();
+          }
+          return;
+        }
+        // Phase 1: 解析 header, 触发 race
         try {
-          _onClientData(client, state, data, (backend) {
-            // 接到 backend 后, 把 client ↔ backend 串起来
-            //
-            // v2.0.21 修: 旧代码在 onBackendReady 回调里直接
-            //   clientSub = client.listen(...)
-            // 没 cancel 老的 clientSub, 老的 listener 还在订阅 client.
-            // 后续每包数据都会触发两个 listener (老的进 _onClientData
-            // 当 no-op 浪费 CPU, 新的进 backend.add 正常转发), 跑长 HLS
-            // (几百段) 累计浪费明显.
-            //
-            // 修法: 先 cancel 老的 clientSub, 再建新的.
-            // v2.0.54 修 (用户日志 Bad state: Stream has already been
-            //   listened to): 整个桥接逻辑必须推到 microtask 跑, 不然
-            //   Socket.connect 内部那个临时订阅没释放, backend.listen()
-            //   就抛错. client.listen() 第二次同理 — 老的 clientSub
-            //   cancel() 也是异步的, 必须等 microtask 切走再 listen.
-            //
-            //   桥接失败时, microtask 里发 502 + closeAll, 跟旧 catch
-            //   block 行为一致, libmpv 看到的是一样.
+          _onClientData(client, state, data, (b) {
+            // onBackendReady callback — race 拨上后被调
             // ignore: avoid_print
             VideoProxyLog.append(
-                '[VideoProxy] [$connId] backend ready → ${backend.remoteAddress.address}:${backend.remotePort}, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 准备桥接 (Future async + await cancel)');
-            // v2.0.54 修 (用户日志 #2): microtask 没用, 因为 cancel()
-            //   本身异步, microtask 闭包是非 async, cancel 返回的 Future
-            //   被丢掉, 立刻 listen 仍然撞 "Stream has already been
-            //   listened to" (用户日志 stack trace 印证: 抛错在 line 467,
-            //   Future.microtask.<anonymous closure>).
-            //   修法: 用 Future(() async) 包整个桥接, await cancel 真等
-            //   释放完再 listen.
-            Future(() async {
+                '[VideoProxy] [$connId] backend ready → ${b.remoteAddress.address}:${b.remotePort}, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 准备建桥 (单 listener 切换模式)');
+            backend = b;
+            // 推 race 期间累积的 client 数据到 backend
+            if (state.pendingBodyBytes.isNotEmpty) {
+              // ignore: avoid_print
+              VideoProxyLog.append(
+                  '[VideoProxy] [$connId] 推 pendingBodyBytes ${state.pendingBodyBytes.length}B → backend');
               try {
-                final oldClientSub = clientSub;
-                clientSub = null;
-                // 真等老订阅释放 — 不然 Socket 的 _subscription 引用
-                // 没清, 后面 client.listen() 第二次会抛错
-                if (oldClientSub != null) {
-                  // ignore: avoid_print
-                  VideoProxyLog.append(
-                      '[VideoProxy] [$connId] await 老 clientSub.cancel()...');
-                  await oldClientSub.cancel();
-                  // ignore: avoid_print
-                  VideoProxyLog.append(
-                      '[VideoProxy] [$connId] 老 clientSub.cancel() 完成, 准备建桥');
-                }
-
-                backendSub = backend.listen(
-                  (d) {
-                    if (firstBackendDataAt == null) {
-                      firstBackendDataAt = DateTime.now();
-                      // ignore: avoid_print
-                      VideoProxyLog.append(
-                          '[VideoProxy] [$connId] upstream 首次回数据 ${d.length}B, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 头几个字节: ${_hexPreview(d, 16)}');
-                    }
-                    backendToClientBytes += d.length;
-                    try {
-                      client.add(d);
-                    } catch (_) {
-                      closeAll();
-                    }
-                  },
-                  onError: (e) {
+                backend!.add(state.pendingBodyBytes);
+              } catch (_) {}
+              clientToBackendBytes += state.pendingBodyBytes.length;
+              state.pendingBodyBytes = [];
+            }
+            // v2.0.22 修: 推 race 期间累积的 client 数据 (含 libmpv
+            //   收到 200 后立刻发的 TLS ClientHello, 推不上 TLS 永远
+            //   握不完 → 没速度)
+            if (state.buffer.isNotEmpty) {
+              // ignore: avoid_print
+              VideoProxyLog.append(
+                  '[VideoProxy] [$connId] 推 race 期间累积 buffer ${state.buffer.length}B → backend');
+              try {
+                backend!.add(state.buffer);
+              } catch (_) {}
+              clientToBackendBytes += state.buffer.length;
+              state.buffer = [];
+            }
+            // backend 上 listen — 新 socket, 没 _subscription 冲突
+            try {
+              backendSub = backend!.listen(
+                (d) {
+                  if (firstBackendDataAt == null) {
+                    firstBackendDataAt = DateTime.now();
                     // ignore: avoid_print
                     VideoProxyLog.append(
-                        '[VideoProxy] [$connId] upstream socket error: $e');
+                        '[VideoProxy] [$connId] upstream 首次回数据 ${d.length}B, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 头几个字节: ${_hexPreview(d, 16)}');
+                  }
+                  backendToClientBytes += d.length;
+                  try {
+                    client.add(d);
+                  } catch (_) {
                     closeAll();
-                  },
-                  onDone: () {
-                    // ignore: avoid_print
-                    VideoProxyLog.append(
-                        '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes');
-                    closeAll();
-                  },
-                  cancelOnError: true,
-                );
-
-                // 把 client 已收到的剩余 body 推给 backend
-                if (state.pendingBodyBytes.isNotEmpty) {
+                  }
+                },
+                onError: (e) {
                   // ignore: avoid_print
                   VideoProxyLog.append(
-                      '[VideoProxy] [$connId] 推 pendingBodyBytes ${state.pendingBodyBytes.length}B → backend');
-                  backend.add(state.pendingBodyBytes);
-                  clientToBackendBytes += state.pendingBodyBytes.length;
-                  state.pendingBodyBytes = [];
-                }
-                // v2.0.22 修: 推 await _connectRace 期间累积的 client 数据
-                //   旧代码只推 pendingBodyBytes (header 解析那一刻的 body),
-                //   但 _handleConnect / _handleHttp 是 async fire-and-forget,
-                //   await _connectRace 期间 client 发来的数据全堆 state.buffer
-                //   没人转. onBackendReady 时只推 pendingBodyBytes 不推 buffer,
-                //   这段数据就永久丢了.
-                //
-                //   对 CONNECT 隧道: libmpv 收到 "200 Connection Established"
-                //     后立刻发 TLS ClientHello, 这个数据堆 buffer 被 onBackendReady
-                //     漏推 → TLS 握手永远完不成 → 没数据流 → "没速度"
-                //   对 HTTP 直连: 请求 body 后续 chunk 丢失 → 请求不完整 → 502
-                if (state.buffer.isNotEmpty) {
+                      '[VideoProxy] [$connId] upstream socket error: $e');
+                  closeAll();
+                },
+                onDone: () {
                   // ignore: avoid_print
                   VideoProxyLog.append(
-                      '[VideoProxy] [$connId] 推 race 期间累积 buffer ${state.buffer.length}B → backend');
-                  backend.add(state.buffer);
-                  clientToBackendBytes += state.buffer.length;
-                  state.buffer = [];
-                }
-                // client → backend: 后续流过来的都推给 backend
-                clientSub = client.listen(
-                  (d) {
-                    clientToBackendBytes += d.length;
-                    try {
-                      backend.add(d);
-                    } catch (_) {
-                      closeAll();
-                    }
-                  },
-                  onError: (e) {
-                    // ignore: avoid_print
-                    VideoProxyLog.append(
-                        '[VideoProxy] [$connId] libmpv socket error: $e');
-                    closeAll();
-                  },
-                  onDone: () {
-                    // ignore: avoid_print
-                    VideoProxyLog.append(
-                        '[VideoProxy] [$connId] libmpv socket done, 总 $clientToBackendBytes bytes → backend');
-                    try {
-                      backend.close();
-                    } catch (_) {}
-                  },
-                  cancelOnError: true,
-                );
-                // ignore: avoid_print
-                VideoProxyLog.append(
-                    '[VideoProxy] [$connId] 桥接已建立 (c→b / b→c 都活了)');
-              } catch (e, st) {
-                // ignore: avoid_print
-                VideoProxyLog.append(
-                    '[VideoProxy] [$connId] 桥接建立失败: $e\n$st');
-                // 跟旧 _handleConnect catch 行为一致: 发 502 + 关连接
-                try {
-                  final body = '502 Bad Gateway\r\n';
-                  final resp =
-                      'HTTP/1.1 502 Bad Gateway\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body';
-                  client.add(resp.codeUnits);
-                  await client.flush();
-                } catch (_) {}
-                closeAll();
-              }
-            });
+                      '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes');
+                  closeAll();
+                },
+                cancelOnError: true,
+              );
+            } catch (e, st) {
+              // ignore: avoid_print
+              VideoProxyLog.append(
+                  '[VideoProxy] [$connId] backend.listen 失败: $e\n$st');
+              closeAll();
+              return;
+            }
+            // 切到 Phase 2 — 后续 onData 直接转发
+            backendReady = true;
+            // ignore: avoid_print
+            VideoProxyLog.append(
+                '[VideoProxy] [$connId] 桥接已建立 (c→b / b→c 都活了, 单 listener 切换模式)');
           }, closeAll);
         } catch (e) {
           // ignore: avoid_print
