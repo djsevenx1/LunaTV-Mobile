@@ -32,6 +32,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/video_proxy_log.dart';
 
 /// v2.0.36: TMDB API 异常
 class TmdbException implements Exception {
@@ -395,6 +396,10 @@ class TmdbService {
   /// v2.0.36: HTTP GET + 1 天本地缓存
   ///
   /// useCache: false 用于调试 (强制走网络)
+  /// v2.0.55: 加 [TMDB] 日记, 玩家屏幕"日记"按钮能看 — 用户反馈
+  ///   "tmdb 获取有问题, 只有历史里面能获取海报", 没法判断是 cache miss
+  ///   / 网络 / CF Worker / TMDB rate limit. 详细日记能看清:
+  ///   缓存命中? 走的 CF Worker 还是直连? HTTP 状态码? body? 异常?
   static Future<dynamic> _httpGet(
     String path,
     Map<String, String> params, {
@@ -402,6 +407,8 @@ class TmdbService {
   }) async {
     final key = await UserDataService.getTmdbApiKey();
     if (key == null || key.isEmpty) {
+      // ignore: avoid_print
+      VideoProxyLog.append('[TMDB] 未配置 API Key — 去设置填');
       throw const TmdbException('未配置 TMDB API Key', code: 'NO_KEY');
     }
 
@@ -411,12 +418,17 @@ class TmdbService {
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&');
     final cacheKey = useCache ? _cacheKey(path, qs) : null;
+    // ignore: avoid_print
+    VideoProxyLog.append('[TMDB] 准备 GET $path (cacheKey=$cacheKey)');
 
     // 1) 内存缓存
     if (cacheKey != null) {
       final mem = _memoryCache[cacheKey];
       if (mem != null &&
           DateTime.now().difference(mem.savedAt) < _cacheTtl) {
+        final ageMin = DateTime.now().difference(mem.savedAt).inMinutes;
+        // ignore: avoid_print
+        VideoProxyLog.append('[TMDB] 命中内存缓存 (${ageMin} 分钟前存)');
         return mem.data;
       }
     }
@@ -424,17 +436,22 @@ class TmdbService {
     if (cacheKey != null) {
       final cached = await _readFromPrefs(cacheKey);
       if (cached != null) {
+        // ignore: avoid_print
+        VideoProxyLog.append('[TMDB] 命中 SharedPreferences 缓存');
         // 写回内存缓存
         _memoryCache[cacheKey] = _CacheEntry(DateTime.now(), cached);
         return cached;
       }
     }
+    // ignore: avoid_print
+    VideoProxyLog.append('[TMDB] 缓存 miss, 准备真发请求');
 
     // 3) 真发请求
     final tmdbUrl = '$_baseUrl$path?$qs';
     final url = await _wrap(tmdbUrl);
     // ignore: avoid_print
-    print('[TMDB] GET $path -> ${url.substring(0, url.length > 80 ? 80 : url.length)}...');
+    VideoProxyLog.append(
+        '[TMDB] 实际 URL: ${url.substring(0, url.length > 160 ? 160 : url.length)}${url.length > 160 ? "..." : ""}');
 
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 10);
@@ -443,29 +460,55 @@ class TmdbService {
       req.headers.set('Accept', 'application/json');
       req.headers.set('User-Agent', 'LunaTV-Mobile/2.0.36');
       final resp = await req.close();
-      final body = await resp.transform(utf8.decoder).join();
+      final status = resp.statusCode;
+      final ct = resp.headers.value('content-type') ?? '?';
+      // ignore: avoid_print
+      VideoProxyLog.append('[TMDB] 响应 HTTP $status content-type=$ct');
 
-      if (resp.statusCode == 401) {
+      if (status == 401) {
+        // ignore: avoid_print
+        VideoProxyLog.append(
+            '[TMDB] 401 鉴权失败 — API Key 无效或被 TMDB 撤销, 去 themoviedb.org/settings/api 重新复制');
         throw const TmdbException(
           'TMDB API Key 无效 (401). 去 themoviedb.org/settings/api 重新复制.',
           code: 'INVALID_KEY',
           httpStatus: 401,
         );
       }
-      if (resp.statusCode == 404) {
+      if (status == 404) {
+        // ignore: avoid_print
+        VideoProxyLog.append('[TMDB] 404 资源不存在');
         throw const TmdbException(
           'TMDB 资源不存在 (404)',
           code: 'HTTP_404',
           httpStatus: 404,
         );
       }
-      if (resp.statusCode >= 400) {
-        throw TmdbException(
-          'TMDB HTTP ${resp.statusCode}: ${body.substring(0, body.length > 200 ? 200 : body.length)}',
-          code: 'HTTP_${resp.statusCode}',
-          httpStatus: resp.statusCode,
+      if (status == 429) {
+        // ignore: avoid_print
+        VideoProxyLog.append(
+            '[TMDB] 429 rate limit — TMDB 限流 40 req/10s, 等会儿再试或减并发');
+        throw const TmdbException(
+          'TMDB 限流 (429). 40 req/10s, 等 10 秒再试.',
+          code: 'RATE_LIMIT',
+          httpStatus: 429,
         );
       }
+
+      final body = await resp.transform(utf8.decoder).join();
+      if (status >= 400) {
+        // ignore: avoid_print
+        VideoProxyLog.append(
+            '[TMDB] HTTP $status 错误, body 前 200: ${body.substring(0, body.length > 200 ? 200 : body.length)}');
+        throw TmdbException(
+          'TMDB HTTP $status: ${body.substring(0, body.length > 200 ? 200 : body.length)}',
+          code: 'HTTP_$status',
+          httpStatus: status,
+        );
+      }
+      // ignore: avoid_print
+      VideoProxyLog.append(
+          '[TMDB] 响应 body ${body.length} bytes, 前 120: ${body.length > 120 ? body.substring(0, 120) + "..." : body}');
 
       final dynamic json = jsonDecode(body);
 
@@ -473,15 +516,34 @@ class TmdbService {
       if (cacheKey != null) {
         _memoryCache[cacheKey] = _CacheEntry(DateTime.now(), json);
         await _saveToPrefs(cacheKey, json);
+        // ignore: avoid_print
+        VideoProxyLog.append('[TMDB] 写入缓存 (1 天 TTL)');
       }
 
       return json;
     } on SocketException catch (e) {
+      // ignore: avoid_print
+      VideoProxyLog.append(
+          '[TMDB] Socket 异常: ${e.message} (host=${e.address?.host} port=${e.port}) — 检查网络 / CF Worker 域名');
       throw TmdbException('Socket: ${e.message}', code: 'NETWORK');
     } on HttpException catch (e) {
+      // ignore: avoid_print
+      VideoProxyLog.append('[TMDB] HTTP 异常: ${e.message}');
       throw TmdbException('HTTP: ${e.message}', code: 'NETWORK');
+    } on HandshakeException catch (e) {
+      // ignore: avoid_print
+      VideoProxyLog.append(
+          '[TMDB] TLS 握手异常: ${e.message} — 大概率 CF Worker 代理证书错 / 优选 IP 拨上但 SNI cert 不对 / 网络 TLS 被劫持');
+      throw TmdbException('TLS: ${e.message}', code: 'TLS');
     } on TimeoutException {
+      // ignore: avoid_print
+      VideoProxyLog.append(
+          '[TMDB] 请求超时 (10s) — 网络慢 / CF Worker 慢 / TMDB rate limit / 优选 IP 不通');
       throw const TmdbException('请求超时 (10s)', code: 'NETWORK');
+    } catch (e) {
+      // ignore: avoid_print
+      VideoProxyLog.append('[TMDB] 其它异常: $e');
+      rethrow;
     } finally {
       client.close(force: true);
     }

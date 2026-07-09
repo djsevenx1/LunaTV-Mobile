@@ -395,15 +395,29 @@ class VideoProxyServer {
             //   block 行为一致, libmpv 看到的是一样.
             // ignore: avoid_print
             VideoProxyLog.append(
-                '[VideoProxy] [$connId] backend ready → ${backend.remoteAddress.address}:${backend.remotePort}, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 准备桥接 (推迟到 microtask)');
-            // 把整个桥接建立推到 microtask — 让 Socket.connect 内部订阅
-            // 和 clientSub 老的 cancel 都有机会先释放, 不然后面的
-            // listen 全抛 "Stream has already been listened to"
-            Future.microtask(() {
+                '[VideoProxy] [$connId] backend ready → ${backend.remoteAddress.address}:${backend.remotePort}, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 准备桥接 (Future async + await cancel)');
+            // v2.0.54 修 (用户日志 #2): microtask 没用, 因为 cancel()
+            //   本身异步, microtask 闭包是非 async, cancel 返回的 Future
+            //   被丢掉, 立刻 listen 仍然撞 "Stream has already been
+            //   listened to" (用户日志 stack trace 印证: 抛错在 line 467,
+            //   Future.microtask.<anonymous closure>).
+            //   修法: 用 Future(() async) 包整个桥接, await cancel 真等
+            //   释放完再 listen.
+            Future(() async {
               try {
                 final oldClientSub = clientSub;
                 clientSub = null;
-                oldClientSub?.cancel();
+                // 真等老订阅释放 — 不然 Socket 的 _subscription 引用
+                // 没清, 后面 client.listen() 第二次会抛错
+                if (oldClientSub != null) {
+                  // ignore: avoid_print
+                  VideoProxyLog.append(
+                      '[VideoProxy] [$connId] await 老 clientSub.cancel()...');
+                  await oldClientSub.cancel();
+                  // ignore: avoid_print
+                  VideoProxyLog.append(
+                      '[VideoProxy] [$connId] 老 clientSub.cancel() 完成, 准备建桥');
+                }
 
                 backendSub = backend.listen(
                   (d) {
@@ -502,10 +516,9 @@ class VideoProxyServer {
                   final resp =
                       'HTTP/1.1 502 Bad Gateway\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body';
                   client.add(resp.codeUnits);
-                  client.flush().then((_) => closeAll()).catchError((_) => closeAll());
-                } catch (_) {
-                  closeAll();
-                }
+                  await client.flush();
+                } catch (_) {}
+                closeAll();
               }
             });
           }, closeAll);
