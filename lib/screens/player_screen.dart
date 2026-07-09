@@ -12,6 +12,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/video_proxy_log.dart';
 import 'package:luna_tv/services/m3u8_service.dart';
 import 'package:luna_tv/services/video_proxy_server.dart';
 import 'package:luna_tv/services/mpv_ffi.dart';
@@ -2247,6 +2248,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                 color: isDark ? Colors.white : Colors.black),
             onPressed: () => Navigator.pop(context),
           ),
+          // v2.0.42: 左上角"日记"按钮 — 不开 logcat 也能给开发者看 [VideoProxy] 输出
+          // 背景: 用户反馈"我不会 logcat", v2.0.42 把 11 处 print 双写到 VideoProxyLog
+          // 静态 buffer, 玩家点这个按钮 → 弹底部 sheet 显示 buffer 内容, 带复制/清空
+          IconButton(
+            tooltip: '视频代理日志',
+            icon: Icon(Icons.bug_report_outlined,
+                color: isDark ? Colors.white70 : Colors.black54),
+            onPressed: _showVideoProxyLogSheet,
+          ),
           Expanded(
             child: Text(
               '选源播放',
@@ -2259,6 +2269,119 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
         ],
       ),
+    );
+  }
+
+  // v2.0.42: 弹底部 sheet 显示 VideoProxyLog buffer, 带复制 + 清空按钮
+  //
+  // 用户操作: 进播放页 → libmpv 拉视频 (哪怕 0 B/s 也行, 也会走代理) → 顶部 🐞 按钮
+  //   → 看 [VideoProxy] 真实拨号 / 失败原因 → 长按复制或点"复制全部"粘出来给开发者
+  Future<void> _showVideoProxyLogSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          minChildSize: 0.3,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (_, scrollController) {
+            return StatefulBuilder(
+              builder: (ctx, setSheetState) {
+                final lines = VideoProxyLog.lines;
+                return Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1A1A1A),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                  ),
+                  child: Column(
+                    children: [
+                      // 顶栏
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.bug_report, color: Colors.greenAccent, size: 20),
+                            const SizedBox(width: 8),
+                            const Text('视频代理日志',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600)),
+                            const Spacer(),
+                            Text('${lines.length}/200',
+                                style: const TextStyle(
+                                    color: Colors.white38, fontSize: 12)),
+                            IconButton(
+                              tooltip: '复制全部',
+                              icon: const Icon(Icons.copy, color: Colors.white70),
+                              onPressed: () async {
+                                if (lines.isEmpty) return;
+                                await Clipboard.setData(
+                                    ClipboardData(text: VideoProxyLog.linesAsString()));
+                                if (!ctx.mounted) return;
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('已复制到剪贴板'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              tooltip: '清空',
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.white70),
+                              onPressed: () {
+                                VideoProxyLog.clear();
+                                setSheetState(() {});
+                              },
+                            ),
+                            IconButton(
+                              tooltip: '关闭',
+                              icon: const Icon(Icons.close, color: Colors.white70),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1, color: Colors.white12),
+                      // 日志内容
+                      Expanded(
+                        child: lines.isEmpty
+                            ? const Center(
+                                child: Text('暂无日志\n播放后 libmpv 拉视频会触发 [VideoProxy] 输出',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.white38, fontSize: 13)),
+                              )
+                            : ListView.builder(
+                                controller: scrollController,
+                                padding: const EdgeInsets.all(12),
+                                itemCount: lines.length,
+                                itemBuilder: (_, i) => Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 2),
+                                  child: SelectableText(
+                                    lines[i],
+                                    style: const TextStyle(
+                                      color: Colors.greenAccent,
+                                      fontSize: 11,
+                                      fontFamily: 'monospace',
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 

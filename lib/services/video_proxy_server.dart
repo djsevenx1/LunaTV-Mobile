@@ -31,6 +31,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:luna_tv/services/video_proxy_log.dart';
+
 import 'package:luna_tv/services/cf_optimizer.dart' show CfOptimizerHttpOverrides;
 import 'package:luna_tv/services/user_data_service.dart';
 
@@ -80,7 +82,7 @@ class VideoProxyServer {
       final s = VideoProxyServer._();
       await s._bind();
       // ignore: avoid_print
-      print('[VideoProxy] tryStart 成功: bind 127.0.0.1:${s._port}');
+      VideoProxyLog.append('[VideoProxy] tryStart 成功: bind 127.0.0.1:${s._port}');
       return s;
     } catch (e, st) {
       // v2.0.39: 不再静默吞, 打印详细原因. _bind() 失败一般是:
@@ -89,7 +91,7 @@ class VideoProxyServer {
       //   - 已有 _videoProxy 没释放 (跨页面残留, _ensureVideoProxy 守门)
       //   - 异常 OS 资源耗尽
       // ignore: avoid_print
-      print('[VideoProxy] tryStart bind 失败: $e\n$st');
+      VideoProxyLog.append('[VideoProxy] tryStart bind 失败: $e\n$st');
       return null;
     }
   }
@@ -158,10 +160,10 @@ class VideoProxyServer {
     // v2.0.40 诊断日志
     if (candidateIps.isNotEmpty) {
       // ignore: avoid_print
-      print('[VideoProxy] _connectRace: 拨 $originalHost:$port 候选 ${candidateIps.length} IP: $candidateIps');
+      VideoProxyLog.append('[VideoProxy] _connectRace: 拨 $originalHost:$port 候选 ${candidateIps.length} IP: $candidateIps');
     } else {
       // ignore: avoid_print
-      print('[VideoProxy] _connectRace: 拨 $originalHost:$port (无候选 IP, 走原 host)');
+      VideoProxyLog.append('[VideoProxy] _connectRace: 拨 $originalHost:$port (无候选 IP, 走原 host)');
     }
     final completer = Completer<Socket>();
     int errorCount = 0;
@@ -205,19 +207,19 @@ class VideoProxyServer {
       } catch (_) {}
       // v2.0.40 诊断日志: 哪个 IP 真拨上
       // ignore: avoid_print
-      print('[VideoProxy] _connectRace: 拨号成功 → ${socket.remoteAddress.address}:${socket.remotePort}');
+      VideoProxyLog.append('[VideoProxy] _connectRace: 拨号成功 → ${socket.remoteAddress.address}:${socket.remotePort}');
       return socket;
     } catch (e) {
       // 全部 IP 都失败, fallback 到原 host
       // ignore: avoid_print
-      print('[VideoProxy] _connectRace: 全部 ${candidateIps.length} IP 失败 ($e), fallback 原 host $originalHost:$port');
+      VideoProxyLog.append('[VideoProxy] _connectRace: 全部 ${candidateIps.length} IP 失败 ($e), fallback 原 host $originalHost:$port');
       final socket = await Socket.connect(originalHost, port,
           timeout: const Duration(seconds: 5));
       try {
         socket.setOption(SocketOption.tcpNoDelay, true);
       } catch (_) {}
       // ignore: avoid_print
-      print('[VideoProxy] _connectRace: fallback 原 host 拨号成功 → ${socket.remoteAddress.address}:${socket.remotePort}');
+      VideoProxyLog.append('[VideoProxy] _connectRace: fallback 原 host 拨号成功 → ${socket.remoteAddress.address}:${socket.remotePort}');
       return socket;
     }
   }
@@ -227,6 +229,9 @@ class VideoProxyServer {
       client.destroy();
       return;
     }
+    // v2.0.40 诊断日志: 确认 libmpv 真 connect 到本地代理 (而不是绕过去直连)
+    // v2.0.42: 走 VideoProxyLog 双写, 玩家屏幕"日记"按钮能看
+    VideoProxyLog.append('[VideoProxy] 新连接 from libmpv: ${client.remoteAddress.address}:${client.remotePort}');
     // v2.0.25: 设 TCP_NODELAY 避免小包被 Nagle 延迟
     //   TLS ClientHello / ServerHello 是小包, Nagle 算法会延迟发送,
     //   导致 TLS 握手慢/超时 → "没速度"
@@ -378,12 +383,12 @@ class VideoProxyServer {
       if (state.method == 'CONNECT') {
         // v2.0.40 诊断日志
         // ignore: avoid_print
-        print('[VideoProxy] CONNECT ${state.target} (从 libmpv 收到 CONNECT 头, 开始拨号)');
+        VideoProxyLog.append('[VideoProxy] CONNECT ${state.target} (从 libmpv 收到 CONNECT 头, 开始拨号)');
         _handleConnect(client, state, onBackendReady, closeAll);
       } else {
         // v2.0.40 诊断日志
         // ignore: avoid_print
-        print('[VideoProxy] HTTP ${state.method} ${state.target}');
+        VideoProxyLog.append('[VideoProxy] HTTP ${state.method} ${state.target}');
         _handleHttp(client, state, onBackendReady, closeAll);
       }
     }
@@ -415,7 +420,7 @@ class VideoProxyServer {
         _raceWinCount++;
         final ms = DateTime.now().difference(raceStart!).inMilliseconds;
         // ignore: avoid_print
-        print('[VideoProxy] CONNECT $host: race dial won in ${ms}ms (${topIps.length} candidates)');
+        VideoProxyLog.append('[VideoProxy] CONNECT $host: race dial won in ${ms}ms (${topIps.length} candidates)');
       } else {
         _tunnelCount++;
       }
