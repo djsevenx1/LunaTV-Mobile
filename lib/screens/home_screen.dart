@@ -23,6 +23,7 @@ import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/bangumi_service.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/widgets/hero_banner.dart';
 import 'package:luna_tv/screens/movie_screen.dart';
 import 'package:luna_tv/screens/tv_screen.dart';
@@ -353,62 +354,79 @@ class _HomeScreenState extends State<HomeScreen> {
                 _onTopTabChanged('播放历史');
               },
             ),
-            // v2.0.38: 配了 TMDB key → 海报墙, 没配 → 原 HotMoviesSection
-            if (isTmdbPosterWallEnabled())
-              TmdbPosterWall(
-                mediaType: TmdbMediaType.movie,
-                title: '热门电影',
-                subtitle: 'TMDB 热门',
-                icon: Icons.movie_outlined,
-                sectionColor: SectionColor.amber,
-                onMoreTap: () => _onBottomNavChanged(1),
-              )
-            else
-              HotMoviesSection(
-                onMovieTap: (playRecord) {
-                  _navigateToPlayer(
-                    PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+            // v2.0.41: 配 / 清 TMDB key 自动 rebuild — 用 ValueListenableBuilder
+            //   监听 UserDataService.tmdbApiKeyNotifier (saveTmdbApiKey 同步通知).
+            //   v2.0.38 之前用顶级函数 isTmdbPosterWallEnabled() 拿 build 一次快照,
+            //   配 / 清 key 不触发 HomeScreen rebuild, 用户看不到海报墙.
+            //   builder 闭包内用同一把 key 判断, 2 个 section 一起切.
+            ValueListenableBuilder<String?>(
+              valueListenable: UserDataService.tmdbApiKeyNotifier,
+              builder: (context, key, _) {
+                final hasKey = key != null && key.isNotEmpty;
+                if (hasKey) {
+                  // 配了 key → TMDB 横滚海报墙 (热门电影 + 热门剧集)
+                  return Column(
+                    children: [
+                      TmdbPosterWall(
+                        mediaType: TmdbMediaType.movie,
+                        title: '热门电影',
+                        subtitle: 'TMDB 热门',
+                        icon: Icons.movie_outlined,
+                        sectionColor: SectionColor.amber,
+                        onMoreTap: () => _onBottomNavChanged(1),
+                      ),
+                      TmdbPosterWall(
+                        mediaType: TmdbMediaType.tv,
+                        title: '热门剧集',
+                        subtitle: 'TMDB 热门',
+                        icon: Icons.tv_outlined,
+                        sectionColor: SectionColor.blue,
+                        onMoreTap: () => _onBottomNavChanged(2),
+                      ),
+                    ],
                   );
-                },
-                onMoreTap: () => _onBottomNavChanged(1),
-                onGlobalMenuAction: (videoInfo, action) {
-                  if (action == VideoMenuAction.play) {
-                    _navigateToPlayer(
-                      PlayerScreen(videoInfo: videoInfo),
-                    );
-                  } else {
-                    _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                  }
-                },
-              ),
-            // v2.0.38: 配了 TMDB key → 海报墙, 没配 → 原 HotTvSection
-            if (isTmdbPosterWallEnabled())
-              TmdbPosterWall(
-                mediaType: TmdbMediaType.tv,
-                title: '热门剧集',
-                subtitle: 'TMDB 热门',
-                icon: Icons.tv_outlined,
-                sectionColor: SectionColor.blue,
-                onMoreTap: () => _onBottomNavChanged(2),
-              )
-            else
-              HotTvSection(
-                onTvTap: (playRecord) {
-                  _navigateToPlayer(
-                    PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
-                  );
-                },
-                onMoreTap: () => _onBottomNavChanged(2),
-                onGlobalMenuAction: (videoInfo, action) {
-                  if (action == VideoMenuAction.play) {
-                    _navigateToPlayer(
-                      PlayerScreen(videoInfo: videoInfo),
-                    );
-                  } else {
-                    _onGlobalMenuActionFromVideoInfo(videoInfo, action);
-                  }
-                },
-              ),
+                }
+                // 没配 key → 走原 Douban HotMoviesSection / HotTvSection (跟 v2.0.37 一致)
+                return Column(
+                  children: [
+                    HotMoviesSection(
+                      onMovieTap: (playRecord) {
+                        _navigateToPlayer(
+                          PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+                        );
+                      },
+                      onMoreTap: () => _onBottomNavChanged(1),
+                      onGlobalMenuAction: (videoInfo, action) {
+                        if (action == VideoMenuAction.play) {
+                          _navigateToPlayer(
+                            PlayerScreen(videoInfo: videoInfo),
+                          );
+                        } else {
+                          _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                        }
+                      },
+                    ),
+                    HotTvSection(
+                      onTvTap: (playRecord) {
+                        _navigateToPlayer(
+                          PlayerScreen(videoInfo: VideoInfo.fromPlayRecord(playRecord)),
+                        );
+                      },
+                      onMoreTap: () => _onBottomNavChanged(2),
+                      onGlobalMenuAction: (videoInfo, action) {
+                        if (action == VideoMenuAction.play) {
+                          _navigateToPlayer(
+                            PlayerScreen(videoInfo: videoInfo),
+                          );
+                        } else {
+                          _onGlobalMenuActionFromVideoInfo(videoInfo, action);
+                        }
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
             // 新番放送组件
             BangumiSection(
               onBangumiTap: (playRecord) {
