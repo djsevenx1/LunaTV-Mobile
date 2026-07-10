@@ -317,12 +317,8 @@ class CfOptimizer {
       client = HttpClient()
         ..connectionTimeout = timeout
         ..idleTimeout = timeout;
-      // v2.0.74: 用 connectionFactory 强制 host → ip (addHostEntry 不存在).
-      //   TCP 连 [ip], TLS SNI = [host] (跟 _OptimizingHttpClient 同一思路).
-      client.connectionFactory = (Uri url, String? proxyHost, int? proxyPort) {
-        final port = url.port == 0 ? 443 : url.port;
-        return _connectForSpeedTest(ip, port, host);
-      };
+      // v2.0.82: 强制 host → ip 解析 (绕开 DNS, 测到 IP 的真实速度)
+      client.addHostEntry(host, ip);
       final uri = Uri(
         scheme: 'https',
         host: host,
@@ -339,7 +335,7 @@ class CfOptimizer {
           await resp.drain<void>().timeout(const Duration(seconds: 2));
         } catch (_) {}
         sw.stop();
-        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: code);
+        return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: code);
       }
       // 读 body, 第一个 chunk 时间 = TCP+TLS 握手延迟
       int firstByteMs = -1;
@@ -372,45 +368,21 @@ class CfOptimizer {
       );
     } on TimeoutException {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -1);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -1);
     } on SocketException {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: 0);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: 0);
     } on HandshakeException {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -2);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -2);
     } catch (e) {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -3);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -3);
     } finally {
       try {
         client?.close(force: true);
       } catch (_) {}
     }
-  }
-
-  /// v2.0.74: 测速用的 connectionFactory helper — TCP 连 [ip], TLS SNI = [sniHost].
-  /// 返回 ConnectionTask<Socket> 给 HttpClient 用.
-  static Future<ConnectionTask<Socket>> _connectForSpeedTest(
-      String ip, int port, String sniHost) async {
-    final completer = Completer<ConnectionTask<Socket>>();
-    Socket.connect(ip, port, timeout: const Duration(seconds: 10))
-        .then((tcpSocket) {
-      try {
-        tcpSocket.setOption(SocketOption.tcpNoDelay, true);
-      } catch (_) {}
-      SecureSocket.secure(tcpSocket, host: sniHost).then((secureSocket) {
-        completer.complete(_DoneConnectionTask(secureSocket));
-      }).catchError((e) {
-        try {
-          tcpSocket.destroy();
-        } catch (_) {}
-        completer.completeError(e);
-      });
-    }).catchError((e) {
-      completer.completeError(e);
-    });
-    return completer.future;
   }
 
   /// 把选中的 IP 存为优选 (单 IP 形式, 给 [UserDataService.saveCfBestIp])
