@@ -304,6 +304,11 @@ class CfOptimizer {
   ///   - latencyMs: 拿到第一个字节的时间 (ms), 反映 TCP+TLS 握手延迟
   ///   - mbPerSec: 下载完 testMB 的平均速度
   ///   - httpCode: HTTP 状态码, 0/-1/-2/-3 = 连接/超时/TLS/其他错误
+  ///
+  /// v2.0.82: 不用 HttpClient.addHostEntry (dart:io 没这个 API),
+  ///   改成把 URL 的 host 换成 IP, 再用 Host 头设回原域名 (跟
+  ///   _OptimizingHttpClient 里的方案一致 — v2.0.46 起的优选 IP override
+  ///   就是用这个, CF edge 接受 SNI = IP + Host 头 = worker 域名的组合)
   static Future<({String ip, int latencyMs, double mbPerSec, int httpCode})>
       _probeOneWithSpeed({
     required String ip,
@@ -316,18 +321,19 @@ class CfOptimizer {
     try {
       client = HttpClient()
         ..connectionTimeout = timeout
-        ..idleTimeout = timeout;
-      // v2.0.82: 强制 host → ip 解析 (绕开 DNS, 测到 IP 的真实速度)
-      client.addHostEntry(host, ip);
-      final uri = Uri(
+        ..idleTimeout = timeout
+        ..userAgent = 'LunaTV-CfSpeedTest/1.0';
+      // v2.0.82: 强制 host → ip: URL 里 host 写 IP, Host 头写 worker 域名
+      //   这样 SSL SNI 会用 IP (CF edge 接受), 但请求落到正确的 zone (走 Host 头)
+      final ipUri = Uri(
         scheme: 'https',
-        host: host,
+        host: ip,
+        port: 443,
         path: '/speed',
         queryParameters: {'size': '$testMB'},
       );
-      final req = await client.getUrl(uri).timeout(timeout);
+      final req = await client.getUrl(ipUri).timeout(timeout);
       req.headers.set(HttpHeaders.hostHeader, host);
-      req.headers.set(HttpHeaders.userAgentHeader, 'LunaTV-CfSpeedTest/1.0');
       final resp = await req.close();
       final code = resp.statusCode;
       if (code != 200) {
@@ -335,28 +341,37 @@ class CfOptimizer {
           await resp.drain<void>().timeout(const Duration(seconds: 2));
         } catch (_) {}
         sw.stop();
-        return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: code);
+        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: code);
       }
       // 读 body, 第一个 chunk 时间 = TCP+TLS 握手延迟
       int firstByteMs = -1;
       int bytes = 0;
-      final stream = resp.handleError((_) {});
+      int errCode = 200;
       final completer = Completer<void>();
       StreamSubscription<List<int>>? sub;
-      sub = stream.listen(
+      sub = resp.listen(
         (chunk) {
           if (firstByteMs < 0) {
             firstByteMs = sw.elapsedMilliseconds;
           }
           bytes += chunk.length;
         },
-        onDone: () => completer.complete(),
-        onError: (_) => completer.complete(),
+        onDone: () {
+          if (!completer.isCompleted) completer.complete();
+        },
+        onError: (e) {
+          // onError 时用 -3 (其他错误) 标识
+          errCode = -3;
+          if (!completer.isCompleted) completer.complete();
+        },
         cancelOnError: false,
       );
       await completer.future.timeout(timeout);
       await sub?.cancel();
       sw.stop();
+      if (errCode != 200) {
+        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: errCode);
+      }
       final secs = sw.elapsedMilliseconds / 1000.0;
       final mb = bytes / 1024.0 / 1024.0;
       final mbps = secs > 0 ? mb / secs : 0.0;
@@ -368,16 +383,16 @@ class CfOptimizer {
       );
     } on TimeoutException {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -1);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -1);
     } on SocketException {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: 0);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: 0);
     } on HandshakeException {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -2);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -2);
     } catch (e) {
       sw.stop();
-      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -3);
+      return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -3);
     } finally {
       try {
         client?.close(force: true);
