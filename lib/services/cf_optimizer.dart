@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data'; // v2.0.83: Uint8List (SecureSocket chunk 类型)
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -350,9 +351,10 @@ class CfOptimizer {
       final headerBuf = <int>[];
       bool headersDone = false;
       final completer = Completer<void>();
-      StreamSubscription<List<int>>? sub;
+      // v2.0.83: SecureSocket 是 Stream<Uint8List>, 不是 Stream<List<int>>
+      StreamSubscription<Uint8List>? sub;
       sub = secureSocket.listen(
-        (chunk) {
+        (Uint8List chunk) {
           if (!headersDone) {
             for (final b in chunk) {
               headerBuf.add(b);
