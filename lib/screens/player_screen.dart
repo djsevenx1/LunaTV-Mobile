@@ -1911,6 +1911,100 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
   }
 
+  /// v2.0.64: 解析分享页 HTML 提取真实视频 URL.
+  ///
+  /// 上游 CMS API 有时返回 /share/xxx 分享页 (HTML), 里面 JS 变量 url
+  /// 才是真正的 m3u8 流. libmpv 不执行 JS, 直接 open 分享页 → 拿到 HTML
+  /// → "Failed to recognize file format".
+  ///
+  /// 策略:
+  ///   1. URL 看起来已经是视频流 (.m3u8/.mp4/.ts/.flv 后缀) → 直接返回, 不 fetch
+  ///   2. fetch URL (带 5s 超时), 看 Content-Type:
+  ///      - 是 text/html → 在 HTML 里找 m3u8/mp4 链接 (JS 变量 url / iframe / source)
+  ///      - 不是 HTML → 直接返回原 URL (可能是二进制流, 别动)
+  ///   3. 找到链接是相对路径 → 拼成绝对 URL (用 fetch 的最终 URL 作 base)
+  ///   4. 找不到 → 返回原 URL, 让 libmpv 自己处理
+  ///
+  /// 失败 (超时/网络错) 不抛异常, 返回原 URL — 不影响播放, 最多就是
+  /// 分享页解析失败退化成原来的"播不了"行为, 跟修之前一样.
+  Future<String> _resolveSharePageUrl(String originalUrl) async {
+    if (originalUrl.isEmpty) return originalUrl;
+
+    // 1. 已经是视频流后缀 → 不解析
+    final lower = originalUrl.toLowerCase();
+    final videoExts = ['.m3u8', '.mp4', '.ts', '.flv', '.mkv', '.avi', '.mov'];
+    // 去掉 query string 再判断后缀 (index.m3u8?sign=xxx 也要认)
+    final pathPart = lower.split('?').first;
+    if (videoExts.any((ext) => pathPart.endsWith(ext))) {
+      return originalUrl;
+    }
+
+    // 2. fetch 看是不是 HTML
+    try {
+      final resp = await http.get(Uri.parse(originalUrl)).timeout(
+        const Duration(seconds: 5),
+      );
+      final contentType = resp.headers['content-type'] ?? '';
+      if (!contentType.toLowerCase().contains('text/html')) {
+        // 不是 HTML, 原样返回 (可能是二进制视频流)
+        return originalUrl;
+      }
+
+      final html = resp.body;
+
+      // 3. 在 HTML 里找 m3u8/mp4 链接
+      //   常见模式 (dytt-tvs 实测):
+      //     const url = "/20260627/.../index.m3u8?sign=xxx";
+      //     var url = "https://.../video.m3u8";
+      //   优先找带 .m3u8 / .mp4 的字符串
+      final m3u8Regex = RegExp(
+        r'''url\s*=\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']''',
+        caseSensitive: false,
+      );
+      final match = m3u8Regex.firstMatch(html);
+      // base Uri 用来解析相对路径 (用 fetch 的最终 URL, 已跟过 302)
+      final baseUri = resp.request?.url ?? Uri.parse(originalUrl);
+      if (match == null) {
+        // 没找到 JS url 变量, 退而求其次找任何 .m3u8 链接
+        final anyM3u8 = RegExp(
+          r'''["']([^"']+\.(?:m3u8|mp4)[^"']*)["']''',
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (anyM3u8 == null) {
+          return originalUrl; // HTML 里没视频链接, 原样返回
+        }
+        final extracted = anyM3u8.group(1)!;
+        final resolved = _resolveAbsoluteUrl(extracted, baseUri);
+        VideoProxyLog.append(
+            '[VideoProxy] 分享页解析: HTML 里找到视频链接 $resolved');
+        return resolved;
+      }
+      final extracted = match.group(1)!;
+      final resolved = _resolveAbsoluteUrl(extracted, baseUri);
+      VideoProxyLog.append(
+          '[VideoProxy] 分享页解析: $originalUrl → $resolved (从 HTML JS 变量提取)');
+      return resolved;
+    } catch (e) {
+      // 超时/网络错, 不影响播放, 原样返回
+      VideoProxyLog.append('[VideoProxy] 分享页解析失败 ($e), 用原 URL');
+      return originalUrl;
+    }
+  }
+
+  /// 把相对 URL 拼成绝对 URL.
+  /// [relative] 可能是绝对 URL (http://...) 也可能是相对路径 (/path/...).
+  /// [baseUrl] 是 fetch 的最终 URL (跟过 302 后的), 用来解析相对路径.
+  String _resolveAbsoluteUrl(String relative, Uri baseUrl) {
+    if (relative.startsWith('http://') || relative.startsWith('https://')) {
+      return relative;
+    }
+    if (relative.startsWith('//')) {
+      return '${baseUrl.scheme}:$relative';
+    }
+    // 相对路径 — 用 Uri.resolve 拼接 (会正确处理 /path 和 path 两种情况)
+    return baseUrl.resolve(relative).toString();
+  }
+
   /// 播放指定集数
   Future<void> _playEpisode(int index) async {
     final source = _selectedSource;
@@ -1931,7 +2025,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     //     libmpv 走本地代理 → 竞速拨号优选 IP → CF edge, 不经过 worker
     //   - 代理没起 (条件不满足) → 直连原 URL, 用户反馈直连正常
     //   - 测速 (_testSourceSpeed) 继续走 buildProxiedUrl, 不受影响
-    final url = originalUrl;
+    // v2.0.64: 解析分享页 HTML 提取真实视频 URL.
+    //   上游 CMS API 有时返回 /share/xxx 分享页 (HTML), 里面 JS 变量 url 才是
+    //   真正的 m3u8 流. libmpv 不执行 JS, 直接 open 分享页 → 拿到 HTML →
+    //   "Failed to recognize file format". 修法: 检测是 HTML 就提取 m3u8.
+    //   只对明显不是视频流 (非 .m3u8/.mp4/.ts/.flv 后缀) 的 URL 做 fetch,
+    //   避免对正常视频流多一次 HTTP 请求.
+    final url = await _resolveSharePageUrl(originalUrl);
 
     // 切集时先把自动切下一集标志重置, 让新一集播完时能再次触发
     _autoPlayedThisEpisode = false;
