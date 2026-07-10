@@ -454,9 +454,17 @@ class VideoProxyServer {
     bool backendReady = false;
 
     void closeAll() {
+      final aliveMs = DateTime.now().difference(connT0).inMilliseconds;
+      // v2.0.58: 标记可疑短响应 — backend 回了数据但很少 (<2KB) 且连接活过
+      //   500ms, 通常是 502/错误页/截断的段. 这是 "优选 IP 4s 时长" bug 的
+      //   烟雾枪: m3u8 段拉不全 → libmpv 只拿到一小段 → 时长显示 4s.
+      final short = backendReady &&
+          backendToClientBytes > 0 &&
+          backendToClientBytes < 2048 &&
+          aliveMs > 500;
       // ignore: avoid_print
       VideoProxyLog.append(
-          '[VideoProxy] [$connId] 连接关闭, client→backend $clientToBackendBytes bytes, backend→client $backendToClientBytes bytes, 存活 ${DateTime.now().difference(connT0).inMilliseconds}ms');
+          '[VideoProxy] [$connId] 连接关闭 ${state.method ?? "?"} ${state.host ?? "?"}, client→backend $clientToBackendBytes bytes, backend→client $backendToClientBytes bytes, 存活 ${aliveMs}ms${short ? " ⚠️可疑短响应" : ""}');
       try {
         clientSub.cancel();
       } catch (_) {}
@@ -531,9 +539,16 @@ class VideoProxyServer {
                 (d) {
                   if (firstBackendDataAt == null) {
                     firstBackendDataAt = DateTime.now();
+                    // v2.0.58: HTTP (非 CONNECT) 路径能解析响应状态码 —
+                    //   502/403/404 等会让 libmpv 拿到错误页, 表现为 "4s 时长".
+                    //   CONNECT 是 TLS 隧道, 数据加密无法解析, 只看字节数.
+                    String? statusHint;
+                    if (state.method != null && state.method != 'CONNECT') {
+                      statusHint = _parseHttpStatus(d);
+                    }
                     // ignore: avoid_print
                     VideoProxyLog.append(
-                        '[VideoProxy] [$connId] upstream 首次回数据 ${d.length}B, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 头几个字节: ${_hexPreview(d, 16)}');
+                        '[VideoProxy] [$connId] upstream 首次回数据 ${d.length}B, T+${DateTime.now().difference(connT0).inMilliseconds}ms${statusHint != null ? ", HTTP $statusHint" : ""}, 头几个字节: ${_hexPreview(d, 16)}');
                   }
                   backendToClientBytes += d.length;
                   try {
@@ -607,6 +622,27 @@ class VideoProxyServer {
     }
     if (data.length > n) sb.write('...');
     return sb.toString();
+  }
+
+  /// v2.0.58: 从 backend 首包解析 HTTP 响应状态行 (e.g. "HTTP/1.1 200 OK" → "200 OK").
+  /// 用于诊断 "优选 IP 4s 时长" — 502/403/404 错误页会让 libmpv 拿到非视频内容.
+  /// 返回 null = 不是 HTTP 响应 / 解析失败 (CONNECT 隧道加密数据也会返 null).
+  static String? _parseHttpStatus(List<int> data) {
+    if (data.length < 12) return null; // "HTTP/1.1 200" 至少 12 字节
+    try {
+      // 只取前 64 字节找 \r\n, 避免大包转字符串浪费
+      final end = data.length < 64 ? data.length : 64;
+      final head = String.fromCharCodes(data.sublist(0, end));
+      if (!head.startsWith('HTTP/')) return null;
+      final nl = head.indexOf('\r\n');
+      final firstLine = nl >= 0 ? head.substring(0, nl) : head;
+      // "HTTP/1.1 200 OK" → 取 "200 OK"
+      final sp1 = firstLine.indexOf(' ');
+      if (sp1 < 0) return null;
+      return firstLine.substring(sp1 + 1).trim();
+    } catch (_) {
+      return null;
+    }
   }
 
   void _onClientData(
@@ -685,6 +721,8 @@ class VideoProxyServer {
     final port = colon >= 0
         ? (int.tryParse(target.substring(colon + 1)) ?? 443)
         : 443;
+    // v2.0.58: 记 host 给 closeAll 日志
+    state.host = host;
 
     // v2.0.19: 借鉴 edgetunnel 预加载竞速拨号, 同时拨 Top3 优选 IP
     // v2.0.34: 改用 getTopNIpsForVideoProxy, 手动优选 IP 优先 (单 IP)
@@ -751,19 +789,24 @@ class VideoProxyServer {
 
     final host = uri.host;
     final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
+    // v2.0.58: 记 host 给 closeAll 日志
+    state.host = host;
+    // v2.0.58: 提取 path 后缀, 日志里区分 m3u8 / .ts / 其他 (4s bug 定位用)
+    final reqPath = uri.path.isEmpty ? '/' : uri.path;
 
     // v2.0.19: 借鉴 edgetunnel 预加载竞速拨号
     // v2.0.34: 改用 getTopNIpsForVideoProxy, 手动优选 IP 优先 (单 IP)
     // v2.0.46: 手动 IP 模式触发一次 host DNS 解析 (跟 _onClientConnection 一致)
     // v2.0.54 日志: HTTP 代理路径
+    // v2.0.58: 加 reqPath 区分请求类型
     // ignore: avoid_print
     VideoProxyLog.append(
-        '[VideoProxy] HTTP ${state.method} $host:$port, 候选 IP 计算中...');
+        '[VideoProxy] HTTP ${state.method} $host:$port $reqPath, 候选 IP 计算中...');
     CfOptimizerHttpOverrides.maybeResolveHostEagerly(host);
     final topIps = CfOptimizerHttpOverrides.getTopNIpsForVideoProxy(host, 3);
     // ignore: avoid_print
     VideoProxyLog.append(
-        '[VideoProxy] HTTP ${state.method} $host:$port, 候选 ${topIps.length} IP: $topIps');
+        '[VideoProxy] HTTP ${state.method} $host:$port $reqPath, 候选 ${topIps.length} IP: $topIps');
 
     // v2.0.19: 修 bug — request line + Host header 都用原 host, 不要用 IP
     // IP 只用来做 TCP 路由, 服务端通过 Host header 找 vhost
@@ -772,9 +815,9 @@ class VideoProxyServer {
     //   'GET http://video.cdn.com/path HTTP/1.1' (absolute-form)
     //   这是代理格式, 源服务器不认 → 返回 400 → 没数据 → "没速度"
     //   正确格式: 'GET /path?query HTTP/1.1' (origin-form) + Host header
-    final requestPath = uri.path.isEmpty ? '/' : uri.path;
+    // v2.0.58: 复用上面的 reqPath, 不再重复声明
     final requestLine =
-        '${state.method} $requestPath${uri.query.isEmpty ? '' : '?${uri.query}'} HTTP/1.1';
+        '${state.method} $reqPath${uri.query.isEmpty ? '' : '?${uri.query}'} HTTP/1.1';
 
     final headerLines = <String>[];
     var hostHeaderSet = false;
@@ -843,6 +886,8 @@ class VideoProxyServer {
 class _ProxyState {
   String? method;
   String? target;
+  // v2.0.58: 解析出的 host (closeAll 日志用, 看是 m3u8 还是 .ts 段)
+  String? host;
   int headerEnd = 0;
   final Map<String, String> headers = {};
   List<int> buffer = [];

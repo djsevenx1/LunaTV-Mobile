@@ -302,6 +302,21 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!mounted) return;
       final wasDur = _lastDurationForAdDetect;
       _currentDuration = dur;
+      // v2.0.58: 记录时长变化到代理日记, 分析 "优选 IP 时视频只有 4s/6s" bug.
+      //   这是定位该 bug 最直接的信号 — 时长从 43m (2580s) 突然变成 4s/6s
+      //   说明 libmpv 拿到的流被截断 / 拿到错误内容 (代理 502 错误页被当成视频,
+      //   或 m3u8 只剩一个短段). 关掉优选 IP 时长正常 = 代理链路有问题.
+      //   日志策略: 只在时长非零且 (首次 / 跟上次差 >1s / 异常短 <30s) 时记录,
+      //   避免每帧刷屏.
+      if (dur > Duration.zero) {
+        final durSec = dur.inSeconds;
+        final wasSec = wasDur.inSeconds;
+        final isShort = durSec < 30;
+        final changed = (wasSec - durSec).abs() > 1;
+        if (wasSec == 0 || isShort || changed) {
+          VideoProxyLog.append('[VideoProxy] 时长变化: ${_formatDuration(wasDur)} → ${_formatDuration(dur)} ($durSec s) ${isShort ? "⚠️异常短" : ""}');
+        }
+      }
       // v1.0.77: 广告流自动跳过
       // 检测 streams.duration 突然变小 (从主片 45min 跳到广告 30s),
       // 差值 > 60s 且是变小 → 立刻 seek 回 _lastKnownPosition, 跳过
@@ -341,6 +356,16 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 暂停时保持控制栏显示
         _showControls();
       }
+    });
+    // v2.0.58: 缓冲状态转换日志, 分析 "优选 IP 4s 卡顿" — 卡顿时会反复
+    //   buffering true/false, 跟时长变化日志配合能看出是哪一帧挂的.
+    _player.streams.buffering.listen((b) {
+      if (!mounted) return;
+      VideoProxyLog.append('[VideoProxy] 缓冲: ${b ? "开始(卡)" : "结束(流畅)"} 时长=${_formatDuration(_currentDuration)} 位置=${_formatDuration(_currentPosition)}');
+    });
+    // v2.0.58: 播放错误日志 (mpv 报错时立刻记到日记, 用户能看到真因)
+    _player.streams.error.listen((e) {
+      VideoProxyLog.append('[VideoProxy] ⚠️libmpv 错误: $e');
     });
     // 加载跳过片头片尾配置
     _loadSkipConfig();
@@ -1176,6 +1201,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     return '$mm:$ss';
   }
 
+  /// v2.0.58: 截短 URL 用于日志输出 (避免 worker 长 query 撑爆 200 行 buffer).
+  /// 保留 scheme+host+path, query 只保留前 60 字符并标 …
+  String _shortenUrl(String url) {
+    if (url.length <= 120) return url;
+    final qIdx = url.indexOf('?');
+    if (qIdx < 0) return url.substring(0, 120) + '…';
+    final base = url.substring(0, qIdx);
+    final query = url.substring(qIdx, qIdx + 61);
+    return '$base$query…';
+  }
+
   /// 构造并保存当前播放记录
   Future<void> _saveCurrentProgress({bool force = false}) async {
     final source = _selectedSource;
@@ -1767,15 +1803,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     final enabled = await UserDataService.getVideoProxyEnabled();
     if (!enabled) {
       // v2.0.34+: 诊断日志, 让用户能确认开关状态
-      // ignore: avoid_print
-      print('[VideoProxy] 跳过: 「视频代理加速」开关未开');
+      // v2.0.58: 改用 VideoProxyLog 让「日记」按钮也能看到 (用户不会 logcat)
+      VideoProxyLog.append('[VideoProxy] 跳过: 「视频代理加速」开关未开');
       return;
     }
     if (_videoProxy != null && _videoProxy!.isRunning) {
-      // ignore: avoid_print
-      print('[VideoProxy] 跳过: 已在跑 (port=${_videoProxy!.port})');
+      VideoProxyLog.append('[VideoProxy] 跳过: 已在跑 (port=${_videoProxy!.port})');
       return;
     }
+    // v2.0.58: 记录优选 IP 状态, 帮助分析 "4s 卡顿" 跟 manual IP 的关系
+    final manualIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    VideoProxyLog.append('[VideoProxy] _ensureVideoProxy 开始: manualIp=$manualIp');
     // v2.0.39 修: 加重试. v2.0.34 假设进播放页时 _resolvedManualIp 一定就绪,
     //   但实际有冷启动竞态: 启动走 _resolveAndSchedule fire-and-forget 5s 内 resolve,
     //   用户启动后秒进播放页, _player.open 后 _resolvedManualIp 还没值, tryStart
@@ -1788,45 +1826,39 @@ class _PlayerScreenState extends State<PlayerScreen>
       final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
       if (resolvedIp != null && resolvedIp.isNotEmpty) {
         // 有 IP 但 tryStart 还是 null → bind() 失败, 不要再 retry
-        // ignore: avoid_print
-        print('[VideoProxy] tryStart 第 $attempt 次返 null 但 IP 已有 ($resolvedIp) → bind 失败, 不再 retry');
+        VideoProxyLog.append('[VideoProxy] tryStart 第 $attempt 次返 null 但 IP 已有 ($resolvedIp) → bind 失败, 不再 retry');
         return;
       }
-      // ignore: avoid_print
-      print('[VideoProxy] tryStart 第 $attempt 次返 null — 冷启动 _resolvedManualIp 还没值, 等 1s 重试');
+      VideoProxyLog.append('[VideoProxy] tryStart 第 $attempt 次返 null — 冷启动 _resolvedManualIp 还没值, 等 1s 重试');
       await Future.delayed(const Duration(seconds: 1));
     }
     if (proxy == null) {
-      // ignore: avoid_print
-      print('[VideoProxy] 3 次都失败, 视频代理不起, libmpv 走原 URL');
+      VideoProxyLog.append('[VideoProxy] 3 次都失败, 视频代理不起, libmpv 走原 URL');
       return;
     }
     // v2.0.20: dart:ffi 直调 libmpv 设 http-proxy (绕开 media_kit API 限制)
     try {
       if (!MpvFFI.isAvailable) {
-        // ignore: avoid_print
-        print('[VideoProxy] FFI libmpv 不可用: ${MpvFFI.loadError ?? "unknown"}');
+        VideoProxyLog.append('[VideoProxy] FFI libmpv 不可用: ${MpvFFI.loadError ?? "unknown"}');
         await proxy.stop();
         return;
       }
       final handle = await _player.handle;
       final rc = MpvFFI.setPropertyString(handle, 'http-proxy', proxy.proxyUrl);
       if (rc < 0) {
-        // ignore: avoid_print
-        print('[VideoProxy] mpv_set_property_string 返 $rc, 停代理走原 URL');
+        VideoProxyLog.append('[VideoProxy] mpv_set_property_string 返 $rc, 停代理走原 URL');
         await proxy.stop();
         return;
       }
     } catch (e) {
-      // ignore: avoid_print
-      print('[VideoProxy] 设 http-proxy 异常: $e');
+      VideoProxyLog.append('[VideoProxy] 设 http-proxy 异常: $e');
       await proxy.stop();
       return;
     }
     // v2.0.34+: 成功时打印, 让用户 logcat 一搜就能确认代理起来了
-    // ignore: avoid_print
-    print('[VideoProxy] 启用成功: ${proxy.proxyUrl} '
-        '(libmpv --http-proxy 已设, .ts 段都走本地代理 → 优选 IP)');
+    // v2.0.58: 同步到 VideoProxyLog, 记 manual IP 帮助分析 4s bug
+    VideoProxyLog.append('[VideoProxy] 启用成功: ${proxy.proxyUrl} '
+        'manualIp=$manualIp (libmpv --http-proxy 已设, .ts 段都走本地代理 → 优选 IP)');
     _videoProxy = proxy;
     // v2.0.34: 通知顶部「加速状态」指示器重算 + 启动下载速度采样
     setState(() {
@@ -1984,6 +2016,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   切集时也走这条路径, _ensureVideoProxy 内部 _videoProxy.isRunning 守门不会重起代理.
     // ignore: unawaited_futures
     _ensureVideoProxy();
+    // v2.0.58: 记录实际播放 URL + 代理状态, 分析 "4s/6s 时长" bug 的关键信号.
+    //   原 URL vs playUrl (buildProxiedUrl 之后) 能看出 CF Worker 是否介入;
+    //   代理是否起能看出 .ts 段是否走优选 IP.
+    final proxyOn = _videoProxy?.isRunning == true;
+    VideoProxyLog.append('[VideoProxy] _player.open: 代理=${proxyOn ? "ON port=${_videoProxy!.port}" : "OFF"}, '
+        '原URL=${_shortenUrl(url)}');
+    VideoProxyLog.append('[VideoProxy] _player.open: 播放URL=${_shortenUrl(playUrl)}');
     try {
       await _player.stop();
       await _player.open(Media(playUrl));
