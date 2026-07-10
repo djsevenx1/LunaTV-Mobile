@@ -455,6 +455,9 @@ class VideoProxyServer {
     bool clientClosed = false;
     Socket? backend;
     bool backendReady = false;
+    // v2.0.63: backend 关闭后置 false, 阻止 Phase 2 继续往已关的 backend 写数据
+    //   (写已关的 socket 会 Connection reset by peer)
+    bool backendAlive = false;
 
     void closeAll({bool graceful = false}) {
       clientClosed = true;
@@ -525,7 +528,7 @@ class VideoProxyServer {
               '[VideoProxy] [$connId] libmpv 首次发数据 ${data.length}B, T+${DateTime.now().difference(connT0).inMilliseconds}ms, 头几个字节: ${_hexPreview(data, 16)}');
         }
         // Phase 2: backend 已就绪, 直接转发
-        if (backendReady && backend != null) {
+        if (backendReady && backend != null && backendAlive) {
           clientToBackendBytes += data.length;
           // v2.0.60: 详细记录 Phase 2 转发, 确认 libmpv 的 HTTP GET 请求
           //   是否被转发给 backend. 4s bug 怀疑 GET 请求没到 worker.
@@ -537,6 +540,10 @@ class VideoProxyServer {
           } catch (_) {
             closeAll();
           }
+          return;
+        }
+        // v2.0.63: backend 已关, 丢弃 libmpv 后续数据 (不能往已关的 socket 写)
+        if (backendReady && !backendAlive) {
           return;
         }
         // Phase 1: 解析 header, 触发 race
@@ -599,6 +606,7 @@ class VideoProxyServer {
                   // ignore: avoid_print
                   VideoProxyLog.append(
                       '[VideoProxy] [$connId] upstream socket error: $e');
+                  backendAlive = false;
                   closeAll();
                 },
                 onDone: () {
@@ -614,6 +622,7 @@ class VideoProxyServer {
                   // ignore: avoid_print
                   VideoProxyLog.append(
                       '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes → 只关 backend, 等 libmpv 读完 client');
+                  backendAlive = false;
                   try {
                     backendSub?.cancel();
                   } catch (_) {}
@@ -645,6 +654,7 @@ class VideoProxyServer {
             }
             // 切到 Phase 2 — 后续 onData 直接转发
             backendReady = true;
+            backendAlive = true;
             // ignore: avoid_print
             VideoProxyLog.append(
                 '[VideoProxy] [$connId] 桥接已建立 (c→b / b→c 都活了, 单 listener 切换模式)');
