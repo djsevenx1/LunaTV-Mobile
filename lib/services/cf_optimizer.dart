@@ -299,16 +299,20 @@ class CfOptimizer {
     return results;
   }
 
-  /// 单 IP 测速: HTTP GET worker /speed?size=N, 强制 host → ip
+  /// 单 IP 测速: Socket.connect(ip) + SecureSocket.secure(host=worker 域名)
+  ///   手动写 HTTP/1.1 GET, 读 body 算速度
   /// 返回 (ip, latencyMs, mbPerSec, httpCode)
-  ///   - latencyMs: 拿到第一个字节的时间 (ms), 反映 TCP+TLS 握手延迟
+  ///   - latencyMs: 拿到第一个 body byte 的时间 (ms), 反映 TCP+TLS 握手延迟
   ///   - mbPerSec: 下载完 testMB 的平均速度
   ///   - httpCode: HTTP 状态码, 0/-1/-2/-3 = 连接/超时/TLS/其他错误
   ///
-  /// v2.0.82: 不用 HttpClient.addHostEntry (dart:io 没这个 API),
-  ///   改成把 URL 的 host 换成 IP, 再用 Host 头设回原域名 (跟
-  ///   _OptimizingHttpClient 里的方案一致 — v2.0.46 起的优选 IP override
-  ///   就是用这个, CF edge 接受 SNI = IP + Host 头 = worker 域名的组合)
+  /// v2.0.82b: 改 raw socket 方案. 之前用 HttpClient + URL.host=IP 时,
+  ///   CF edge 在 SNI=IP 阶段直接断连 ("Connection terminated during
+  ///   handshake", 不是证书问题). 改用 SecureSocket.secure(socket,
+  ///   host: workerDomain) 显式把 SNI 设为 worker 域名 + 连接目标 IP.
+  ///   onBadCertificate=true 跳过证书验证 (worker CF edge 返回的是
+  ///   workers.dev 通用证书, 跟 client 期望的 worker 域名不匹配,
+  ///   但握手成功就行, 测速 client 不需要严格验证证书).
   static Future<({String ip, int latencyMs, double mbPerSec, int httpCode})>
       _probeOneWithSpeed({
     required String ip,
@@ -317,51 +321,103 @@ class CfOptimizer {
     required Duration timeout,
   }) async {
     final sw = Stopwatch()..start();
-    HttpClient? client;
+    Socket? rawSocket;
     try {
-      client = HttpClient()
-        ..connectionTimeout = timeout
-        ..idleTimeout = timeout
-        ..userAgent = 'LunaTV-CfSpeedTest/1.0';
-      // v2.0.82: 强制 host → ip: URL 里 host 写 IP, Host 头写 worker 域名
-      //   这样 SSL SNI 会用 IP (CF edge 接受), 但请求落到正确的 zone (走 Host 头)
-      final ipUri = Uri(
-        scheme: 'https',
-        host: ip,
-        port: 443,
-        path: '/speed',
-        queryParameters: {'size': '$testMB'},
+      // 1. TCP 连 IP:443
+      rawSocket = await Socket.connect(ip, 443, timeout: timeout);
+      // 2. TLS 升级, SNI=worker 域名
+      final secureSocket = await SecureSocket.secure(
+        rawSocket,
+        host: host,
+        timeout: timeout,
+        onBadCertificate: (_) => true, // 跳过证书验证
       );
-      final req = await client.getUrl(ipUri).timeout(timeout);
-      req.headers.set(HttpHeaders.hostHeader, host);
-      final resp = await req.close();
-      final code = resp.statusCode;
-      if (code != 200) {
-        try {
-          await resp.drain<void>().timeout(const Duration(seconds: 2));
-        } catch (_) {}
-        sw.stop();
-        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: code);
-      }
-      // 读 body, 第一个 chunk 时间 = TCP+TLS 握手延迟
+      // 3. 写 HTTP/1.1 GET
+      final request = 'GET /speed?size=$testMB HTTP/1.1\r\n'
+          'Host: $host\r\n'
+          'User-Agent: LunaTV-CfSpeedTest/1.0\r\n'
+          'Connection: close\r\n'
+          '\r\n';
+      secureSocket.write(request);
+      await secureSocket.flush();
+
+      // 4. 读 response (status + headers + body), byte 累计
       int firstByteMs = -1;
       int bytes = 0;
-      int errCode = 200;
+      int httpCode = 0;
+      int contentLength = 0;
+      int bodyRead = 0;
+      final headerBuf = <int>[];
+      bool headersDone = false;
       final completer = Completer<void>();
       StreamSubscription<List<int>>? sub;
-      sub = resp.listen(
+      sub = secureSocket.listen(
         (chunk) {
-          if (firstByteMs < 0) {
-            firstByteMs = sw.elapsedMilliseconds;
+          if (!headersDone) {
+            for (final b in chunk) {
+              headerBuf.add(b);
+            }
+            // 找 \r\n\r\n 分隔 headers / body
+            final sep = List<int>.from([13, 10, 13, 10]);
+            int sepIdx = -1;
+            for (int i = 0; i + 4 <= headerBuf.length; i++) {
+              bool match = true;
+              for (int j = 0; j < 4; j++) {
+                if (headerBuf[i + j] != sep[j]) {
+                  match = false;
+                  break;
+                }
+              }
+              if (match) {
+                sepIdx = i;
+                break;
+              }
+            }
+            if (sepIdx >= 0) {
+              final headerBytes = headerBuf.sublist(0, sepIdx);
+              final headerStr = utf8.decode(headerBytes);
+              // 解析 status line: HTTP/1.1 200 OK
+              final firstLineEnd = headerStr.indexOf('\r\n');
+              if (firstLineEnd > 0) {
+                final statusLine = headerStr.substring(0, firstLineEnd);
+                final m = RegExp(r'HTTP/\S+\s+(\d+)').firstMatch(statusLine);
+                if (m != null) httpCode = int.parse(m.group(1)!);
+              }
+              // 解析 Content-Length
+              final clMatch =
+                  RegExp(r'(?i)content-length:\s*(\d+)').firstMatch(headerStr);
+              if (clMatch != null) {
+                contentLength = int.parse(clMatch.group(1)!);
+              }
+              // headersDone 后剩余的 byte 算 body
+              final bodyStart = sepIdx + 4;
+              if (bodyStart < headerBuf.length) {
+                final bodyBytes = headerBuf.sublist(bodyStart);
+                if (firstByteMs < 0) {
+                  firstByteMs = sw.elapsedMilliseconds;
+                }
+                bytes += bodyBytes.length;
+                bodyRead += bodyBytes.length;
+              }
+              headersDone = true;
+            }
+          } else {
+            if (firstByteMs < 0) {
+              firstByteMs = sw.elapsedMilliseconds;
+            }
+            bytes += chunk.length;
+            bodyRead += chunk.length;
           }
-          bytes += chunk.length;
+          // Content-Length 收够就停
+          if (contentLength > 0 && bodyRead >= contentLength) {
+            if (!completer.isCompleted) completer.complete();
+            sub?.cancel();
+          }
         },
         onDone: () {
           if (!completer.isCompleted) completer.complete();
         },
         onError: (e) {
-          // onError 时用 -3 (其他错误) 标识
-          errCode = -3;
           if (!completer.isCompleted) completer.complete();
         },
         cancelOnError: false,
@@ -369,8 +425,17 @@ class CfOptimizer {
       await completer.future.timeout(timeout);
       await sub?.cancel();
       sw.stop();
-      if (errCode != 200) {
-        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: errCode);
+
+      if (httpCode == 0) {
+        // 解析不到 status, 算失败
+        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -3);
+      }
+      if (httpCode != 200) {
+        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: httpCode);
+      }
+      if (bytes == 0) {
+        // 200 但 body 为空, 也算失败
+        return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -3);
       }
       final secs = sw.elapsedMilliseconds / 1000.0;
       final mb = bytes / 1024.0 / 1024.0;
@@ -395,7 +460,7 @@ class CfOptimizer {
       return (ip: ip, latencyMs: -1, mbPerSec: 0.0, httpCode: -3);
     } finally {
       try {
-        client?.close(force: true);
+        rawSocket?.destroy();
       } catch (_) {}
     }
   }
