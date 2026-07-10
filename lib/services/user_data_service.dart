@@ -851,17 +851,18 @@ class UserDataService {
     return originalUrl;
   }
 
-  /// v2.0.9: 判断配置的 worker 域名是不是真正的 CF Worker
+  /// v2.0.72: 判断配置的 worker 域名是不是有效的 CF Worker.
   ///
-  /// 简化规则: 必须以 `.workers.dev` 结尾才算 CF Worker
+  /// v2.0.9 原规则: 必须以 `.workers.dev` 结尾才算 CF Worker.
+  ///   问题: 用户用自定义域名 CNAME 到 worker (e.g. api.xx.fn0.qzz.io),
+  ///   不以 .workers.dev 结尾 → 图片被拦, 走 ciao-cors 公共代理 (慢 + 403).
+  ///   用户反馈"图片那些不写优选 ip 也要走代理".
   ///
-  /// 为什么不用更复杂的判断 (e.g. HTTP HEAD 请求验活):
-  ///   - buildBangumiImageUrl 是同步函数, 不能 await
-  ///   - 每次图片请求都发 HEAD 太慢, 影响图片加载
-  ///   - 简化判断已能覆盖 99% 情况: 用户填错 netlify / 自建域名时
-  ///     自动 fallback, 不会卡在 404
+  /// v2.0.72 新规则: 只要域名配了就认 (用户在 CF 加速页配的就是 worker 域名,
+  ///   不需要额外校验). 如果配错域名导致 404, 用户自己改域名就行, 比
+  ///   强制走 ciao-cors 体验好.
   static bool _isValidWorkerDomain(String domain) {
-    return domain.endsWith('.workers.dev');
+    return domain.isNotEmpty;
   }
 
   // Bangumi 数据源 key 同步初始化（main.dart 启动时调用）
