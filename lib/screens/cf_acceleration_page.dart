@@ -713,14 +713,19 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                   padding: const EdgeInsets.only(bottom: 24),
                   children: [
                     _buildInfoCard(isDark),
-                    _buildSectionHeader('代理总开关', LucideIcons.rocket, isDark),
+                    _buildSectionHeader('代理加速', LucideIcons.rocket, isDark),
+                    // v2.0.76: 两个开关语义重定义
+                    //   上面 "视频代理" — 只控制视频, 关 = 视频直连原源
+                    //   下面 "优选 IP 启用" — 控制所有资源 (视频 / 图片 / TMDB / Bangumi) 是否用优选 IP
+                    //   CF Worker 代理本身不再有总开关, 域名配了就生效
                     _buildToggleTile(
-                      title: 'CF Worker 加速（代理总开关）',
-                      subtitle:
-                          '打开后视频 / 图片 / TMDB 走 Worker; 关闭全部直连原源',
-                      value: _cfWorkerEnabled,
-                      onChanged: _setWorkerEnabled,
-                      icon: LucideIcons.rocket,
+                      title: '视频代理',
+                      subtitle: _videoProxyEnabled
+                          ? '视频走 CF Worker 代理（libmpv → VideoProxyServer）'
+                          : '视频直连原 URL（不走代理）',
+                      value: _videoProxyEnabled,
+                      onChanged: _setVideoProxyEnabled,
+                      icon: LucideIcons.video,
                       isDark: isDark,
                     ),
                     const SizedBox(height: 8),
@@ -757,23 +762,15 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       const SizedBox(height: 8),
                       _buildIpOptimizationWarning(isDark),
                     ],
-                    // v2.0.70: 视频代理加速开关 语义改成「优选 IP 启用开关」
-                    //   - 代理总开关 (CF Worker 加速) 控制是否启代理 → worker
-                    //   - 这个开关只控制视频流是否走优选 IP (图片/TMDB 不受影响)
-                    //   行为:
-                    //     代理总开关关 → 直连 (这个开关无效)
-                    //     代理总开关开 + 这个开关关 → 视频走 worker (系统 DNS)
-                    //     代理总开关开 + 这个开关开 + IP 填了 → 视频走优选 IP + worker
-                    //     代理总开关开 + 这个开关开 + IP 没填 → 视频走 worker (系统 DNS)
                     const SizedBox(height: 8),
                     _buildToggleTile(
-                      title: '优选 IP 启用（视频流）',
-                      subtitle: _videoProxyEnabled
-                          ? '视频流走优选 IP + Worker（图片/TMDB/Bangumi 始终走优选 IP, 不受此开关控制）'
-                          : '视频流走 Worker (系统 DNS); 图片/TMDB/Bangumi 仍走优选 IP',
-                      value: _videoProxyEnabled,
-                      onChanged: _setVideoProxyEnabled,
-                      icon: LucideIcons.video,
+                      title: '优选 IP 启用',
+                      subtitle: _cfWorkerEnabled
+                          ? '所有资源走优选 IP + CF Worker'
+                          : '所有资源走系统 DNS + CF Worker（仍走代理但不用优选 IP）',
+                      value: _cfWorkerEnabled,
+                      onChanged: _setWorkerEnabled,
+                      icon: LucideIcons.zap,
                       isDark: isDark,
                     ),
                   ],

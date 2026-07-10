@@ -21,10 +21,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///     *.workers.dev 原域名走 CF 自己的 CDN, override 容易被忽略
 ///
 /// 触发条件:
-///   - 用户必须先打开 "CF Worker 加速源" 开关 ([UserDataService.getCfWorkerEnabled])
+///   - 用户配了 CF Worker 域名 (没配 = 整个优选没意义, 走系统 DNS)
+///   - 用户打开 "优选 IP 启用" 开关 ([UserDataService.getCfWorkerEnabled],
+///     v2.0.76 后语义是"对所有资源用优选 IP" — 不再是 CF Worker 总开关)
 ///   - 用户可以单独关 "CF 优选测速" 开关 (默认开)
 ///   - 启动时如果 7 天没测过 → 后台跑
 ///   - 用户菜单里可以手动 "立即优选测速"
+///
+/// v2.0.76 起, CF Worker 代理本身没有总开关 — 域名配了就生效, 关掉"优选 IP
+/// 启用" 仍会走 worker 域名, 但 worker 域名按系统 DNS 解析 (不一定是最快的 IP).
 class CfOptimizer {
   // CF 公开 IPv4 段 (https://www.cloudflare.com/ips/)
   // v4: 173.245.48.0/20, 103.21.244.0/22, 103.22.200.0/22,
@@ -646,15 +651,18 @@ class _OptimizingHttpClient implements HttpClient {
     final host = uri.host.toLowerCase();
     if (host != target.toLowerCase()) return null;
 
-    // v2.0.32: 手动优选优先级最高, 不受 featureEnabled 控制
-    // 用 _resolvedManualIp 而不是 _manualPreferredIp, 这样域名已经被解析成 IP
+    // v2.0.76: featureEnabled (新「优选 IP 启用」开关) 决定是否 override
+    //   - 优选 IP 开关关 → 不 override, 走系统 DNS (即使有手动 IP)
+    //   - 优选 IP 开关开 + 手动 IP 已解析 → 用手动 IP (优先级最高)
+    //   - 优选 IP 开关开 + 没手动 IP → 用测速结果第一个 IP
+    if (!CfOptimizerHttpOverrides._featureEnabled) return null;
+
     final resolved = CfOptimizerHttpOverrides._resolvedManualIp;
     if (resolved != null && resolved.isNotEmpty) {
       return InternetAddress(resolved, type: InternetAddressType.IPv4);
     }
 
     // 退回测速结果 (需要 featureEnabled + 测速结果)
-    if (!CfOptimizerHttpOverrides._featureEnabled) return null;
     final ips = CfOptimizerHttpOverrides._bestIpsCache;
     if (ips == null || ips.isEmpty) return null;
     // 返回第一个优选 IP (按延迟最低排)

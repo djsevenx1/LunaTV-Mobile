@@ -44,7 +44,12 @@ class _UserMenuState extends State<UserMenu> {
   bool _preferSpeedTest = true;
   bool _localSearch = false;
   bool _isLocalMode = false;
-  bool _cfWorkerEnabled = false;
+  // v2.0.76: 这两个字段语义已重定义
+  //   - _preferIpEnabled  对应 UserDataService.getCfWorkerEnabled() = "优选 IP 启用"
+  //   - _videoProxyEnabled 对应 UserDataService.getVideoProxyEnabled() = "视频代理"
+  // CF Worker 代理本身不再有总开关 — 域名配了就生效, 这里只展示两个状态
+  bool _preferIpEnabled = true;
+  bool _videoProxyEnabled = true;
   String _cfWorkerDomain = '';
   // v2.0.30: 砍掉 IP 优选, 只留 CF Worker 开关, 摘要也简化
   String _cfSummary = '未配置';
@@ -83,7 +88,9 @@ class _UserMenuState extends State<UserMenu> {
     final m3u8ProxyUrl = await UserDataService.getM3u8ProxyUrl();
     final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
-    final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
+    // v2.0.76: 语义重命名 — 字段名跟新语义对齐
+    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
+    final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
     final cfBestIp = await UserDataService.getCfBestIp();
     // v2.0.35: TMDB 海报墙 (单独 section, 配 key 启用首页海报墙)
@@ -103,11 +110,13 @@ class _UserMenuState extends State<UserMenu> {
         _m3u8ProxyUrl = m3u8ProxyUrl;
         _preferSpeedTest = preferSpeedTest;
         _localSearch = localSearch;
-        _cfWorkerEnabled = cfWorkerEnabled;
+        _preferIpEnabled = preferIpEnabled;
+        _videoProxyEnabled = videoProxyEnabled;
         _cfWorkerDomain = cfWorkerDomain;
         _cfSummary = _computeCfSummary(
           domain: cfWorkerDomain,
-          enabled: cfWorkerEnabled,
+          preferIpEnabled: preferIpEnabled,
+          videoProxyEnabled: videoProxyEnabled,
           bestIp: cfBestIp,
           resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
         );
@@ -122,24 +131,30 @@ class _UserMenuState extends State<UserMenu> {
   /// v2.0.30: 简化, 不再展示优选 IP 数量和测速时间.
   /// v2.0.31: 展示手动优选 IP (如有).
   /// v2.0.32: 支持优选域名, 展示"域名 → 解析 IP", 实时反映 DNS 解析结果.
+  /// v2.0.76: 重写 — 不再有"总开关未开"概念 (CF Worker 配了域名就生效),
+  ///   摘要反映两个独立开关: 优选 IP / 视频代理.
   String _computeCfSummary({
     required String domain,
-    required bool enabled,
+    required bool preferIpEnabled,
+    required bool videoProxyEnabled,
     String? bestIp,
     String? resolvedIp,
   }) {
     if (domain.isEmpty) return '未配置';
     final bestIpDisplay = _formatBestIpDisplay(bestIp, resolvedIp);
-    if (!enabled) {
-      if (bestIpDisplay != null) {
-        return '$domain · 开关未开 · $bestIpDisplay';
-      }
-      return '$domain · 开关未开';
+    final flags = <String>[];
+    if (videoProxyEnabled) flags.add('视频代理');
+    if (preferIpEnabled && bestIpDisplay != null) flags.add('优选 IP');
+    if (flags.isEmpty) {
+      // 都没启用, 显示"系统 DNS"标记
+      return bestIpDisplay != null
+          ? '$domain · 系统 DNS · $bestIpDisplay'
+          : '$domain · 系统 DNS';
     }
     if (bestIpDisplay != null) {
-      return '$domain · $bestIpDisplay';
+      return '$domain · ${flags.join('+')} · $bestIpDisplay';
     }
-    return '$domain · 已开启';
+    return '$domain · ${flags.join('+')}';
   }
 
   /// v2.0.32: 把"IP / 域名"格式化成"IP xxx" 或 "域名 → IP xxx" 形式
@@ -172,16 +187,20 @@ class _UserMenuState extends State<UserMenu> {
     );
     if (!mounted) return;
     // 从子页面返回后, 重新读 CF 状态, 刷新入口行的一行摘要
-    final cfWorkerEnabled = await UserDataService.getCfWorkerEnabled();
+    // v2.0.76: 两个独立开关都读 — 优选 IP + 视频代理
+    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
+    final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
     final cfBestIp = await UserDataService.getCfBestIp();
     if (!mounted) return;
     setState(() {
-      _cfWorkerEnabled = cfWorkerEnabled;
+      _preferIpEnabled = preferIpEnabled;
+      _videoProxyEnabled = videoProxyEnabled;
       _cfWorkerDomain = cfWorkerDomain;
       _cfSummary = _computeCfSummary(
         domain: cfWorkerDomain,
-        enabled: cfWorkerEnabled,
+        preferIpEnabled: preferIpEnabled,
+        videoProxyEnabled: videoProxyEnabled,
         bestIp: cfBestIp,
         resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
       );

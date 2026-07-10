@@ -62,31 +62,42 @@ void main() async {
 /// v2.0.31: 装 CF 优选 HTTP override (Dart HTTP 请求强制解析到优选 IP)
 /// 触发条件 (任一即可):
 /// - 手动优选 IP 已填 (优先级最高, 不依赖测速 / 开关)
-/// - CF 优选开关开 + 测速结果非空
+/// - 优选测速结果非空
+/// v2.0.76: 去掉 getCfWorkerEnabled() 早 return — 该开关现在是「优选 IP 启用」,
+///   CF Worker 代理本身不再有总开关, 域名配了默认就生效. featureEnabled 改成
+///   跟「优选 IP 启用」开关 + 实际有没有 prefer IP 联动.
 Future<void> _warmupCfOptimizer() async {
-  final enabled = await UserDataService.getCfWorkerEnabled();
-  if (!enabled) {
-    return;
-  }
+  // v2.0.76: 只要域名配了就装 override (不再被 getCfWorkerEnabled 守门)
   final domain = await UserDataService.getCfWorkerDomain();
   if (domain.isEmpty) {
     return;
   }
 
+  // v2.0.76: 「优选 IP 启用」开关 (v2.0.75 之前叫 "代理总开关")
+  final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
   // v2.0.31: 手动优选 IP 不需要 CfOptimizer 开关. 只要填了就生效.
   final manualIp = await UserDataService.getCfBestIp();
+  // 实际能不能走优选 IP: 开关 ON + 填了 IP (或测速结果非空)
+  final hasManualIp = manualIp != null && manualIp.isNotEmpty;
 
   final optimizerEnabled = await CfOptimizer.getEnabled();
   final bestIps = await CfOptimizer.getBestIps();
   final storedDomain = await CfOptimizer.getTargetDomain();
 
+  // v2.0.76: featureEnabled 含义 = "override 是否实际生效"
+  //   - 优选 IP 开关关 → false (override 是 no-op, HTTP 走系统 DNS)
+  //   - 优选 IP 开关开 + 有 IP / 测速结果 → true
+  final hasSpeedTestIps = bestIps.isNotEmpty && storedDomain == domain;
+  final featureEnabled =
+      preferIpEnabled && (hasManualIp || (optimizerEnabled && hasSpeedTestIps));
+
   // 装 override (内部 _tryOverrideAddress 决定走手动 IP / 测速 IP / 不走)
-  if (manualIp != null && manualIp.isNotEmpty) {
+  if (hasManualIp) {
     // 手动优选 IP / 域名 模式
     CfOptimizerHttpOverrides.warmup(
       bestIps: bestIps,
       targetDomain: domain,
-      featureEnabled: optimizerEnabled,
+      featureEnabled: featureEnabled,
       manualPreferredIp: manualIp,
     );
     CfOptimizerHttpOverrides.install();
@@ -104,16 +115,16 @@ Future<void> _warmupCfOptimizer() async {
     } else {
       unawaited(_resolveAndSchedule(manualIp));
     }
-  } else if (bestIps.isNotEmpty && storedDomain == domain && optimizerEnabled) {
+  } else if (hasSpeedTestIps && optimizerEnabled) {
     // 测速结果模式
     CfOptimizerHttpOverrides.warmup(
       bestIps: bestIps,
       targetDomain: domain,
-      featureEnabled: true,
+      featureEnabled: featureEnabled,
     );
     CfOptimizerHttpOverrides.install();
   } else {
-    // 缓存空 / 域名变了 / 优选开关关, 装个 disable 的 override (不放行任何 IP 覆盖)
+    // 缓存空 / 域名变了 / 优选 IP 开关关, 装个 disable 的 override (不放行任何 IP 覆盖)
     CfOptimizerHttpOverrides.warmup(
       bestIps: const [],
       targetDomain: domain,

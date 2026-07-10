@@ -68,20 +68,18 @@ class VideoProxyServer {
   ///   大概率已经拿到, 万一没拿到 (刚开机瞬开 app) 走 tryStart 返回 null,
   ///   libmpv 走原 URL, 不影响播放.
   static Future<VideoProxyServer?> tryStart() async {
-    // v2.0.70: 两开关语义重新定义
-    //   - CF Worker 加速 = 代理总开关 (控制是否启代理 → worker)
-    //   - 视频代理加速 = 优选 IP 启用开关 (控制视频流是否走优选 IP)
-    //   守门 1: 代理总开关 (CF Worker 加速) 打开
-    final workerEnabled = await UserDataService.getCfWorkerEnabled();
-    if (!workerEnabled) return null;
+    // v2.0.76: 守门改成 getVideoProxyEnabled() — 该开关现在是「视频代理」,
+    //   关 = 视频不走代理, 直接原源; 开 = 视频走 VideoProxyServer.
+    final videoProxyOn = await UserDataService.getVideoProxyEnabled();
+    if (!videoProxyOn) return null;
 
     // 守门 2: 域名配了
     final domain = await UserDataService.getCfWorkerDomain();
     if (domain.isEmpty) return null;
 
-    // v2.0.70: 优选 IP 启用开关 (视频代理加速) 决定视频流走不走优选 IP.
-    //   这里只读状态打日志, 不作守门 — 开关关也能启代理 (走 worker 系统 DNS).
-    final preferIpEnabled = await UserDataService.getVideoProxyEnabled();
+    // v2.0.76: 「优选 IP 启用」开关 (v2.0.75 之前叫 "代理总开关") 决定视频流走不走优选 IP.
+    //   这里只读状态打日志 + 算 effectiveIp, 不作守门 — 开关关也能启代理 (走 worker 系统 DNS).
+    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
     final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
     final effectiveIp = (preferIpEnabled && resolvedIp != null && resolvedIp.isNotEmpty)
         ? resolvedIp
@@ -829,17 +827,15 @@ class VideoProxyServer {
     //   - TLS SNI = workerDomain (host 参数控制 SNI, 不是连接地址)
     //   - 手动发 HTTP/1.1 请求 + 流式读响应
     //
-    // v2.0.70: 两开关语义重新定义
-    //   - CF Worker 加速 = 代理总开关 (控制是否启代理 → worker)
-    //   - 视频代理加速 = 优选 IP 启用开关 (控制视频流是否走优选 IP)
-    //   - 图片/TMDB 不受优选 IP 开关影响, 只看代理总开关 (图片本来就走 Dart
-    //     HttpClient + CfOptimizerHttpOverrides, 跟视频代理是两条独立链路)
-    //   行为表:
-    //     代理总开关关 → tryStart 返 null → 直连视频源
-    //     代理总开关开 + 优选 IP 开关关 → 走 worker (系统 DNS)
-    //     代理总开关开 + 优选 IP 开关开 + IP 填了 → 走优选 IP + worker
-    //     代理总开关开 + 优选 IP 开关开 + IP 没填 → 走 worker (系统 DNS)
-    final preferIpEnabled = await UserDataService.getVideoProxyEnabled();
+    // v2.0.76: 两开关语义重定义
+    //   - 视频代理 (上面) = 控制视频是否走代理 (关 = 直连原源, tryStart 直接返 null)
+    //   - 优选 IP 启用 (下面) = 控制所有资源 (含视频) 是否走优选 IP
+    //   行为表 (视频):
+    //     视频代理关 → tryStart 返 null → 直连视频源
+    //     视频代理开 + 优选 IP 开关关 → 走 worker (系统 DNS)
+    //     视频代理开 + 优选 IP 开关开 + IP 填了 → 走优选 IP + worker
+    //     视频代理开 + 优选 IP 开关开 + IP 没填 → 走 worker (系统 DNS)
+    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
     final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
     // 优选 IP 启用开关关 / 没填 IP → 强制 null (走系统 DNS)
     final preferIp = (preferIpEnabled && resolvedIp != null && resolvedIp.isNotEmpty)

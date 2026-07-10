@@ -29,8 +29,10 @@ class UserDataService {
 
   // 内存缓存
   static bool? _isLocalModeCache;
+  // v2.0.76: 字段重命名 — 原本 "CF Worker 加速总开关", 现在是 "优选 IP 启用"
   static bool? _cfWorkerEnabledCache;
   static String? _cfWorkerDomainCache;
+  // v2.0.76: 新加 — "视频代理" 开关
   static bool? _videoProxyEnabledCache;
   static String? _bangumiDataSourceCache;
   static String? _bangumiImageSourceCache;
@@ -327,37 +329,54 @@ class UserDataService {
 
   // ===== CF Worker 加速配置 =====
 
-  // 保存 CF Worker 加速开关
+  // v2.0.76: CF Worker 加速开关 语义重定义
+  //   旧 (v2.0.70~v2.0.75): "代理总开关" — 控制是否启代理 (CF Worker)
+  //   新 (v2.0.76+):        "优选 IP 启用" — 控制所有资源 (视频 / 图片 / TMDB / Bangumi)
+  //                          是否走优选 IP. CF Worker 代理本身不再有总开关,
+  //                          只要域名配了默认就生效.
+  // 保存
   static Future<void> saveCfWorkerEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_cfWorkerEnabledKey, enabled);
     _cfWorkerEnabledCache = enabled;
   }
 
-  // 获取 CF Worker 加速开关（默认 false）
+  // 获取 (默认 true — 用户期望默认走优选 IP, 跟 v2.0.34 反过来)
   static Future<bool> getCfWorkerEnabled() async {
     if (_cfWorkerEnabledCache != null) return _cfWorkerEnabledCache!;
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getBool(_cfWorkerEnabledKey) ?? false;
+    final v = prefs.getBool(_cfWorkerEnabledKey) ?? true;
     _cfWorkerEnabledCache = v;
     return v;
   }
 
-  // 同步获取 CF Worker 开关
+  // 同步获取
   static bool getCfWorkerEnabledSync() {
-    return _cfWorkerEnabledCache ?? false;
+    return _cfWorkerEnabledCache ?? true;
   }
 
-  // v2.0.27: 视频代理开关 (默认 false — 视频直连, 不走 Dart Socket 代理)
-  // 用户想通过优选 IP 加速视频时手动开, 开了之后视频走 VideoProxyServer
+  // v2.0.76: 视频代理开关 语义重定义
+  //   旧 (v2.0.70~v2.0.75): "优选 IP 启用（视频流）" — 只控制视频是否走优选 IP
+  //   新 (v2.0.76+):        "视频代理" — 控制视频是否走 CF Worker 代理
+  //                          (关 = 视频直连原源, 开 = 视频走 VideoProxyServer)
   static Future<void> saveVideoProxyEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_videoProxyEnabledKey, enabled);
+    _videoProxyEnabledCache = enabled;
   }
 
   static Future<bool> getVideoProxyEnabled() async {
+    if (_videoProxyEnabledCache != null) return _videoProxyEnabledCache!;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_videoProxyEnabledKey) ?? false;
+    final v = prefs.getBool(_videoProxyEnabledKey) ?? true;
+    _videoProxyEnabledCache = v;
+    return v;
+  }
+
+  /// 同步版 (buildProxiedUrl 等热路径用, 避免 await)
+  /// v2.0.76: 默认 true — 用户期望默认走视频代理
+  static bool getVideoProxyEnabledSync() {
+    return _videoProxyEnabledCache ?? true;
   }
 
   // 保存 CF Worker 域名（不含 https:// 前缀）
@@ -552,7 +571,8 @@ class UserDataService {
   ///
   /// 在以下任一情况下返回原 URL：
   /// 1) [targetUrl] 为空
-  /// 2) 开关未开
+  /// 2) 「视频代理」开关关 (v2.0.76 起: 视频是否走代理看的是视频代理开关, 不是
+  ///    优选 IP 开关; 优选 IP 只决定 HTTP 层解析到哪个 IP, 跟 URL 无关)
   /// 3) Worker 域名未配置
   ///
   /// 否则根据链接类型返回 worker 代理后的 URL：
@@ -579,9 +599,14 @@ class UserDataService {
   }
 
   static Future<void> _ensureCfWorkerCache() async {
+    // v2.0.76: 同时缓存 优选 IP 开关 + 视频代理开关 两个独立值
     if (_cfWorkerEnabledCache == null) {
       final prefs = await SharedPreferences.getInstance();
-      _cfWorkerEnabledCache = prefs.getBool(_cfWorkerEnabledKey) ?? false;
+      _cfWorkerEnabledCache = prefs.getBool(_cfWorkerEnabledKey) ?? true;
+    }
+    if (_videoProxyEnabledCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _videoProxyEnabledCache = prefs.getBool(_videoProxyEnabledKey) ?? true;
     }
     if (_cfWorkerDomainCache == null) {
       final prefs = await SharedPreferences.getInstance();
@@ -589,9 +614,13 @@ class UserDataService {
     }
   }
 
-  // 同步判断：开关 + 域名都齐了
+  // 同步判断：buildProxiedUrl 是否能包 worker.
+  // v2.0.76: 改成看「视频代理」开关 (不是优选 IP 开关).
+  //   优选 IP 开关只影响 CfOptimizerHttpOverrides 的 DNS override,
+  //   不影响 URL 是否被包 worker.
   static bool _isCfWorkerUsableSync() {
-    if (_cfWorkerEnabledCache != true) return false;
+    // 视频代理关 → 不包 worker
+    if (_videoProxyEnabledCache != true) return false;
     final d = _cfWorkerDomainCache;
     if (d == null || d.isEmpty) return false;
     return true;
