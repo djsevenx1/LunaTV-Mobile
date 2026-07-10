@@ -523,6 +523,11 @@ class VideoProxyServer {
         // Phase 2: backend 已就绪, 直接转发
         if (backendReady && backend != null) {
           clientToBackendBytes += data.length;
+          // v2.0.60: 详细记录 Phase 2 转发, 确认 libmpv 的 HTTP GET 请求
+          //   是否被转发给 backend. 4s bug 怀疑 GET 请求没到 worker.
+          // ignore: avoid_print
+          VideoProxyLog.append(
+              '[VideoProxy] [$connId] Phase2 转发 ${data.length}B → backend (累计 $clientToBackendBytes B)');
           try {
             backend!.add(data);
           } catch (_) {
