@@ -3795,7 +3795,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: _buildAccelHint(accelLevel, cfWorkerOn, bestIpOn,
-                      videoProxyToggleOn, videoStreamViaProxy),
+                      videoProxyOn, videoStreamViaProxy),
                 ),
               const SizedBox(height: 8),
               Align(
@@ -3996,10 +3996,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// v2.0.34: 加速等级非 full 时的提示
   Widget _buildAccelHint(String level, bool cfWorkerOn, bool bestIpOn,
-      bool videoProxyToggleOn, bool videoStreamViaProxy) {
+      bool videoProxyOn, bool videoStreamViaProxy) {
     if (level == 'none') {
       return Text(
-        '在 设置 → CF Worker 加速 里打开 CF Worker 加速源 + 填域名 + 优选 IP',
+        '在 设置 → CF Worker 加速 里打开 视频代理 + 填域名 + 优选 IP',
         style: TextStyle(
           color: Colors.white.withOpacity(0.55),
           fontSize: 11,
@@ -4023,9 +4023,9 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
           const SizedBox(height: 4),
           Text(
-            videoProxyToggleOn
-                ? '「视频代理加速」开了, 但 tryStart 失败, 查 logcat [VideoProxy] 看原因.'
-                : '去 设置 → CF Worker 加速 → 视频代理加速 打开开关.',
+            videoProxyOn
+                ? '「视频代理」开关开了, 但 tryStart 失败, 查 logcat [VideoProxy] 看原因.'
+                : '去 设置 → CF Worker 加速 → 视频代理 打开开关.',
             style: TextStyle(
               color: const Color(0xFFfbbf24).withOpacity(0.9),
               fontSize: 11,
