@@ -694,7 +694,7 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
           appBar: AppBar(
             backgroundColor: bg,
             elevation: 0,
-            title: Text('CF Worker 加速',
+            title: Text('代理加速',
                 style: FontUtils.poppins(context,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -713,11 +713,11 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                   padding: const EdgeInsets.only(bottom: 24),
                   children: [
                     _buildInfoCard(isDark),
-                    _buildSectionHeader('Worker 加速', LucideIcons.rocket, isDark),
+                    _buildSectionHeader('代理总开关', LucideIcons.rocket, isDark),
                     _buildToggleTile(
-                      title: 'CF Worker 加速',
+                      title: 'CF Worker 加速（代理总开关）',
                       subtitle:
-                          '打开后请求 / 视频走 Worker, .ts 段被 CF edge 缓存',
+                          '打开后视频 / 图片 / TMDB 走 Worker; 关闭全部直连原源',
                       value: _cfWorkerEnabled,
                       onChanged: _setWorkerEnabled,
                       icon: LucideIcons.rocket,
@@ -757,18 +757,20 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       const SizedBox(height: 8),
                       _buildIpOptimizationWarning(isDark),
                     ],
-                    // v2.0.34: 视频代理加速开关 UI 入口
-                    //   v2.0.30 砍优选测速时把入口一起砍了, 用户找不到开关.
-                    //   默认 false: Dart 手写 CONNECT 隧道代理历史上不太稳
-                    //   (v2.0.21/v2.0.22/v2.0.23 修过几轮), v2.0.27 起默认关.
-                    //   v2.0.34 把 tryStart 门改成靠手动优选 IP 后, 真正有用:
-                    //   配好优选 IP + 打开这个开关 → 视频走优选 IP 加速.
+                    // v2.0.70: 视频代理加速开关 语义改成「优选 IP 启用开关」
+                    //   - 代理总开关 (CF Worker 加速) 控制是否启代理 → worker
+                    //   - 这个开关只控制视频流是否走优选 IP (图片/TMDB 不受影响)
+                    //   行为:
+                    //     代理总开关关 → 直连 (这个开关无效)
+                    //     代理总开关开 + 这个开关关 → 视频走 worker (系统 DNS)
+                    //     代理总开关开 + 这个开关开 + IP 填了 → 视频走优选 IP + worker
+                    //     代理总开关开 + 这个开关开 + IP 没填 → 视频走 worker (系统 DNS)
                     const SizedBox(height: 8),
                     _buildToggleTile(
-                      title: '视频代理加速',
+                      title: '优选 IP 启用（视频流）',
                       subtitle: _videoProxyEnabled
-                          ? 'libmpv 走本地代理 → 优选 IP → CF edge（需配优选 IP）'
-                          : '关闭时视频直连原 URL（不开 CF 加速时的行为）',
+                          ? '视频流走优选 IP + Worker（需配优选 IP, 图片/TMDB 不受影响）'
+                          : '视频流走 Worker (系统 DNS), 不走优选 IP',
                       value: _videoProxyEnabled,
                       onChanged: _setVideoProxyEnabled,
                       icon: LucideIcons.video,

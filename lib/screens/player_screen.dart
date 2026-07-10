@@ -1798,13 +1798,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///
   /// 失败 / 异常 → 代理不起, 行为跟 v2.0.14 一模一样
   Future<void> _ensureVideoProxy() async {
-    // v2.0.27: 默认不启视频代理 (Dart Socket 代理不可靠)
-    // 用户在设置里手动开"视频代理加速"才启
-    final enabled = await UserDataService.getVideoProxyEnabled();
-    if (!enabled) {
-      // v2.0.34+: 诊断日志, 让用户能确认开关状态
-      // v2.0.58: 改用 VideoProxyLog 让「日记」按钮也能看到 (用户不会 logcat)
-      VideoProxyLog.append('[VideoProxy] 跳过: 「视频代理加速」开关未开');
+    // v2.0.70: 两开关语义重新定义
+    //   - CF Worker 加速 = 代理总开关 (控制是否启代理 → worker)
+    //   - 视频代理加速 = 优选 IP 启用开关 (控制视频流是否走优选 IP)
+    //   守门: 代理总开关关 → 不启代理, libmpv 直连视频源
+    //         代理总开关开 → 启代理 (走 worker), 优选 IP 开关决定走不走优选 IP
+    final proxyMasterOn = await UserDataService.getCfWorkerEnabled();
+    if (!proxyMasterOn) {
+      VideoProxyLog.append('[VideoProxy] 跳过: 「CF Worker 加速」(代理总开关) 未开, libmpv 直连视频源');
       return;
     }
     if (_videoProxy != null && _videoProxy!.isRunning) {
@@ -1813,13 +1814,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     // v2.0.58: 记录优选 IP 状态, 帮助分析 "4s 卡顿" 跟 manual IP 的关系
     final manualIp = CfOptimizerHttpOverrides.getResolvedManualIp();
-    VideoProxyLog.append('[VideoProxy] _ensureVideoProxy 开始: manualIp=$manualIp');
+    final preferIpEnabled = await UserDataService.getVideoProxyEnabled();
+    VideoProxyLog.append('[VideoProxy] _ensureVideoProxy 开始: 优选IP开关=$preferIpEnabled manualIp=$manualIp');
     // v2.0.67: 优选 IP 不再是必须条件, tryStart 一次就行 (不再 retry 等 _resolvedManualIp)
-    //   - CF 加速开 + worker 域名配了 → tryStart 成功 (优选 IP 可选)
-    //   - CF 加速关 → tryStart 返 null → libmpv 直连视频源
+    //   v2.0.70: 守门已改成代理总开关 (CF Worker 加速), 这里 tryStart 一定成功
+    //   - 代理总开关开 + worker 域名配了 → tryStart 成功 (优选 IP 可选)
+    //   - 代理总开关关 → 上面已 return, 不会到这
     final proxy = await VideoProxyServer.tryStart();
     if (proxy == null) {
-      VideoProxyLog.append('[VideoProxy] tryStart 返 null (CF 加速未开/域名未配), libmpv 走原 URL');
+      VideoProxyLog.append('[VideoProxy] tryStart 返 null (域名未配), libmpv 走原 URL');
       return;
     }
     // v2.0.65: 不再设 libmpv --http-proxy!
@@ -1831,7 +1834,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   代理服务器还是要启动 (VideoProxyServer._handleLocalHttp 处理).
     VideoProxyLog.append('[VideoProxy] 启用成功 (v2.0.65 本地 HTTP 代理): '
         'http://127.0.0.1:${proxy.port} '
-        'manualIp=$manualIp (播放 URL 走本地代理 → HttpClient 走优选 IP → worker)');
+        '优选IP开关=$preferIpEnabled manualIp=$manualIp (播放 URL 走本地代理 → worker)');
     _videoProxy = proxy;
     // v2.0.34: 通知顶部「加速状态」指示器重算 + 启动下载速度采样
     setState(() {
@@ -3650,17 +3653,18 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     // 节点启用状态
     final cfWorkerOn = cfWorkerEnabled && cfWorkerDomain.isNotEmpty;
-    final bestIpOn = cfBestIp.isNotEmpty && hasResolvedIp;
+    // v2.0.70: 优选 IP 启用 = 优选 IP 开关开 + IP 填了 + 已解析
+    final bestIpOn = videoProxyToggleOn && cfBestIp.isNotEmpty && hasResolvedIp;
     final videoStreamViaProxy = _videoProxyActive;
 
-    // 加速等级:
-    //   full: CF Worker + 优选 IP 都启用 + 视频流走代理 (理想)
-    //   half: CF Worker 或优选 IP 启用, 但视频流没走代理
-    //         (m3u8/图片走 worker, 视频直连原源)
-    //   none: 都关
+    // 加速等级 (v2.0.70 语义重新定义):
+    //   full: 代理总开关开 + 优选 IP 启用 + 视频流走代理 (理想, 走优选 IP + worker)
+    //   half: 代理总开关开, 但没走优选 IP (视频走 worker 系统 DNS / 或优选 IP 开关关)
+    //         图片/TMDB 仍走 worker
+    //   none: 代理总开关关 (全部直连)
     final accelLevel = (cfWorkerOn && bestIpOn && videoStreamViaProxy)
         ? 'full'
-        : (cfWorkerOn || bestIpOn)
+        : cfWorkerOn
             ? 'half'
             : 'none';
 

@@ -68,7 +68,10 @@ class VideoProxyServer {
   ///   大概率已经拿到, 万一没拿到 (刚开机瞬开 app) 走 tryStart 返回 null,
   ///   libmpv 走原 URL, 不影响播放.
   static Future<VideoProxyServer?> tryStart() async {
-    // 守门 1: CF Worker 加速打开
+    // v2.0.70: 两开关语义重新定义
+    //   - CF Worker 加速 = 代理总开关 (控制是否启代理 → worker)
+    //   - 视频代理加速 = 优选 IP 启用开关 (控制视频流是否走优选 IP)
+    //   守门 1: 代理总开关 (CF Worker 加速) 打开
     final workerEnabled = await UserDataService.getCfWorkerEnabled();
     if (!workerEnabled) return null;
 
@@ -76,18 +79,21 @@ class VideoProxyServer {
     final domain = await UserDataService.getCfWorkerDomain();
     if (domain.isEmpty) return null;
 
-    // v2.0.67: 优选 IP 不再是必须条件!
-    //   - 填了优选 IP: 代理用 SecureSocket 连优选 IP (加速)
-    //   - 没填优选 IP: 代理用 SecureSocket 连 worker 域名 (走系统 DNS, 不加速但统一走代理链路)
-    //   CF 加速关 → tryStart 返 null → libmpv 直连视频源 (不走 worker)
+    // v2.0.70: 优选 IP 启用开关 (视频代理加速) 决定视频流走不走优选 IP.
+    //   这里只读状态打日志, 不作守门 — 开关关也能启代理 (走 worker 系统 DNS).
+    final preferIpEnabled = await UserDataService.getVideoProxyEnabled();
     final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    final effectiveIp = (preferIpEnabled && resolvedIp != null && resolvedIp.isNotEmpty)
+        ? resolvedIp
+        : null;
 
     // 全部满足, 启代理
     try {
       final s = VideoProxyServer._();
       await s._bind();
       // ignore: avoid_print
-      VideoProxyLog.append('[VideoProxy] tryStart 成功: bind 127.0.0.1:${s._port} (优选IP=${resolvedIp ?? "无,走DNS"})');
+      VideoProxyLog.append('[VideoProxy] tryStart 成功: bind 127.0.0.1:${s._port} '
+          '(优选IP开关=$preferIpEnabled, 生效IP=${effectiveIp ?? "无,走DNS"})');
       return s;
     } catch (e, st) {
       // v2.0.39: 不再静默吞, 打印详细原因.
@@ -822,7 +828,23 @@ class VideoProxyServer {
     //   - TCP 连优选 IP
     //   - TLS SNI = workerDomain (host 参数控制 SNI, 不是连接地址)
     //   - 手动发 HTTP/1.1 请求 + 流式读响应
-    final preferIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    //
+    // v2.0.70: 两开关语义重新定义
+    //   - CF Worker 加速 = 代理总开关 (控制是否启代理 → worker)
+    //   - 视频代理加速 = 优选 IP 启用开关 (控制视频流是否走优选 IP)
+    //   - 图片/TMDB 不受优选 IP 开关影响, 只看代理总开关 (图片本来就走 Dart
+    //     HttpClient + CfOptimizerHttpOverrides, 跟视频代理是两条独立链路)
+    //   行为表:
+    //     代理总开关关 → tryStart 返 null → 直连视频源
+    //     代理总开关开 + 优选 IP 开关关 → 走 worker (系统 DNS)
+    //     代理总开关开 + 优选 IP 开关开 + IP 填了 → 走优选 IP + worker
+    //     代理总开关开 + 优选 IP 开关开 + IP 没填 → 走 worker (系统 DNS)
+    final preferIpEnabled = await UserDataService.getVideoProxyEnabled();
+    final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    // 优选 IP 启用开关关 / 没填 IP → 强制 null (走系统 DNS)
+    final preferIp = (preferIpEnabled && resolvedIp != null && resolvedIp.isNotEmpty)
+        ? resolvedIp
+        : null;
     final fetchStart = DateTime.now();
     // ignore: avoid_print
     VideoProxyLog.append(
