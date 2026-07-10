@@ -16,7 +16,9 @@
 // 跟 v2.0.40 + v2.0.41 兼容: print() 输出不变 (双写), 老的 logcat 抓法照样能用.
 class VideoProxyLog {
   // v2.0.42: 静态环形 buffer, 上限 200 行
-  static const int _maxLines = 200;
+  // v2.0.59: 扩到 500 行 — 代理连接日志很啰嗦 (每连接 ~15 行), 200 行装不下
+  //   时长变化 / TMDB 刮削等关键诊断行被 FIFO 挤掉, 用户看不到
+  static const int _maxLines = 500;
   static final List<String> _lines = <String>[];
 
   /// 加一行日志. 自动加 HH:MM:SS.mmm 时间戳, 同时打 print.

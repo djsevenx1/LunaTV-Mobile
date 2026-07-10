@@ -2372,7 +2372,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600)),
                             const Spacer(),
-                            Text('${lines.length}/200',
+                            Text('${lines.length}/500',
                                 style: const TextStyle(
                                     color: Colors.white38, fontSize: 12)),
                             IconButton(

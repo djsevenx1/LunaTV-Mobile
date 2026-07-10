@@ -453,7 +453,7 @@ class VideoProxyServer {
     Socket? backend;
     bool backendReady = false;
 
-    void closeAll() {
+    void closeAll({bool graceful = false}) {
       final aliveMs = DateTime.now().difference(connT0).inMilliseconds;
       // v2.0.58: 标记可疑短响应 — backend 回了数据但很少 (<2KB) 且连接活过
       //   500ms, 通常是 502/错误页/截断的段. 这是 "优选 IP 4s 时长" bug 的
@@ -464,16 +464,45 @@ class VideoProxyServer {
           aliveMs > 500;
       // ignore: avoid_print
       VideoProxyLog.append(
-          '[VideoProxy] [$connId] 连接关闭 ${state.method ?? "?"} ${state.host ?? "?"}, client→backend $clientToBackendBytes bytes, backend→client $backendToClientBytes bytes, 存活 ${aliveMs}ms${short ? " ⚠️可疑短响应" : ""}');
+          '[VideoProxy] [$connId] 连接关闭 ${state.method ?? "?"} ${state.host ?? "?"}, client→backend $clientToBackendBytes bytes, backend→client $backendToClientBytes bytes, 存活 ${aliveMs}ms${short ? " ⚠️可疑短响应" : ""}${graceful ? " (优雅)" : ""}');
       try {
         clientSub.cancel();
       } catch (_) {}
       try {
         backendSub?.cancel();
       } catch (_) {}
-      try {
-        client.destroy();
-      } catch (_) {}
+      // v2.0.59: 修 m3u8 截断导致 4s 时长 bug.
+      //   根因: backend (CF worker) 关闭后立刻 client.destroy() 会丢弃
+      //   client socket 发送 buffer 里还没被 libmpv 读完的数据. m3u8 响应
+      //   被 CF worker 用短连接发完就关, onDone 触发 closeAll() →
+      //   client.destroy() → libmpv 拿到截断的 m3u8 → 只看到 1-2 段 → 4s.
+      //   直连没这问题因为 libmpv 自己管 socket 生命周期.
+      //   修法: backend 正常结束 (onDone) 用 graceful=true, 先 flush 确保
+      //   buffer 数据发完再 close. 异常路径仍用 destroy() 立刻清.
+      if (graceful) {
+        try {
+          // socket.flush() 返回 Future, 但这里不能 await (closeAll 不是 async).
+          // 用 then 链: flush 完再 close. flush 期间数据在内核 buffer 里,
+          // close() 不会丢 (Socket.close 是半关闭, 发完再关).
+          client.flush().then((_) {
+            try {
+              client.close();
+            } catch (_) {}
+          }).catchError((_) {
+            try {
+              client.destroy();
+            } catch (_) {}
+          });
+        } catch (_) {
+          try {
+            client.destroy();
+          } catch (_) {}
+        }
+      } else {
+        try {
+          client.destroy();
+        } catch (_) {}
+      }
       _connCount--;
     }
 
@@ -564,10 +593,13 @@ class VideoProxyServer {
                   closeAll();
                 },
                 onDone: () {
+                  // v2.0.59: backend 正常结束用 graceful 关闭 — 先 flush client
+                  //   再 close, 避免 m3u8 数据卡在发送 buffer 被 destroy 丢弃.
+                  //   这是 4s 时长 bug 的根因 (见 closeAll 注释).
                   // ignore: avoid_print
                   VideoProxyLog.append(
-                      '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes');
-                  closeAll();
+                      '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes → 优雅关闭 client');
+                  closeAll(graceful: true);
                 },
                 cancelOnError: true,
               );
