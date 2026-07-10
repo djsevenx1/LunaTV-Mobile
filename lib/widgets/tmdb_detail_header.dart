@@ -41,6 +41,7 @@ import 'package:flutter/material.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/video_proxy_log.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
@@ -129,18 +130,23 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
   //
   // 返回 true = 标题大致对得上, 可以用 TMDB 数据.
   // 返回 false = 标题不匹配, 走默认海报 (避免大头部显示错误的剧).
-  bool _isTitleMatch(TmdbItem item, String query) {
+  bool _isTitleMatch(TmdbItem item, String query) =>
+      _isTitleMatchWithScore(item, query).$1;
+
+  /// v2.0.71: 返回 (是否匹配, 分数) 方便日记输出.
+  /// 分数 = 2-gram 命中率 [0,1], substring 命中记 1.0.
+  (bool, double) _isTitleMatchWithScore(TmdbItem item, String query) {
     final q = query.trim();
-    if (q.isEmpty) return false;
+    if (q.isEmpty) return (false, 0);
     final candidates = <String>[
       item.title,
       item.originalTitle,
     ].where((s) => s.isNotEmpty).toList();
-    if (candidates.isEmpty) return false;
+    if (candidates.isEmpty) return (false, 0);
 
     // 1) substring 检查 (任一 candidate 包含完整 query 就算匹配)
     for (final c in candidates) {
-      if (c.contains(q) || q.contains(c)) return true;
+      if (c.contains(q) || q.contains(c)) return (true, 1.0);
     }
 
     // v2.0.58: 2-gram 前清洗 query + candidate, 去掉标点/空格/括号年份.
@@ -151,13 +157,13 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
     //   "你好李焕英": substring 兜住 (q.contains(c)); 即使 substring 没兜住,
     //   2-gram 也只算有效字符, 命中率不被标点稀释.
     final qClean = _normalizeForGram(q);
-    if (qClean.isEmpty) return false;
+    if (qClean.isEmpty) return (false, 0);
     final cCleans = candidates.map(_normalizeForGram).where((s) => s.isNotEmpty).toList();
-    if (cCleans.isEmpty) return false;
+    if (cCleans.isEmpty) return (false, 0);
 
     // substring 再查一遍清洗后的 (去掉标点后可能命中)
     for (final c in cCleans) {
-      if (c.contains(qClean) || qClean.contains(c)) return true;
+      if (c.contains(qClean) || qClean.contains(c)) return (true, 1.0);
     }
 
     // 2) 2-gram 相似度 (基于清洗后的字符串)
@@ -167,8 +173,9 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
     } else {
       qGrams = qClean.length - 1;
     }
-    if (qGrams <= 0) return false;
+    if (qGrams <= 0) return (false, 0);
 
+    double bestScore = 0;
     for (final c in cCleans) {
       if (c.length < 2) continue;
       int hit = 0;
@@ -176,12 +183,15 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
         final g = qClean.substring(i, i + 2);
         if (c.contains(g)) hit++;
       }
+      final score = hit / qGrams;
+      if (score > bestScore) bestScore = score;
       // v2.0.52: 阈值 0.5 → 0.3.
       // v2.0.58: 清洗后阈值回到 0.4 (清洗掉了标点稀释, 0.4 更准, 仍能拒掉
       //   「搜"山村医馆"返"千香"」命中率 0)
-      if (hit / qGrams >= 0.4) return true;
+      // v2.0.71: 阈值降到 0.35 (用户反馈"很多都不刮削", 0.4 偶尔拒掉真剧)
+      if (score >= 0.35) return (true, score);
     }
-    return false;
+    return (false, bestScore);
   }
 
   /// v2.0.58: 清洗字符串用于 2-gram 匹配.
@@ -250,27 +260,39 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
       Future<TmdbPagedResult<TmdbItem>> doSearch(TmdbMediaType t, int? y) =>
           TmdbService.search(type: t, query: widget.title, year: y, page: 1);
 
+      // v2.0.71: 搜索全过程写日记, 方便诊断"很多都不刮削"
+      VideoProxyLog.append('[TMDBHeader] 开始刮削: title="${widget.title}" '
+          'kind=${widget.kind} year=${widget.year ?? "无"} '
+          'mediaType=${_mediaType.value} yearInt=${_yearInt ?? "无"} '
+          'isShortDrama=$_isShortDrama');
       var results = await doSearch(_mediaType, _yearInt);
       final cfg = await cfgFuture;
       if (!mounted) return;
+      VideoProxyLog.append('[TMDBHeader] 第1搜 ${_mediaType.value}+year=${_yearInt ?? "无"} '
+          '"${widget.title}" → ${results.results.length} 条'
+          '${results.results.isEmpty ? "" : ", 前3: ${results.results.take(3).map((r) => '"${r.title}"(${r.id})').join(', ')}"}');
       if (results.results.isEmpty && _yearInt != null) {
-        // ignore: avoid_print
-        print('[TMDBDetailHeader] 带 year=$_yearInt 搜 "${widget.title}" (${_mediaType.value}) 空, 去 year 重搜');
+        VideoProxyLog.append('[TMDBHeader] 带 year=$_yearInt 搜 "${widget.title}" (${_mediaType.value}) 空, 去 year 重搜');
         results = await doSearch(_mediaType, null);
         if (!mounted) return;
+        VideoProxyLog.append('[TMDBHeader] 第2搜 ${_mediaType.value} 去year '
+            '"${widget.title}" → ${results.results.length} 条'
+            '${results.results.isEmpty ? "" : ", 前3: ${results.results.take(3).map((r) => '"${r.title}"(${r.id})').join(', ')}"}');
       }
       if (results.results.isEmpty) {
         final other = _mediaType == TmdbMediaType.movie
             ? TmdbMediaType.tv
             : TmdbMediaType.movie;
-        // ignore: avoid_print
-        print('[TMDBDetailHeader] ${_mediaType.value} 搜 "${widget.title}" 空, 换 ${other.value} 重搜 (kind 可能误判)');
+        VideoProxyLog.append('[TMDBHeader] ${_mediaType.value} 搜 "${widget.title}" 空, 换 ${other.value} 重搜 (kind 可能误判)');
         results = await doSearch(other, null);
         if (!mounted) return;
+        VideoProxyLog.append('[TMDBHeader] 第3搜 ${other.value} 去year '
+            '"${widget.title}" → ${results.results.length} 条'
+            '${results.results.isEmpty ? "" : ", 前3: ${results.results.take(3).map((r) => '"${r.title}"(${r.id})').join(', ')}"}');
       }
       if (results.results.isEmpty) {
-        // ignore: avoid_print
-        print('[TMDBDetailHeader] 搜不到 "${widget.title}" (movie+tv 都试过), 走默认海报');
+        VideoProxyLog.append('[TMDBHeader] 搜不到 "${widget.title}" (movie+tv 都试过), 走默认海报');
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _hasError = false; // 搜不到不算 error, 走 fallback
@@ -285,19 +307,20 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
       //   之前只看 first, 偶尔 first 是同名前缀的近似剧 (e.g. 搜「长相思」,
       //   first 是「长相思：千古玦尘」), 第 2 个才是真剧, 全废了
       //   走 Douban fallback.
+      // v2.0.71: 遍历前 5 个 (从 3 提到 5), 并写每个的匹配详情到日记.
       TmdbItem? matched;
-      for (final r in results.results.take(3)) {
-        if (_isTitleMatch(r, widget.title)) {
+      final matchDetails = <String>[];
+      for (final r in results.results.take(5)) {
+        final (ok, score) = _isTitleMatchWithScore(r, widget.title);
+        matchDetails.add('"${r.title}"(${r.id})=${ok ? "✓" : "✗"}(${score.toStringAsFixed(2)})');
+        if (ok && matched == null) {
           matched = r;
-          break;
         }
       }
+      VideoProxyLog.append('[TMDBHeader] 标题匹配: 搜 "${widget.title}", '
+          '前 ${matchDetails.length} 个: ${matchDetails.join(", ")}'
+          '${matched == null ? " → 全不匹配, 走默认海报" : " → 命中 \"${matched.title}\"(${matched.id})"}');
       if (matched == null) {
-        // ignore: avoid_print
-        print('[TMDBDetailHeader] 标题都不匹配: 搜 "${widget.title}", '
-            '前 ${results.results.take(3).length} 个结果: '
-            '${results.results.take(3).map((r) => '"${r.title}"').join(', ')}, '
-            '走默认海报');
         if (!mounted) return;
         setState(() {
           _isLoading = false;
@@ -311,6 +334,9 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
         id: matched.id,
       );
       if (!mounted) return;
+      VideoProxyLog.append('[TMDBHeader] 刮削成功: "${widget.title}" → '
+          '"${(details ?? matched).title}" overview=${((details ?? matched).overview?.isNotEmpty ?? false) ? "有" : "无"} '
+          'backdrop=${(details ?? matched).backdropPath != null ? "有" : "无"}');
       setState(() {
         _tmdbConfig = cfg;
         // 用详情 (overview + backdrop) 优先, 拿不到用 search result (基本字段)
@@ -320,12 +346,14 @@ class _TmdbDetailHeaderState extends State<TmdbDetailHeader> {
       });
     } on TmdbException {
       if (!mounted) return;
+      VideoProxyLog.append('[TMDBHeader] TmdbException → 走 fallback');
       setState(() {
         _isLoading = false;
         _hasError = true; // TMDB error (NO_KEY/INVALID_KEY/NETWORK) → 显 fallback
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
+      VideoProxyLog.append('[TMDBHeader] 其它异常: $e → 走 fallback');
       setState(() {
         _isLoading = false;
         _hasError = true;
