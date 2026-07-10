@@ -852,12 +852,12 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: _buildSpeedTestButton(
-                  label: _isSpeedTesting && _speedTestSizeMB == 5
+                  label: _isSpeedTesting && _speedTestSizeMB == 3
                       ? '测试中...'
-                      : '测速 5MB',
+                      : '测速 3MB',
                   isDark: isDark,
                   enabled: !_isSpeedTesting,
-                  onTap: () => _testWorkerSpeed(5),
+                  onTap: () => _testWorkerSpeed(3),
                 ),
               ),
             ],
