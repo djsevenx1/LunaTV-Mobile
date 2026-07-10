@@ -1,13 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
-import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/screens/cf_acceleration_page.dart';
-import 'package:luna_tv/screens/tmdb_settings_page.dart';
 import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
@@ -37,8 +36,6 @@ class _UserMenuState extends State<UserMenu> {
   String _doubanImageSource = '直连';
   String _bangumiDataSource = '直连';
   String _bangumiImageSource = '直连';
-  // v2.0.45: TMDB 数据源 (跟豆瓣/Bangumi 对齐, 默认 CF Worker 加速)
-  String _tmdbDataSource = 'CF Worker 加速';
   String _m3u8ProxyUrl = '';
   String _version = '';
   bool _preferSpeedTest = true;
@@ -53,9 +50,8 @@ class _UserMenuState extends State<UserMenu> {
   String _cfWorkerDomain = '';
   // v2.0.30: 砍掉 IP 优选, 只留 CF Worker 开关, 摘要也简化
   String _cfSummary = '未配置';
-  // v2.0.35: TMDB API key, 跟"加速"section 并列, 单独做一个 section "海报墙"
-  String _tmdbApiKey = '';
-  String _tmdbSummary = '未配置 (首页用原列表)';
+  // v2.0.77: 豆瓣登录 cookie — 登录后给豆瓣图升到 l_ratio_poster (高清)
+  bool _doubanLoggedIn = false;
 
   @override
   void initState() {
@@ -93,10 +89,9 @@ class _UserMenuState extends State<UserMenu> {
     final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
     final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
     final cfBestIp = await UserDataService.getCfBestIp();
-    // v2.0.35: TMDB 海报墙 (单独 section, 配 key 启用首页海报墙)
-    final tmdbApiKey = await UserDataService.getTmdbApiKey();
-    // v2.0.45: TMDB 数据源 (跟豆瓣/Bangumi 对齐, 在数据源 section 显示)
-    final tmdbDataSource = await UserDataService.getTmdbDataSourceDisplayName();
+    // v2.0.77: 豆瓣登录状态 — 决定详情页 / 轮播图走 l_ratio_poster 高清
+    final doubanCookie = await UserDataService.getDoubanCookie();
+    final doubanLoggedIn = doubanCookie != null && doubanCookie.isNotEmpty;
 
     if (mounted) {
       setState(() {
@@ -120,9 +115,7 @@ class _UserMenuState extends State<UserMenu> {
           bestIp: cfBestIp,
           resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
         );
-        _tmdbApiKey = tmdbApiKey ?? '';
-        _tmdbSummary = _computeTmdbSummary(tmdbApiKey);
-        _tmdbDataSource = tmdbDataSource;
+        _doubanLoggedIn = doubanLoggedIn;
       });
     }
   }
@@ -207,27 +200,187 @@ class _UserMenuState extends State<UserMenu> {
     });
   }
 
-  // v2.0.35: push TMDB 海报墙 子页面, 返回时刷新入口行摘要
-  Future<void> _openTmdbSettingsPage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const TmdbSettingsPage()),
+  // v2.0.77: 弹出豆瓣 cookie 输入对话框
+  //   用户从浏览器 DevTools 复制 cookie 字符串粘进来
+  Future<void> _openDoubanLoginDialog() async {
+    final cookie = await UserDataService.getDoubanCookie() ?? '';
+    final controller = TextEditingController(text: cookie);
+    controller.selection =
+        TextSelection(baseOffset: 0, extentOffset: cookie.length);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(LucideIcons.cookie, size: 20, color: Color(0xFF10b981)),
+            const SizedBox(width: 8),
+            Text(
+              '登录豆瓣',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 18,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '从浏览器 DevTools 复制 cookie 粘进来。登录后豆瓣图自动升到 l_ratio_poster (高清)。',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '不登录 = 现有图片不变。',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 4,
+              minLines: 2,
+              style: FontUtils.sourceCodePro(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+              ),
+              decoration: InputDecoration(
+                hintText: 'bid=xxx; __yadk_uid=xxx; ...',
+                hintStyle: FontUtils.sourceCodePro(
+                  ctx,
+                  fontSize: 12,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF6b7280)
+                      : const Color(0xFF9ca3af),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (_doubanLoggedIn)
+            TextButton(
+              onPressed: () async {
+                await UserDataService.clearDoubanCookie();
+                if (!ctx.mounted) return;
+                Navigator.of(ctx).pop();
+                if (!mounted) return;
+                setState(() => _doubanLoggedIn = false);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('已退出豆瓣登录')),
+                );
+              },
+              child: Text(
+                '退出',
+                style: FontUtils.poppins(
+                  ctx,
+                  fontSize: 14,
+                  color: const Color(0xFFef4444),
+                ),
+              ),
+            ),
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(
+                text:
+                    '打开 https://movie.douban.com/ 登录后 F12 → Application → Cookies → movie.douban.com → 复制所有 cookie',
+              ));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                    content: Text('已复制获取步骤 (请到豆瓣网页版登录后操作)')),
+              );
+            },
+            child: Text(
+              '查看步骤',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              '取消',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final input = controller.text.trim();
+              await UserDataService.saveDoubanCookie(
+                  input.isEmpty ? null : input);
+              if (!ctx.mounted) return;
+              Navigator.of(ctx).pop();
+              if (!mounted) return;
+              setState(() {
+                _doubanLoggedIn = input.isNotEmpty;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(input.isEmpty
+                      ? '已退出豆瓣登录'
+                      : '已保存豆瓣 cookie, 海报将自动升级到高清'),
+                ),
+              );
+            },
+            child: Text(
+              '保存',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: const Color(0xFF10b981),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
-    if (!mounted) return;
-    final key = await UserDataService.getTmdbApiKey();
-    if (!mounted) return;
-    setState(() {
-      _tmdbApiKey = key ?? '';
-      _tmdbSummary = _computeTmdbSummary(key);
-    });
+
+    controller.dispose();
   }
 
-  /// v2.0.35: 入口行一行摘要 (跟 _cfSummary 风格一致, 显示在用户菜单入口)
-  static String _computeTmdbSummary(String? key) {
-    if (key == null || key.isEmpty) return '未配置 (首页用原列表)';
-    if (key.length > 12) {
-      return '已配置: ${key.substring(0, 4)}...${key.substring(key.length - 4)}';
-    }
-    return '已配置: ****';
+  /// v2.0.77: 入口行一行摘要 — 已登录 = "已登录: 高清 l_ratio_poster"
+  String _computeDoubanSummary() {
+    if (_doubanLoggedIn) return '已登录 · 高清 l_ratio_poster';
+    return '未登录 (现有图片不变化)';
   }
 
   String _parseRoleFromCookies(String? cookies) {
@@ -1204,34 +1357,6 @@ class _UserMenuState extends State<UserMenu> {
                 iconColor: const Color(0xFFf43f5e),
               ),
               _buildDivider(),
-              // v2.0.45: TMDB 数据源选项 (跟豆瓣/Bangumi 数据源选择器对齐)
-              //   - 直连: 走 api.themoviedb.org 原 URL (国内几乎不可达)
-              //   - CF Worker 加速: 走用户配的 CF Worker 域名 (跟 Bangumi
-              //     一样, 配了域名就生效, 不依赖 CF Worker 加速总开关)
-              // 跟 TMDB API Key 是正交的: Key 控制"开不开 TMDB 海报墙",
-              //   数据源控制"TMDB 请求走哪条链路", 跟豆瓣/Bangumi 模式一致.
-              _buildOptionSelector(
-                title: 'TMDB 数据源',
-                currentValue: _tmdbDataSource,
-                options: const [
-                  'CF Worker 加速',
-                  '直连',
-                ],
-                onChanged: (value) async {
-                  final key = UserDataService
-                      .getTmdbDataSourceKeyFromDisplayName(value);
-                  await UserDataService.saveTmdbDataSource(key);
-                  if (!mounted) return;
-                  setState(() {
-                    _tmdbDataSource = value;
-                  });
-                  // 清 TMDB 缓存, 强制下次拉取走新数据源
-                  await TmdbService.clearCache();
-                },
-                icon: LucideIcons.film,
-                iconColor: const Color(0xFF0ea5e9),
-              ),
-              _buildDivider(),
               // M3U8 代理 URL 选项
               _buildInputOption(
                 title: 'M3U8 代理 URL',
@@ -1256,20 +1381,25 @@ class _UserMenuState extends State<UserMenu> {
               ),
             ],
           ),
-          // ===== 海报墙 (v2.0.35) =====
-          //   跟"加速"是不同性质的功能 (CF 加速是网络层, TMDB 是 UI 增强)
-          //   单独做一个 section, 跟"加速"视觉同等级, 跟"其他"杂项分开
-          //   点进去是独立子页面 TMDB API Key 输入 + 测试 + 清除
-          //   配 key = 自动启用首页海报墙, 不配 = 保持原样 (无 toggle, key 字段就是开关)
+          // ===== 海报墙 (v2.0.77) =====
+          //   v2.0.35~v2.0.76: TMDB 海报墙 (配 API key 启用首页海报墙)
+          //   v2.0.77: 改用豆瓣登录 — 登录后自动给豆瓣图升到 l_ratio_poster (高清),
+          //     没登录 = 当前图片行为不变 (回退到 v2.0.76 之前没 TMDB 时的体验).
+          //   单独做一个 section 跟"加速"视觉同等级, 跟"其他"杂项分开.
+          //   点进去是 cookie 输入框 + 退出按钮, 不需要子页面.
           _buildSectionHeader('海报墙'),
           _buildCard(
             children: [
               _buildInputOption(
-                title: 'TMDB 海报墙',
-                currentValue: _tmdbSummary,
-                onTap: _openTmdbSettingsPage,
-                icon: LucideIcons.layoutGrid,
-                iconColor: const Color(0xFF10b981),
+                title: '豆瓣登录',
+                currentValue: _computeDoubanSummary(),
+                onTap: _openDoubanLoginDialog,
+                icon: _doubanLoggedIn
+                    ? LucideIcons.userCheck
+                    : LucideIcons.user,
+                iconColor: _doubanLoggedIn
+                    ? const Color(0xFF10b981)
+                    : const Color(0xFF9ca3af),
               ),
             ],
           ),

@@ -27,6 +27,9 @@ String _upgradeDoubanPosterUrl(String url) {
 /// - [source]: 数据来源（如 'douban'、'bangumi' 等）
 /// - [upgradeDouban]: 是否升级豆瓣图为高分辨率（默认 false，用于小卡片）；
 ///   设为 true 适用于 Hero Banner 等大图展示场景。
+///   **v2.0.77**：用户登录豆瓣后(cookie 有效),自动按 `upgradeDouban: true` 处理,
+///   即把 `s_/m_ratio_poster` 升级到 `l_ratio_poster` (公开图最大尺寸, 约 600×900)。
+///   未登录则保持调用方传入的默认行为,不影响现有体验。
 /// 返回可直接用于加载的图片地址。
 Future<String> getImageUrl(
   String originalUrl,
@@ -36,8 +39,11 @@ Future<String> getImageUrl(
   if (source == 'douban' && originalUrl.isNotEmpty) {
     final imageSourceKey = await UserDataService.getDoubanImageSourceKey();
 
+    // v2.0.77: 登录豆瓣后, 任何位置都自动升级到高清 l_ratio_poster
+    final bool shouldUpgrade =
+        upgradeDouban || UserDataService.isDoubanLoggedIn();
     String processed = originalUrl;
-    if (upgradeDouban) {
+    if (shouldUpgrade) {
       processed = _upgradeDoubanPosterUrl(processed);
     }
 
@@ -90,11 +96,18 @@ Map<String, String>? getImageRequestHeaders(String imageUrl, String? source) {
 
   if (isDoubanSource) {
     // 常见可用的 Referer 和 UA，避免 403 或 Android 解码失败
-    return <String, String>{
+    final Map<String, String> headers = <String, String>{
       'Referer': 'https://movie.douban.com/',
       'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
       'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     };
+    // v2.0.77: 已登录豆瓣时携带 cookie, 拉 l_ratio_poster 公开图(无需 cookie)
+    // 也带上, 部分高分辨率/防盗链场景会用到登录态
+    final String? cookie = UserDataService.getDoubanCookieSync();
+    if (cookie != null && cookie.isNotEmpty) {
+      headers['Cookie'] = cookie;
+    }
+    return headers;
   }
 
   // Bangumi 图片服务器 lain.bgm.tv 需要 User-Agent + Referer

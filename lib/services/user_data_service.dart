@@ -18,14 +18,11 @@ class UserDataService {
   static const String _videoProxyEnabledKey = 'video_proxy_enabled';
   // v2.0.31: 用户手动填的优选 IP, 优先级高于测速结果
   static const String _cfBestIpKey = 'cf_best_ip';
-  // v2.0.35: TMDB API Key (v3 auth), 留空 = 关闭 TMDB 海报墙, 有 = 首页 2 个
-  //   section (热门电影 / 热门剧集) 自动切 TMDB 横滚海报墙 + 评分
-  //   申请地址 https://www.themoviedb.org/settings/api (免费, 立即审核)
-  static const String _tmdbApiKeyKey = 'tmdb_api_key';
-  // v2.0.45: TMDB 数据源 (直连 / CF Worker 加速), 跟豆瓣/Bangumi 对齐
-  //   key: direct / cf_worker, 默认 cf_worker (跟 Bangumi 默认对齐,
-  //   因为 api.themoviedb.org 在国内几乎不可达, 直连基本是 0% 命中)
-  static const String _tmdbDataSourceKey = 'tmdb_data_source';
+  // v2.0.77: 豆瓣登录 cookie — 登录后给豆瓣图升到 l_ratio_poster (高清),
+  //   没登录 = 现有图片不变化.
+  //   用户从浏览器 DevTools 复制 cookie 字符串粘进来, 存这里.
+  //   申请的 cookie 失效了再粘一次就行.
+  static const String _doubanCookieKey = 'douban_cookie';
 
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -37,14 +34,8 @@ class UserDataService {
   static String? _bangumiDataSourceCache;
   static String? _bangumiImageSourceCache;
   static String? _cfBestIpCache;
-  // v2.0.35
-  static String? _tmdbApiKeyCache;
-  // v2.0.45
-  static String? _tmdbDataSourceCache;
-  // v2.0.41 加了 ValueNotifier 触发 HomeScreen rebuild, v2.0.43 砍掉首页 TMDB
-  //   后没人监听, 字段也回滚. 保持单一 static String? 缓存, getTmdbApiKeySync
-  //   同步读, saveTmdbApiKey 同步写. 详情页 push 时 build 拿最新 cache, 不需要
-  //   通知器 (跟前 v2.0.38 一样).
+  // v2.0.77
+  static String? _doubanCookieCache;
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -331,7 +322,7 @@ class UserDataService {
 
   // v2.0.76: CF Worker 加速开关 语义重定义
   //   旧 (v2.0.70~v2.0.75): "代理总开关" — 控制是否启代理 (CF Worker)
-  //   新 (v2.0.76+):        "优选 IP 启用" — 控制所有资源 (视频 / 图片 / TMDB / Bangumi)
+  //   新 (v2.0.76+):        "优选 IP 启用" — 控制所有资源 (视频 / 图片 / Bangumi 等)
   //                          是否走优选 IP. CF Worker 代理本身不再有总开关,
   //                          只要域名配了默认就生效.
   // 保存
@@ -430,102 +421,56 @@ class UserDataService {
     return v;
   }
 
-  // ===== TMDB API Key (v2.0.35) =====
+  // ===== 豆瓣登录 cookie (v2.0.77) =====
+  //
+  // 用户从浏览器 DevTools → Application → Cookies → movie.douban.com
+  //   复制整串 cookie 粘进来, 存这里. 登录后:
+  //   - getImageUrl 拿到豆瓣 URL 时自动把 s_ratio_poster / m_ratio_poster
+  //     升到 l_ratio_poster (600x900, 公开图最大尺寸) — 详情页大头部 / 轮播
+  //   - 详情页请求豆瓣 API 时带 cookie, 拿到原图尺寸的 raw_url (需登录)
+  //   - 用户登出 / cookie 失效 → 删 key, 行为退回到没登录 = 当前不变化
+  //
+  // 不做主动 cookie 校验 (没法在 Flutter 里跑 JS / 跑 OAuth), 失效
+  // 用户自己再粘一次. 想主动校验就看图加载 403 没.
 
-  /// 异步读 TMDB API key. 没填 = null.
-  ///
-  /// 配 key 即等价于「启用 TMDB 海报墙 / 大头部」开关. 详情页 (player_screen)
-  /// build 时同步读 [getTmdbApiKeySync], 配了走 TmdbDetailHeader, 没配走原
-  /// _buildPosterHeader. (v2.0.41 曾把首页热门 2 个 section 也切 TMDB,
-  /// v2.0.43 砍掉, 改回 Douban section.)
-  static Future<String?> getTmdbApiKey() async {
-    if (_tmdbApiKeyCache != null) return _tmdbApiKeyCache;
+  /// 异步读豆瓣 cookie, 没存 = null.
+  static Future<String?> getDoubanCookie() async {
+    if (_doubanCookieCache != null) return _doubanCookieCache;
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_tmdbApiKeyKey);
+    final v = prefs.getString(_doubanCookieKey);
     if (v == null || v.isEmpty) {
-      _tmdbApiKeyCache = null;
+      _doubanCookieCache = null;
       return null;
     }
-    _tmdbApiKeyCache = v;
+    _doubanCookieCache = v;
     return v;
   }
 
-  /// 同步读 TMDB API key (build 时用, 避免 Future). null = 未配 / 未初始化.
-  static String? getTmdbApiKeySync() => _tmdbApiKeyCache;
+  /// 同步读豆瓣 cookie (build 时用). null = 未配.
+  static String? getDoubanCookieSync() => _doubanCookieCache;
 
-  /// v2.0.43: 同步判断 TMDB key 是否配了 — 给 player_screen / tmdb_detail_header
-  ///   build 时用, 决定走 TMDB 大头部还是 fallback.
-  ///   (之前是 tmdb_poster_wall.dart 里的顶级函数, v2.0.43 砍掉首页 TMDB
-  ///   后 poster_wall 文件没意义了, 把这个 1 行 helper 移到这里.)
-  static bool isTmdbApiKeyConfigured() {
-    final k = _tmdbApiKeyCache;
-    return k != null && k.isNotEmpty;
+  /// 同步判断是否登录 (build 时用).
+  static bool isDoubanLoggedIn() {
+    final c = _doubanCookieCache;
+    return c != null && c.isNotEmpty;
   }
 
-  /// 保存 TMDB API key. trim + 非空校验. 传 null 或空字符串 = 删除.
-  ///
-  /// 不做严格格式校验 (v3 key 32 字符 hex / v4 JWT 长字符串),
-  /// 等调用 TMDB API 失败时再提示用户重填.
-  static Future<void> saveTmdbApiKey(String? input) async {
+  /// 保存豆瓣 cookie. trim + 非空校验. 传 null / 空 = 清除.
+  static Future<void> saveDoubanCookie(String? input) async {
     final cleaned = (input ?? '').trim();
     final prefs = await SharedPreferences.getInstance();
     if (cleaned.isEmpty) {
-      await prefs.remove(_tmdbApiKeyKey);
-      _tmdbApiKeyCache = null;
+      await prefs.remove(_doubanCookieKey);
+      _doubanCookieCache = null;
     } else {
-      await prefs.setString(_tmdbApiKeyKey, cleaned);
-      _tmdbApiKeyCache = cleaned;
+      await prefs.setString(_doubanCookieKey, cleaned);
+      _doubanCookieCache = cleaned;
     }
   }
 
-  // ===== TMDB 数据源 (v2.0.45) =====
-  //
-  // 跟豆瓣/Bangumi 的数据源选择器对齐: 用户选「直连」或「CF Worker 加速」,
-  //   默认 cf_worker (api.themoviedb.org 在国内几乎不可达, 直连基本 0% 命中).
-  //   CF Worker 模式依赖用户配的 CF Worker 域名 (跟 Bangumi 一样, 配了就用,
-  //   不依赖 CF Worker 加速总开关).
-  //
-  // 存储 key: direct / cf_worker
-  static const String _tmdbDataSourceDefault = 'cf_worker';
-
-  static Future<String> getTmdbDataSourceKey() async {
-    if (_tmdbDataSourceCache != null) return _tmdbDataSourceCache!;
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_tmdbDataSourceKey) ?? _tmdbDataSourceDefault;
-    _tmdbDataSourceCache = v;
-    return v;
-  }
-
-  static String getTmdbDataSourceKeySync() {
-    return _tmdbDataSourceCache ?? _tmdbDataSourceDefault;
-  }
-
-  static Future<String> getTmdbDataSourceDisplayName() async {
-    final key = await getTmdbDataSourceKey();
-    switch (key) {
-      case 'cf_worker':
-        return 'CF Worker 加速';
-      case 'direct':
-      default:
-        return '直连';
-    }
-  }
-
-  static String getTmdbDataSourceKeyFromDisplayName(String name) {
-    switch (name) {
-      case 'CF Worker 加速':
-        return 'cf_worker';
-      case '直连':
-      default:
-        return 'direct';
-    }
-  }
-
-  static Future<void> saveTmdbDataSource(String key) async {
-    final cleaned = key == 'cf_worker' ? 'cf_worker' : 'direct';
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tmdbDataSourceKey, cleaned);
-    _tmdbDataSourceCache = cleaned;
+  /// 清除豆瓣 cookie (登出).
+  static Future<void> clearDoubanCookie() async {
+    await saveDoubanCookie(null);
   }
 
   /// 同步读 (启动 warmup 后用)
@@ -805,29 +750,6 @@ class UserDataService {
     return originalUrl;
   }
 
-  /// v2.0.45: 构造 TMDB 数据请求 URL
-  ///
-  /// 跟 [buildBangumiDataUrl] 风格一致:
-  ///   - 用户选 "直连" → 原 URL (api.themoviedb.org 直连, 国内基本不可达)
-  ///   - 用户选 "CF Worker 加速" → 走用户配的 CF Worker 域名 (只要配了就用,
-  ///     不依赖 CF Worker 加速总开关 — 跟 Bangumi 行为对齐)
-  ///   - CF Worker 域名没配 → 退化成直连 (跟 Bangumi 行为对齐)
-  ///
-  /// 这是同步版, 跟 buildBangumiDataUrl / buildProxiedUrl 保持一致.
-  /// 异步版 TmdbService._wrap 走 getTmdbDataSourceKey + buildProxiedUrlAsync.
-  static String buildTmdbDataUrl(String originalUrl) {
-    final key = getTmdbDataSourceKeySync();
-    if (key == 'direct') return originalUrl;
-
-    // cf_worker: 走 CF Worker 域名 (跟 Bangumi 一样, 配了就用)
-    final worker = _cfWorkerDomainCache;
-    if (worker != null && worker.isNotEmpty) {
-      return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
-    }
-    // 域名没配, 退化成直连
-    return originalUrl;
-  }
-
   /// 构造 Bangumi 图片请求 URL
   ///
   /// 优先级（和 Bangumi 数据源对齐）：
@@ -910,11 +832,11 @@ class UserDataService {
   static Future<void> warmupCfWorkerConfig() async {
     await _ensureCfWorkerCache();
     await warmupBangumiConfig();
-    // v2.0.45: 缓存 TMDB 数据源 (跟 Bangumi 一样, build 阶段同步读)
-    if (_tmdbDataSourceCache == null) {
+    // v2.0.77: 缓存豆瓣 cookie, 给 getImageUrl 高画质升级用
+    if (_doubanCookieCache == null) {
       final prefs = await SharedPreferences.getInstance();
-      _tmdbDataSourceCache =
-          prefs.getString(_tmdbDataSourceKey) ?? _tmdbDataSourceDefault;
+      final v = prefs.getString(_doubanCookieKey);
+      _doubanCookieCache = (v == null || v.isEmpty) ? null : v;
     }
   }
 }
