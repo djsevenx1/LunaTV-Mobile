@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:luna_tv/services/user_data_service.dart'; // v2.0.82: saveManualBestIp 调用 saveCfBestIp
+
 /// CF 优选测速服务
 ///
 /// v2.0.11: 新增,客户端纯 override DNS 解析
@@ -227,6 +229,173 @@ class CfOptimizer {
     await prefs.remove(_kIps);
     await prefs.remove(_kLastTest);
     await prefs.remove(_kTargetDomain);
+  }
+
+  // ============== v2.0.82: IP 优选测速 (返回全量结果, 让用户点选存) ==============
+  //
+  // 跟 [runOptimization] 不同:
+  //   - runOptimization: 按延迟取 Top 3 自动存, 后台用
+  //   - runSpeedTest: 测所有 IP 的延迟 + 下载速度, 列表展示, 用户手动点存
+  //
+  // 测速方法: HttpClient + addHostEntry 强制 host → ip 映射, GET worker
+  //   /speed?size=1 端点 (v2.0.84 一次性 Uint8Array, 不流式). 同时拿到
+  //   延迟 (HTTP 响应开始到第一字节 ≈ TCP+TLS 握手时间) 和下载速度.
+  //
+  // 限制: 默认测前 30 个 IP, 避免 100 个 IP × 1MB = 100MB 流量.
+
+  /// IP 优选测速结果 (供 UI 展示)
+  ///   - latencyMs: HTTP 响应延迟 (ms), -1 = 失败
+  ///   - mbPerSec: 下载速度 (MB/s), 0 = 失败
+  ///   - httpCode: HTTP 状态码, 0 = 连接失败, -1 = 超时
+  static Future<List<({String ip, int latencyMs, double mbPerSec, int httpCode})>>
+      runSpeedTest({
+    required String targetDomain,
+    int testMB = 1,
+    int maxIps = 30,
+    int concurrency = 6,
+    Duration timeout = const Duration(seconds: 10),
+    void Function(int done, int total)? onProgress,
+  }) async {
+    if (targetDomain.isEmpty) return const [];
+    final cleanDomain = targetDomain
+        .replaceFirst(RegExp(r'^https?://'), '')
+        .split('/').first
+        .trim();
+
+    final ips = _candidateIps.take(maxIps).toList();
+    final results = <({String ip, int latencyMs, double mbPerSec, int httpCode})>[];
+    final queue = List<String>.from(ips);
+    int done = 0;
+    int total = queue.length;
+
+    Future<void> worker() async {
+      while (queue.isNotEmpty) {
+        final ip = queue.removeAt(0);
+        final r = await _probeOneWithSpeed(
+          ip: ip,
+          host: cleanDomain,
+          testMB: testMB,
+          timeout: timeout,
+        );
+        results.add(r);
+        done++;
+        onProgress?.call(done, total);
+      }
+    }
+
+    final workers = <Future<void>>[];
+    for (int i = 0; i < concurrency; i++) {
+      workers.add(worker());
+    }
+    await Future.wait(workers);
+
+    // 按速度降序排序, 失败的 (mbPerSec=0) 排最后
+    results.sort((a, b) {
+      if (a.mbPerSec == 0 && b.mbPerSec == 0) return 0;
+      if (a.mbPerSec == 0) return 1;
+      if (b.mbPerSec == 0) return -1;
+      return b.mbPerSec.compareTo(a.mbPerSec);
+    });
+    return results;
+  }
+
+  /// 单 IP 测速: HTTP GET worker /speed?size=N, 强制 host → ip
+  /// 返回 (ip, latencyMs, mbPerSec, httpCode)
+  ///   - latencyMs: 拿到第一个字节的时间 (ms), 反映 TCP+TLS 握手延迟
+  ///   - mbPerSec: 下载完 testMB 的平均速度
+  ///   - httpCode: HTTP 状态码, 0/-1/-2/-3 = 连接/超时/TLS/其他错误
+  static Future<({String ip, int latencyMs, double mbPerSec, int httpCode})>
+      _probeOneWithSpeed({
+    required String ip,
+    required String host,
+    required int testMB,
+    required Duration timeout,
+  }) async {
+    final sw = Stopwatch()..start();
+    HttpClient? client;
+    try {
+      client = HttpClient()
+        ..connectionTimeout = timeout
+        ..idleTimeout = timeout;
+      // v2.0.82: 强制 host → ip 解析 (绕开 DNS, 测到 IP 的真实速度)
+      client.addHostEntry(host, ip);
+      final uri = Uri(
+        scheme: 'https',
+        host: host,
+        path: '/speed',
+        queryParameters: {'size': '$testMB'},
+      );
+      final req = await client.getUrl(uri).timeout(timeout);
+      req.headers.set(HttpHeaders.hostHeader, host);
+      req.headers.set(HttpHeaders.userAgentHeader, 'LunaTV-CfSpeedTest/1.0');
+      final resp = await req.close();
+      final code = resp.statusCode;
+      if (code != 200) {
+        try {
+          await resp.drain<void>().timeout(const Duration(seconds: 2));
+        } catch (_) {}
+        sw.stop();
+        return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: code);
+      }
+      // 读 body, 第一个 chunk 时间 = TCP+TLS 握手延迟
+      int firstByteMs = -1;
+      int bytes = 0;
+      final stream = resp.handleError((_) {});
+      final completer = Completer<void>();
+      StreamSubscription<List<int>>? sub;
+      sub = stream.listen(
+        (chunk) {
+          if (firstByteMs < 0) {
+            firstByteMs = sw.elapsedMilliseconds;
+          }
+          bytes += chunk.length;
+        },
+        onDone: () => completer.complete(),
+        onError: (_) => completer.complete(),
+        cancelOnError: false,
+      );
+      await completer.future.timeout(timeout);
+      await sub?.cancel();
+      sw.stop();
+      final secs = sw.elapsedMilliseconds / 1000.0;
+      final mb = bytes / 1024.0 / 1024.0;
+      final mbps = secs > 0 ? mb / secs : 0.0;
+      return (
+        ip: ip,
+        latencyMs: firstByteMs < 0 ? sw.elapsedMilliseconds : firstByteMs,
+        mbPerSec: mbps,
+        httpCode: 200,
+      );
+    } on TimeoutException {
+      sw.stop();
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -1);
+    } on SocketException {
+      sw.stop();
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: 0);
+    } on HandshakeException {
+      sw.stop();
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -2);
+    } catch (e) {
+      sw.stop();
+      return (ip: ip, latencyMs: -1, mbPerSec: 0, httpCode: -3);
+    } finally {
+      try {
+        client?.close(force: true);
+      } catch (_) {}
+    }
+  }
+
+  /// 把选中的 IP 存为优选 (单 IP 形式, 给 [UserDataService.saveCfBestIp])
+  /// 同时也存到 [_kIps] 列表 (给 [CfOptimizerHttpOverrides] 用)
+  static Future<void> saveManualBestIp(String ip) async {
+    if (ip.isEmpty) return;
+    await UserDataService.saveCfBestIp(ip);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kIps, [ip]);
+    await prefs.setInt(_kLastTest, DateTime.now().millisecondsSinceEpoch);
+    await prefs.setString(_kTargetDomain, '');
+    // 立即推到 HTTP overrides
+    CfOptimizerHttpOverrides.setManualPreferredIp(ip);
   }
 
   /// 格式化最后测速时间 (人类可读)

@@ -1,6 +1,3 @@
-import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -9,10 +6,15 @@ import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/screens/cf_ip_speed_test_page.dart'; // v2.0.82: IP 优选测速新页面
 
 /// v2.0.30: 砍掉「IP 优选测速」+「视频走优选 IP 代理」两块, 只留 CF Worker
 /// 加速开关 + 域名配置. CORSAPI worker (v2.0.28b) 已自带 CF edge cache, 是
 /// 当前的唯一加速通道.
+///
+/// v2.0.82: 恢复 IP 优选测速 UI 入口 (_buildIpSpeedTestTile 跳新页面).
+///   老 _testWorkerSpeed / _buildSpeedTestTile (v2.0.80) 测的是固定域名一个值,
+///   用户反馈"列出速度快的给我选" — 现改为扫 30 个 IP 列表让用户点选.
 class CfAccelerationPage extends StatefulWidget {
   const CfAccelerationPage({super.key});
 
@@ -28,15 +30,6 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
   //   现在加回来). 后端存储键还在 user_data_service.dart, 默认 false.
   bool _videoProxyEnabled = false;
   bool _loading = true;
-
-  // v2.0.80: 测速到 worker 状态
-  bool _isSpeedTesting = false;
-  int? _speedTestSizeMB; // 测速用的数据大小 (MB)
-  double? _speedTestMBps; // 结果 MB/s
-  int? _speedTestMs; // 耗时 (ms)
-  String? _speedTestErr; // 错误信息
-  int? _speedTestReceived; // 实际下载字节数
-  int? _speedTestExpected; // 期望下载字节数 (Content-Length)
 
   @override
   void initState() {
@@ -78,78 +71,9 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     });
   }
 
-  // v2.0.80: 测速到 worker 域名 (/speed 端点)
-  //   - 用户配置 worker 域名后才能测速
-  //   - 测的是「mobile → worker」实际下载速度 (走 CfOptimizerHttpOverrides,
-  //     配了优选 IP 时会走优选 IP 测速, 跟实际播放路径一致)
-  //   - 测得 MB/s, 显示在加速域名输入框下方
-  Future<void> _testWorkerSpeed(int sizeMB) async {
-    if (_cfWorkerDomain.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先配置 CF Worker 加速源域名'),
-          backgroundColor: Color(0xFFEF4444),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-    if (_isSpeedTesting) return;
-
-    if (!mounted) return;
-    setState(() {
-      _isSpeedTesting = true;
-      _speedTestSizeMB = sizeMB;
-      _speedTestErr = null;
-      _speedTestMBps = null;
-      _speedTestMs = null;
-      _speedTestReceived = null;
-      _speedTestExpected = null;
-    });
-
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 10);
-    final url = Uri.parse('https://$_cfWorkerDomain/speed?size=$sizeMB');
-    final start = DateTime.now();
-    int received = 0;
-    int? expected;
-
-    try {
-      final req = await client.getUrl(url);
-      req.headers.set(HttpHeaders.userAgentHeader, 'LunaTV-SpeedTest/1.0');
-      final resp = await req.close();
-      if (resp.statusCode != 200) {
-        throw HttpException('HTTP ${resp.statusCode}', uri: url);
-      }
-      final cl = resp.headers.value(HttpHeaders.contentLengthHeader);
-      if (cl != null) expected = int.tryParse(cl);
-      await for (final chunk in resp) {
-        received += chunk.length;
-      }
-    } on Exception catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isSpeedTesting = false;
-        _speedTestErr = e.toString();
-      });
-      return;
-    } finally {
-      client.close(force: true);
-    }
-
-    final elapsedMs = DateTime.now().difference(start).inMilliseconds;
-    // MB/s = (bytes / 1024 / 1024) / (ms / 1000)
-    final mbps = (received / 1024.0 / 1024.0) / (elapsedMs / 1000.0);
-    if (!mounted) return;
-    setState(() {
-      _isSpeedTesting = false;
-      _speedTestMBps = mbps;
-      _speedTestMs = elapsedMs;
-      _speedTestReceived = received;
-      _speedTestExpected = expected;
-    });
-  }
+  // v2.0.82: v2.0.80 _testWorkerSpeed 已删除, 测速改到 CfIpSpeedTestPage
+  //   扫 30 个 IP 列表让用户选. _testWorkerSpeed 测的是固定 worker 域名一个
+  //   值, 用户反馈"列出速度快的给我选" — 这边只留 IP 优选测速入口.
 
   Future<void> _setBestIp(String ip) async {
     // v2.0.32: 返回清理后的字符串, null = 无效输入
@@ -766,137 +690,74 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
     );
   }
 
-  // v2.0.80: 测速 tile - 显示当前测速状态 + 1MB/5MB 按钮 + 测速结果
-  Widget _buildSpeedTestTile(bool isDark) {
+  // v2.0.82: IP 优选测速入口 tile — 跳 [CfIpSpeedTestPage]
+  //   替代 v2.0.80/81 "测速到 Worker" 按钮组 (用户反馈"列出速度快的给我选").
+  //   跳新页面扫 30 个 CF IP, 列表按速度降序, 点选存优选.
+  Widget _buildIpSpeedTestTile(bool isDark) {
     final cardColor = isDark ? const Color(0xFF1e1e1e) : Colors.white;
-    final subtitleColor = isDark ? const Color(0xFF9ca3af) : const Color(0xFF6b7280);
-    final primaryTextColor = isDark ? const Color(0xFFffffff) : const Color(0xFF1f2937);
-    final greenColor = const Color(0xFF10b981);
-
-    // 状态文案
-    String statusText;
-    Widget statusValue;
-    if (_isSpeedTesting) {
-      statusText = '测速中... (${_speedTestSizeMB}MB)';
-      statusValue = SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          valueColor: AlwaysStoppedAnimation<Color>(greenColor),
-        ),
-      );
-    } else if (_speedTestErr != null) {
-      statusText = '测速失败: $_speedTestErr';
-      statusValue = Icon(LucideIcons.alertTriangle,
-          size: 16, color: const Color(0xFFEF4444));
-    } else if (_speedTestMBps != null) {
-      final mbpsStr = _speedTestMBps!.toStringAsFixed(2);
-      final ms = _speedTestMs ?? 0;
-      final sizeMB = _speedTestSizeMB ?? 0;
-      statusText = '结果: $mbpsStr MB/s · 耗时 ${ms}ms · 测试 ${sizeMB}MB';
-      statusValue = Icon(LucideIcons.gauge, size: 16, color: greenColor);
-    } else {
-      statusText = '点击按钮测速到 worker 域名 (实际播放路径)';
-      statusValue = Icon(LucideIcons.gauge, size: 16, color: subtitleColor);
-    }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(LucideIcons.gauge,
-                  size: 20, color: subtitleColor),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '测速到 Worker',
-                  style: FontUtils.poppins(context,
-                      fontSize: 14,
-                      color: subtitleColor,
-                      fontWeight: FontWeight.w400),
-                ),
-              ),
-              statusValue,
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            statusText,
-            style: FontUtils.sourceCodePro(context,
-                fontSize: 13,
-                color: primaryTextColor,
-                fontWeight: FontWeight.w500),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _buildSpeedTestButton(
-                  label: _isSpeedTesting && _speedTestSizeMB == 1
-                      ? '测试中...'
-                      : '测速 1MB',
-                  isDark: isDark,
-                  enabled: !_isSpeedTesting,
-                  onTap: () => _testWorkerSpeed(1),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildSpeedTestButton(
-                  label: _isSpeedTesting && _speedTestSizeMB == 3
-                      ? '测试中...'
-                      : '测速 3MB',
-                  isDark: isDark,
-                  enabled: !_isSpeedTesting,
-                  onTap: () => _testWorkerSpeed(3),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSpeedTestButton({
-    required String label,
-    required bool isDark,
-    required bool enabled,
-    required VoidCallback onTap,
-  }) {
-    final bgColor = enabled
-        ? const Color(0xFF10b981)
-        : (isDark ? const Color(0xFF374151) : const Color(0xFFe5e7eb));
-    final textColor = enabled
-        ? Colors.white
-        : (isDark ? const Color(0xFF6b7280) : const Color(0xFF9ca3af));
+    final subtitleColor =
+        isDark ? const Color(0xFF9ca3af) : const Color(0xFF6b7280);
+    final primaryTextColor =
+        isDark ? const Color(0xFFffffff) : const Color(0xFF1f2937);
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
+        onTap: _cfWorkerDomain.isEmpty
+            ? null
+            : () async {
+                final picked = await Navigator.of(context).push<String>(
+                  MaterialPageRoute(
+                    builder: (_) => CfIpSpeedTestPage(
+                      workerDomain: _cfWorkerDomain,
+                    ),
+                  ),
+                );
+                if (!mounted) return;
+                if (picked != null && picked.isNotEmpty) {
+                  // 跳新页面里已经写了 UserDataService + CfOptimizerHttpOverrides,
+                  // 这里只刷新 UI (CfBestIp 重新读)
+                  final best = await UserDataService.getCfBestIp();
+                  if (!mounted) return;
+                  setState(() {
+                    _cfBestIp = best ?? '';
+                  });
+                }
+              },
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(8),
+            color: cardColor,
+            borderRadius: BorderRadius.circular(10),
           ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: FontUtils.poppins(context,
-                fontSize: 13,
-                color: textColor,
-                fontWeight: FontWeight.w500),
+          child: Row(
+            children: [
+              Icon(LucideIcons.gauge, size: 20, color: subtitleColor),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'CF IP 优选测速',
+                      style: FontUtils.poppins(context,
+                          fontSize: 14,
+                          color: primaryTextColor,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '扫描 30 个 CF IP 测延迟+速度, 点选存优选',
+                      style: FontUtils.sourceCodePro(context,
+                          fontSize: 11, color: subtitleColor),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(LucideIcons.chevronRight,
+                  size: 16, color: subtitleColor),
+            ],
           ),
         ),
       ),
@@ -959,10 +820,12 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                       icon: LucideIcons.server,
                       isDark: isDark,
                     ),
-                    // v2.0.80: 测速到 worker 按钮组 (默认 1MB / 5MB 两档)
+                    // v2.0.82: CF IP 优选测速入口 (跳新页面, 扫 30 个 IP 列
+                    //   速度给用户选). 替代 v2.0.80 "测速到 worker" (只能测一个
+                    //   固定域名, 用户反馈"列出速度快的给我选").
                     if (_cfWorkerDomain.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      _buildSpeedTestTile(isDark),
+                      _buildIpSpeedTestTile(isDark),
                     ],
                     const SizedBox(height: 8),
                     _buildInputTile(
