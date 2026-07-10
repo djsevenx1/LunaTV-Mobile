@@ -223,7 +223,7 @@ class BangumiService {
         headerLines.add(line);
       }
       if (headerLines.isEmpty) {
-        return (502, <String, String>{}, '');
+        return (502, {}, '');
       }
       final statusLine = headerLines.first;
       final status = int.tryParse(statusLine.split(' ').elementAtOrNull(1) ?? '') ?? 0;
