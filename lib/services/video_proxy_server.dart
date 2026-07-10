@@ -450,10 +450,14 @@ class VideoProxyServer {
     int backendToClientBytes = 0;
     DateTime? firstClientDataAt;
     DateTime? firstBackendDataAt;
+    // v2.0.61: 标记 client 是否已关闭, 30s 超时兜底用 (StreamSubscription
+    //   没有 isCanceled getter, 用局部 bool 替代)
+    bool clientClosed = false;
     Socket? backend;
     bool backendReady = false;
 
     void closeAll({bool graceful = false}) {
+      clientClosed = true;
       final aliveMs = DateTime.now().difference(connT0).inMilliseconds;
       // v2.0.58: 标记可疑短响应 — backend 回了数据但很少 (<2KB) 且连接活过
       //   500ms, 通常是 502/错误页/截断的段. 这是 "优选 IP 4s 时长" bug 的
@@ -624,7 +628,7 @@ class VideoProxyServer {
                   } catch (_) {}
                   // 30s 超时兜底: 如果 libmpv 30s 没关 client, 强制关 (防泄漏)
                   Future.delayed(const Duration(seconds: 30), () {
-                    if (clientSub != null && !clientSub.isCanceled) {
+                    if (!clientClosed) {
                       VideoProxyLog.append('[VideoProxy] [$connId] 30s 超时强制关闭 client (libmpv 没关)');
                       closeAll();
                     }
