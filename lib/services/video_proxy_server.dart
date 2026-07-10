@@ -823,6 +823,7 @@ class VideoProxyServer {
     //   - TLS SNI = workerDomain (host 参数控制 SNI, 不是连接地址)
     //   - 手动发 HTTP/1.1 请求 + 流式读响应
     final preferIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    final fetchStart = DateTime.now();
     // ignore: avoid_print
     VideoProxyLog.append(
         '[VideoProxy] LOCAL 代理 fetch: https://$workerDomain$target (优选IP=${preferIp ?? "无,走DNS"})');
@@ -909,7 +910,25 @@ class VideoProxyServer {
       final isChunked = (headers['transfer-encoding'] ?? '').toLowerCase().contains('chunked');
 
       if (isM3u8) {
-        // m3u8: 完整读取 body, 重写 https://worker/ → http://127.0.0.1:PORT/
+        // v2.0.69: 先发响应头 (chunked), 让 libmpv 不会 5 秒超时放弃.
+        //   之前: 等 worker body 读完重写完才发响应头 → 优选 IP 慢 (6s) 时
+        //         libmpv 5s 超时放弃 ("header 阶段都没数据" + "Failed to open").
+        //   现在: worker 响应头一到立刻发给 libmpv (Transfer-Encoding: chunked),
+        //         body 读完重写后用一个 chunk 发出. libmpv 收到响应头就不会超时.
+        final headerSentAt = DateTime.now();
+        final respBuf = StringBuffer();
+        respBuf.write('HTTP/1.1 $statusCode OK\r\n');
+        respBuf.write('Content-Type: $contentType\r\n');
+        respBuf.write('Transfer-Encoding: chunked\r\n');
+        respBuf.write('Access-Control-Allow-Origin: *\r\n');
+        respBuf.write('Connection: close\r\n');
+        respBuf.write('\r\n');
+        client.add(utf8.encode(respBuf.toString()));
+        await client.flush();
+        VideoProxyLog.append(
+            '[VideoProxy] LOCAL m3u8 响应头已发 (chunked), worker 响应头到达耗时 ${DateTime.now().difference(fetchStart).inMilliseconds}ms, 等待 body 重写...');
+
+        // 读完整 body, 重写 https://worker/ → http://127.0.0.1:PORT/
         final bodyBytes = await reader.readBody(contentLength, isChunked);
         final body = utf8.decode(bodyBytes);
         final port = _port;
@@ -918,18 +937,14 @@ class VideoProxyServer {
         final rewritten = body.replaceAll(workerBase, localBase);
         final rewrittenBytes = utf8.encode(rewritten);
 
-        final respBuf = StringBuffer();
-        respBuf.write('HTTP/1.1 $statusCode OK\r\n');
-        respBuf.write('Content-Type: $contentType\r\n');
-        respBuf.write('Content-Length: ${rewrittenBytes.length}\r\n');
-        respBuf.write('Access-Control-Allow-Origin: *\r\n');
-        respBuf.write('Connection: close\r\n');
-        respBuf.write('\r\n');
-        client.add(utf8.encode(respBuf.toString()));
+        // chunked: 长度行 (hex) + 数据 + \r\n + 结束 chunk (0\r\n\r\n)
+        client.add(utf8.encode('${rewrittenBytes.length.toRadixString(16)}\r\n'));
         client.add(rewrittenBytes);
+        client.add(utf8.encode('\r\n0\r\n\r\n'));
         await client.flush();
+        final bodyMs = DateTime.now().difference(headerSentAt).inMilliseconds;
         VideoProxyLog.append(
-            '[VideoProxy] LOCAL m3u8 重写完成: ${bodyBytes.length}B → ${rewrittenBytes.length}B (优选IP=$preferIp)');
+            '[VideoProxy] LOCAL m3u8 重写完成: ${bodyBytes.length}B → ${rewrittenBytes.length}B (body 耗时 ${bodyMs}ms, 优选IP=$preferIp)');
       } else {
         // 非 m3u8 (.ts / .mp4): 流式转发
         final respBuf = StringBuffer();
