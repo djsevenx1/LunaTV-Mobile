@@ -598,13 +598,37 @@ class VideoProxyServer {
                   closeAll();
                 },
                 onDone: () {
-                  // v2.0.59: backend 正常结束用 graceful 关闭 — 先 flush client
-                  //   再 close, 避免 m3u8 数据卡在发送 buffer 被 destroy 丢弃.
-                  //   这是 4s 时长 bug 的根因 (见 closeAll 注释).
+                  // v2.0.61: 修 4s 时长 bug 真正根因 — backend 关闭时不能关 client!
+                  //   之前 backend onDone 立刻 closeAll (v2.0.59 改 graceful 也不行),
+                  //   client.close() 发 FIN 包, libmpv 读到 FIN 就停止读取,
+                  //   client 内核 buffer 里还没读完的 sub-m3u8 数据就丢了.
+                  //   sub-m3u8 274KB, libmpv 读得慢, backend 1.3s 传完就关,
+                  //   libmpv 可能只读到开头几段 → duration 4s.
+                  //   修法: backend onDone 只关 backend, 不关 client. client 等
+                  //   libmpv 自己读完数据后关闭, client onDone 触发 closeAll.
+                  //   风险: client 永不关闭会泄漏 socket. 加 30s 超时兜底.
                   // ignore: avoid_print
                   VideoProxyLog.append(
-                      '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes → 优雅关闭 client');
-                  closeAll(graceful: true);
+                      '[VideoProxy] [$connId] upstream socket done (remote 关闭), 总 $backendToClientBytes bytes → 只关 backend, 等 libmpv 读完 client');
+                  try {
+                    backendSub?.cancel();
+                  } catch (_) {}
+                  try {
+                    backend?.destroy();
+                  } catch (_) {}
+                  // 半关闭 client 写端: 告诉 libmpv 没有更多数据了, 但不强制关.
+                  // flush 确保数据从 Dart 层刷到内核 buffer, close() 发 FIN.
+                  // 但这次只 flush 不 close — 等 libmpv onDone.
+                  try {
+                    client.flush();
+                  } catch (_) {}
+                  // 30s 超时兜底: 如果 libmpv 30s 没关 client, 强制关 (防泄漏)
+                  Future.delayed(const Duration(seconds: 30), () {
+                    if (clientSub != null && !clientSub.isCanceled) {
+                      VideoProxyLog.append('[VideoProxy] [$connId] 30s 超时强制关闭 client (libmpv 没关)');
+                      closeAll();
+                    }
+                  });
                 },
                 cancelOnError: true,
               );
