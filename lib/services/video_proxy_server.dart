@@ -822,99 +822,155 @@ class VideoProxyServer {
       return;
     }
 
-    final upstreamUrl = 'https://$workerDomain$target';
+    // v2.0.66: 不用 HttpClient (CfOptimizerHttpOverrides 会把 URI host 改成 IP,
+    //   导致 TLS SNI = IP, CF edge 拒绝握手 → SSLV3_ALERT_HANDSHAKE_FAILURE).
+    //   改用 SecureSocket.connect(preferIp, 443, host: workerDomain):
+    //   - TCP 连优选 IP
+    //   - TLS SNI = workerDomain (host 参数控制 SNI, 不是连接地址)
+    //   - 手动发 HTTP/1.1 请求 + 流式读响应
+    final preferIp = CfOptimizerHttpOverrides.getResolvedManualIp();
     // ignore: avoid_print
     VideoProxyLog.append(
-        '[VideoProxy] LOCAL 代理 fetch: $upstreamUrl');
+        '[VideoProxy] LOCAL 代理 fetch: https://$workerDomain$target (优选IP=${preferIp ?? "无,走DNS"})');
 
+    Socket? upstream;
     try {
-      final httpClient = HttpClient();
-      // 连接超时 10s, 响应超时 30s (.ts 段可能几 MB)
-      httpClient.connectionTimeout = const Duration(seconds: 10);
-
-      final req = await httpClient.getUrl(Uri.parse(upstreamUrl));
-      // 透传部分请求头 (UA 等, 但不含 host/proxy 相关)
-      final ua = state.headers['user-agent'];
-      if (ua != null && ua.isNotEmpty) {
-        req.headers.set('User-Agent', ua);
+      // 1. 建立 TCP + TLS 连接 (SNI = workerDomain)
+      if (preferIp != null && preferIp.isNotEmpty) {
+        // v2.0.66: 用 SecureSocket.connect, 第二个参数 host 控制 SNI
+        //   SecureSocket.connect(address, port, host: sniHostname)
+        //   - address: TCP 连接的 IP
+        //   - host: TLS SNI + 证书验证的域名
+        upstream = await SecureSocket.connect(
+          preferIp,
+          443,
+          host: workerDomain,
+          timeout: const Duration(seconds: 10),
+        );
+      } else {
+        // 没配优选 IP, 走系统 DNS (SNI = workerDomain 自动)
+        upstream = await SecureSocket.connect(
+          workerDomain,
+          443,
+          timeout: const Duration(seconds: 10),
+        );
       }
+      try {
+        upstream.setOption(SocketOption.tcpNoDelay, true);
+      } catch (_) {}
+
+      // 2. 发 HTTP/1.1 请求 (Host header = workerDomain)
+      final ua = state.headers['user-agent'] ??
+          'Mozilla/5.0 (Linux; Android 13; Mobile) LunaTV/1.0';
       final range = state.headers['range'];
+      final reqBuf = StringBuffer();
+      reqBuf.write('GET $target HTTP/1.1\r\n');
+      reqBuf.write('Host: $workerDomain\r\n');
+      reqBuf.write('User-Agent: $ua\r\n');
+      reqBuf.write('Accept: */*\r\n');
+      reqBuf.write('Connection: close\r\n');
       if (range != null && range.isNotEmpty) {
-        req.headers.set('Range', range);
+        reqBuf.write('Range: $range\r\n');
+      }
+      reqBuf.write('\r\n');
+      upstream.add(utf8.encode(reqBuf.toString()));
+      await upstream.flush();
+
+      // 3. 读响应头 (逐行读直到空行)
+      final reader = _SocketReader(upstream);
+      final headerLines = <String>[];
+      while (true) {
+        final line = await reader.readLine();
+        if (line == null) break; // EOF
+        if (line.isEmpty) break; // 空行 = 头结束
+        headerLines.add(line);
       }
 
-      final resp = await req.close().timeout(
-        const Duration(seconds: 30),
-      );
+      if (headerLines.isEmpty) {
+        throw Exception('upstream 返回空响应');
+      }
 
-      // 判断 Content-Type — m3u8 需要重写链接, 其他 (.ts / .mp4) 直接流式转发
-      final contentType = resp.headers.value('content-type') ?? '';
+      // 解析状态行 + 头
+      final statusLine = headerLines.first;
+      final statusParts = statusLine.split(' ');
+      final statusCode = statusParts.length >= 2 ? int.tryParse(statusParts[1]) ?? 502 : 502;
+      final headers = <String, String>{};
+      for (var i = 1; i < headerLines.length; i++) {
+        final idx = headerLines[i].indexOf(':');
+        if (idx > 0) {
+          final key = headerLines[i].substring(0, idx).trim().toLowerCase();
+          final val = headerLines[i].substring(idx + 1).trim();
+          headers[key] = val;
+        }
+      }
+
+      final contentType = headers['content-type'] ?? '';
       final isM3u8 = contentType.contains('mpegurl') ||
           contentType.contains('m3u8') ||
           target.contains('/m3u8');
+      final contentLength = int.tryParse(headers['content-length'] ?? '');
+      final isChunked = (headers['transfer-encoding'] ?? '').toLowerCase().contains('chunked');
 
       if (isM3u8) {
-        // m3u8: 完整读取, 重写 https://worker/ → http://127.0.0.1:PORT/
-        final body = await resp.transform(const Utf8Decoder()).join();
+        // m3u8: 完整读取 body, 重写 https://worker/ → http://127.0.0.1:PORT/
+        final bodyBytes = await reader.readBody(contentLength, isChunked);
+        final body = utf8.decode(bodyBytes);
         final port = _port;
         final localBase = 'http://127.0.0.1:$port';
         final workerBase = 'https://$workerDomain';
         final rewritten = body.replaceAll(workerBase, localBase);
+        final rewrittenBytes = utf8.encode(rewritten);
 
-        final bodyBytes = utf8.encode(rewritten);
-        final headerBuf = StringBuffer();
-        headerBuf.write('HTTP/1.1 ${resp.statusCode} ${resp.reasonPhrase}\r\n');
-        headerBuf.write('Content-Type: $contentType\r\n');
-        headerBuf.write('Content-Length: ${bodyBytes.length}\r\n');
-        headerBuf.write('Access-Control-Allow-Origin: *\r\n');
-        headerBuf.write('Connection: close\r\n');
-        headerBuf.write('\r\n');
-        client.add(utf8.encode(headerBuf.toString()));
-        client.add(bodyBytes);
+        final respBuf = StringBuffer();
+        respBuf.write('HTTP/1.1 $statusCode OK\r\n');
+        respBuf.write('Content-Type: $contentType\r\n');
+        respBuf.write('Content-Length: ${rewrittenBytes.length}\r\n');
+        respBuf.write('Access-Control-Allow-Origin: *\r\n');
+        respBuf.write('Connection: close\r\n');
+        respBuf.write('\r\n');
+        client.add(utf8.encode(respBuf.toString()));
+        client.add(rewrittenBytes);
         await client.flush();
         VideoProxyLog.append(
-            '[VideoProxy] LOCAL m3u8 重写完成: ${body.length}B → ${rewritten.length}B (worker→local)');
+            '[VideoProxy] LOCAL m3u8 重写完成: ${bodyBytes.length}B → ${rewrittenBytes.length}B (优选IP=$preferIp)');
       } else {
-        // 非 m3u8 (.ts / .mp4 等): 流式转发, 不重写
-        final headerBuf = StringBuffer();
-        headerBuf.write('HTTP/1.1 ${resp.statusCode} ${resp.reasonPhrase}\r\n');
-        final contentLength = resp.headers.value('content-length');
+        // 非 m3u8 (.ts / .mp4): 流式转发
+        final respBuf = StringBuffer();
+        respBuf.write('HTTP/1.1 $statusCode OK\r\n');
         if (contentLength != null) {
-          headerBuf.write('Content-Length: $contentLength\r\n');
-        } else {
-          headerBuf.write('Transfer-Encoding: chunked\r\n');
+          respBuf.write('Content-Length: $contentLength\r\n');
         }
-        final ct = resp.headers.value('content-type');
-        if (ct != null) headerBuf.write('Content-Type: $ct\r\n');
-        final ce = resp.headers.value('content-range');
-        if (ce != null) headerBuf.write('Content-Range: $ce\r\n');
-        headerBuf.write('Access-Control-Allow-Origin: *\r\n');
-        headerBuf.write('Connection: close\r\n');
-        headerBuf.write('\r\n');
-        client.add(utf8.encode(headerBuf.toString()));
+        final ct = headers['content-type'];
+        if (ct != null) respBuf.write('Content-Type: $ct\r\n');
+        final cr = headers['content-range'];
+        if (cr != null) respBuf.write('Content-Range: $cr\r\n');
+        respBuf.write('Access-Control-Allow-Origin: *\r\n');
+        respBuf.write('Connection: close\r\n');
+        respBuf.write('\r\n');
+        client.add(utf8.encode(respBuf.toString()));
         await client.flush();
 
         // 流式转发 body
-        int totalBytes = 0;
-        await for (final chunk in resp) {
-          totalBytes += chunk.length;
-          client.add(chunk);
-          await client.flush();
-        }
+        final totalBytes = await reader.streamTo(client);
         VideoProxyLog.append(
-            '[VideoProxy] LOCAL 流式转发完成: $totalBytes bytes');
+            '[VideoProxy] LOCAL 流式转发完成: $totalBytes bytes (优选IP=$preferIp)');
       }
 
-      httpClient.close();
-      // 关闭 client (发 FIN, libmpv 读完就结束)
+      // 关闭连接
+      try {
+        await upstream.flush();
+        upstream.destroy();
+      } catch (_) {}
       try {
         await client.flush();
         client.close();
       } catch (_) {}
-      // 不调 closeAll — client.onDone 会触发
     } catch (e) {
       // ignore: avoid_print
       VideoProxyLog.append('[VideoProxy] LOCAL 代理 fetch 失败: $e');
+      try {
+        upstream?.destroy();
+      } catch (_) {}
       _sendHttpError(client, 502, 'Local proxy error: $e', closeAll);
     }
   }
@@ -1103,4 +1159,133 @@ class _ProxyState {
   final Map<String, String> headers = {};
   List<int> buffer = [];
   List<int> pendingBodyBytes = [];
+}
+
+/// v2.0.66: Socket 读取器, 封装 socket + 剩余 buffer.
+///   用于 _handleLocalHttp 读 HTTP 响应 (readLine / readBody / streamTo).
+///   解决 socket.first 丢数据 + 逐字节读慢的问题.
+class _SocketReader {
+  final Socket _socket;
+  final List<int> _buf = [];
+  bool _eof = false;
+  final StreamIterator<List<int>> _iter;
+
+  _SocketReader(this._socket) : _iter = StreamIterator(_socket);
+
+  /// 读一行 (以 \r\n 或 \n 结尾), 返回不含换行符的内容. EOF 返回 null.
+  Future<String?> readLine() async {
+    final line = <int>[];
+    while (true) {
+      if (_buf.isEmpty) {
+        if (_eof) {
+          return line.isEmpty ? null : utf8.decode(line);
+        }
+        if (!await _iter.moveNext()) {
+          _eof = true;
+          return line.isEmpty ? null : utf8.decode(line);
+        }
+        _buf.addAll(_iter.current);
+      }
+      var consumed = 0;
+      while (consumed < _buf.length) {
+        final b = _buf[consumed];
+        if (b == 0x0D) {
+          // \r
+          consumed++;
+          if (consumed < _buf.length) {
+            if (_buf[consumed] == 0x0A) consumed++; // \r\n
+          }
+          // 移除已读
+          _buf.removeRange(0, consumed);
+          return utf8.decode(line);
+        }
+        if (b == 0x0A) {
+          consumed++;
+          _buf.removeRange(0, consumed);
+          return utf8.decode(line);
+        }
+        line.add(b);
+        consumed++;
+      }
+      _buf.clear();
+    }
+  }
+
+  /// 读完整 body (Content-Length 或 chunked 或 EOF)
+  Future<List<int>> readBody(int? contentLength, bool isChunked) async {
+    final out = <int>[];
+    if (isChunked) {
+      while (true) {
+        final sizeLine = await readLine();
+        if (sizeLine == null) break;
+        final size = int.tryParse(sizeLine.trim(), radix: 16) ?? 0;
+        if (size == 0) {
+          await readLine();
+          break;
+        }
+        out.addAll(await readN(size));
+        await readLine();
+      }
+    } else if (contentLength != null) {
+      out.addAll(await readN(contentLength));
+    } else {
+      while (!_eof) {
+        if (_buf.isNotEmpty) {
+          out.addAll(_buf);
+          _buf.clear();
+        }
+        if (!await _iter.moveNext()) {
+          _eof = true;
+        } else {
+          out.addAll(_iter.current);
+        }
+      }
+    }
+    return out;
+  }
+
+  /// 精确读 N 字节
+  Future<List<int>> readN(int n) async {
+    final out = <int>[];
+    while (out.length < n) {
+      if (_buf.isEmpty) {
+        if (!await _iter.moveNext()) {
+          _eof = true;
+          break;
+        }
+        _buf.addAll(_iter.current);
+      }
+      final take = n - out.length;
+      if (_buf.length <= take) {
+        out.addAll(_buf);
+        _buf.clear();
+      } else {
+        out.addAll(_buf.sublist(0, take));
+        _buf.removeRange(0, take);
+      }
+    }
+    return out;
+  }
+
+  /// 流式转发剩余 body 到 [sink], 返回总字节数
+  Future<int> streamTo(Socket sink) async {
+    var total = 0;
+    // 先发 buffer 里剩余的
+    if (_buf.isNotEmpty) {
+      sink.add(_buf);
+      await sink.flush();
+      total += _buf.length;
+      _buf.clear();
+    }
+    while (!_eof) {
+      if (!await _iter.moveNext()) {
+        _eof = true;
+        break;
+      }
+      sink.add(_iter.current);
+      await sink.flush();
+      total += _iter.current.length;
+    }
+    return total;
+  }
 }
