@@ -638,80 +638,71 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
 
 class _OptimizingHttpClient implements HttpClient {
   final HttpClient _inner;
-  _OptimizingHttpClient(this._inner) {
-    // v2.0.73: 用 connectionFactory 控制 TLS SNI, 彻底解决 SNI = IP bug.
-    //   旧做法 (v2.0.32): getUrl/openUrl 把 URI host 改成优选 IP, 再设 Host header.
-    //     问题: TLS 握手在 connection 阶段, 用 URI host 当 SNI → SNI = IP →
-    //     CF edge 拒握手 (HandshakeException). Host header 是 HTTP 层的, TLS 层不看.
-    //   新做法: URI host 保持原域名 (TLS SNI = 原域名 ✓), connectionFactory
-    //     在 connection 阶段拦截 — TCP 连优选 IP, 然后 SecureSocket.secure(socket, host: 原域名)
-    //     升级 TLS. 这样 TCP 走优选 IP (加速), TLS SNI = 原域名 (CF edge 认).
-    //   覆盖: 图片 (CachedNetworkImage) / TMDB / Bangumi / 任何 HttpClient 请求.
-    _inner.connectionFactory = (Uri url, String? proxyHost, int? proxyPort) {
-      final preferIp = _resolvePreferIp(url);
-      if (preferIp == null) {
-        // 没配优选 IP / 不是目标域名 → 走默认 (系统 DNS)
-        return HttpClient.baseConnectionFactory(url, proxyHost, proxyPort);
-      }
-      // 自定义连接: TCP 连优选 IP, TLS SNI = 原 host
-      final host = url.host;
-      final port = url.port == 0 ? 443 : url.port;
-      return _connectWithSni(preferIp, port, host);
-    };
-  }
+  _OptimizingHttpClient(this._inner);
 
-  /// 判断这个 URL 要不要走优选 IP, 返回优选 IP (null = 不走).
-  String? _resolvePreferIp(Uri uri) {
+  InternetAddress? _tryOverrideAddress(Uri uri) {
     final target = CfOptimizerHttpOverrides._targetDomainCache;
     if (target == null || target.isEmpty) return null;
     final host = uri.host.toLowerCase();
     if (host != target.toLowerCase()) return null;
 
     // v2.0.32: 手动优选优先级最高, 不受 featureEnabled 控制
+    // 用 _resolvedManualIp 而不是 _manualPreferredIp, 这样域名已经被解析成 IP
     final resolved = CfOptimizerHttpOverrides._resolvedManualIp;
     if (resolved != null && resolved.isNotEmpty) {
-      return resolved;
+      return InternetAddress(resolved, type: InternetAddressType.IPv4);
     }
 
     // 退回测速结果 (需要 featureEnabled + 测速结果)
     if (!CfOptimizerHttpOverrides._featureEnabled) return null;
     final ips = CfOptimizerHttpOverrides._bestIpsCache;
     if (ips == null || ips.isEmpty) return null;
-    return ips.first;
+    // 返回第一个优选 IP (按延迟最低排)
+    return InternetAddress(ips.first, type: InternetAddressType.IPv4);
   }
 
-  /// TCP 连 [ip]:[port], TLS 升级时 SNI = [sniHost].
-  /// 返回 ConnectionTask<Socket> 给 HttpClient 用.
-  Future<ConnectionTask<Socket>> _connectWithSni(
-      String ip, int port, String sniHost) async {
-    final completer = Completer<ConnectionTask<Socket>>();
-    // 先 TCP 连优选 IP
-    Socket.connect(ip, port, timeout: const Duration(seconds: 10))
-        .then((tcpSocket) {
-      try {
-        tcpSocket.setOption(SocketOption.tcpNoDelay, true);
-      } catch (_) {}
-      // TLS 升级, SNI = 原域名
-      SecureSocket.secure(tcpSocket, host: sniHost).then((secureSocket) {
-        completer.complete(_DoneConnectionTask(secureSocket));
-      }).catchError((e) {
-        try {
-          tcpSocket.destroy();
-        } catch (_) {}
-        completer.completeError(e);
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) {
+    final addr = _tryOverrideAddress(url);
+    if (addr != null) {
+      final newUri = Uri(
+        scheme: url.scheme,
+        userInfo: url.userInfo,
+        host: addr.address,
+        port: url.port,
+        path: url.path,
+        query: url.query,
+        fragment: url.fragment,
+      );
+      // 用 Host header 保留原域名 (SNI / TLS 验证用)
+      return _inner.getUrl(newUri).then((req) {
+        req.headers.set('Host', url.host);
+        return req;
       });
-    }).catchError((e) {
-      completer.completeError(e);
-    });
-    return completer.future;
+    }
+    return _inner.getUrl(url);
   }
 
   @override
-  Future<HttpClientRequest> getUrl(Uri url) => _inner.getUrl(url);
-
-  @override
-  Future<HttpClientRequest> openUrl(String method, Uri url) =>
-      _inner.openUrl(method, url);
+  Future<HttpClientRequest> openUrl(String method, Uri url) {
+    final addr = _tryOverrideAddress(url);
+    if (addr != null) {
+      final newUri = Uri(
+        scheme: url.scheme,
+        userInfo: url.userInfo,
+        host: addr.address,
+        port: url.port,
+        path: url.path,
+        query: url.query,
+        fragment: url.fragment,
+      );
+      return _inner.openUrl(method, newUri).then((req) {
+        req.headers.set('Host', url.host);
+        return req;
+      });
+    }
+    return _inner.openUrl(method, url);
+  }
 
   // 其余方法透传
   @override
@@ -805,22 +796,4 @@ class _OptimizingHttpClient implements HttpClient {
   Future<HttpClientRequest> postUrl(Uri url) => _inner.postUrl(url);
   @override
   Future<HttpClientRequest> putUrl(Uri url) => _inner.putUrl(url);
-}
-
-/// v2.0.73: 包装已完成的 socket 成 [ConnectionTask], 给
-/// `HttpClient.connectionFactory` 用. socket 已经连上 + TLS 握手完成,
-/// `socket` future 立即完成, `cancel` 是 no-op (已经连上了).
-class _DoneConnectionTask implements ConnectionTask<Socket> {
-  final Socket _socket;
-  _DoneConnectionTask(this._socket);
-
-  @override
-  Future<Socket> get socket => Future.value(_socket);
-
-  @override
-  void cancel() {
-    try {
-      _socket.destroy();
-    } catch (_) {}
-  }
 }
