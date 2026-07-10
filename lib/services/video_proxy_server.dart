@@ -76,27 +76,21 @@ class VideoProxyServer {
     final domain = await UserDataService.getCfWorkerDomain();
     if (domain.isEmpty) return null;
 
-    // 守门 3 (v2.0.34): 手动优选 IP 已解析
-    //   _resolvedManualIp 在 v2.0.32 resolveManualPreferred() 后非空
-    //   - IPv4 模式: setManualPreferredIp 时立即设
-    //   - 域名模式: 启动时 + 5min 周期 resolve
-    //   null = 没配 / 刚启动还没 resolve 完 / 解析失败
+    // v2.0.67: 优选 IP 不再是必须条件!
+    //   - 填了优选 IP: 代理用 SecureSocket 连优选 IP (加速)
+    //   - 没填优选 IP: 代理用 SecureSocket 连 worker 域名 (走系统 DNS, 不加速但统一走代理链路)
+    //   CF 加速关 → tryStart 返 null → libmpv 直连视频源 (不走 worker)
     final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
-    if (resolvedIp == null || resolvedIp.isEmpty) return null;
 
     // 全部满足, 启代理
     try {
       final s = VideoProxyServer._();
       await s._bind();
       // ignore: avoid_print
-      VideoProxyLog.append('[VideoProxy] tryStart 成功: bind 127.0.0.1:${s._port}');
+      VideoProxyLog.append('[VideoProxy] tryStart 成功: bind 127.0.0.1:${s._port} (优选IP=${resolvedIp ?? "无,走DNS"})');
       return s;
     } catch (e, st) {
-      // v2.0.39: 不再静默吞, 打印详细原因. _bind() 失败一般是:
-      //   - 端口被占 (极少见, 0 是系统分配空闲端口)
-      //   - 系统限制 ServerSocket (Android 14+ 沙箱)
-      //   - 已有 _videoProxy 没释放 (跨页面残留, _ensureVideoProxy 守门)
-      //   - 异常 OS 资源耗尽
+      // v2.0.39: 不再静默吞, 打印详细原因.
       // ignore: avoid_print
       VideoProxyLog.append('[VideoProxy] tryStart bind 失败: $e\n$st');
       return null;

@@ -1814,26 +1814,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     // v2.0.58: 记录优选 IP 状态, 帮助分析 "4s 卡顿" 跟 manual IP 的关系
     final manualIp = CfOptimizerHttpOverrides.getResolvedManualIp();
     VideoProxyLog.append('[VideoProxy] _ensureVideoProxy 开始: manualIp=$manualIp');
-    // v2.0.39 修: 加重试. v2.0.34 假设进播放页时 _resolvedManualIp 一定就绪,
-    //   但实际有冷启动竞态: 启动走 _resolveAndSchedule fire-and-forget 5s 内 resolve,
-    //   用户启动后秒进播放页, _player.open 后 _resolvedManualIp 还没值, tryStart
-    //   守门 3 fail, _videoProxyActive 永远 false. 之后 _ensureVideoProxy 也不会被重调.
-    //   修法: 失败时若 _resolvedManualIp 还没值, 等 1s 重试一次, 最多 3 次 (3s 内)
-    VideoProxyServer? proxy;
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      proxy = await VideoProxyServer.tryStart();
-      if (proxy != null) break;
-      final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
-      if (resolvedIp != null && resolvedIp.isNotEmpty) {
-        // 有 IP 但 tryStart 还是 null → bind() 失败, 不要再 retry
-        VideoProxyLog.append('[VideoProxy] tryStart 第 $attempt 次返 null 但 IP 已有 ($resolvedIp) → bind 失败, 不再 retry');
-        return;
-      }
-      VideoProxyLog.append('[VideoProxy] tryStart 第 $attempt 次返 null — 冷启动 _resolvedManualIp 还没值, 等 1s 重试');
-      await Future.delayed(const Duration(seconds: 1));
-    }
+    // v2.0.67: 优选 IP 不再是必须条件, tryStart 一次就行 (不再 retry 等 _resolvedManualIp)
+    //   - CF 加速开 + worker 域名配了 → tryStart 成功 (优选 IP 可选)
+    //   - CF 加速关 → tryStart 返 null → libmpv 直连视频源
+    final proxy = await VideoProxyServer.tryStart();
     if (proxy == null) {
-      VideoProxyLog.append('[VideoProxy] 3 次都失败, 视频代理不起, libmpv 走原 URL');
+      VideoProxyLog.append('[VideoProxy] tryStart 返 null (CF 加速未开/域名未配), libmpv 走原 URL');
       return;
     }
     // v2.0.65: 不再设 libmpv --http-proxy!
