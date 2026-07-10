@@ -829,29 +829,32 @@ class VideoProxyServer {
 
     Socket? upstream;
     try {
-      // 1. 建立 TCP + TLS 连接 (SNI = workerDomain)
+      // v2.0.68: 正确的 TLS SNI 做法
+      //   SecureSocket.connect 没有 host: 命名参数 (编译错误).
+      //   正确: Socket.connect(ip, 443) 建 TCP, 再 SecureSocket.secure(socket, host: domain)
+      //   升级 TLS. host 参数控制 SNI + 证书验证域名.
       if (preferIp != null && preferIp.isNotEmpty) {
-        // v2.0.66: 用 SecureSocket.connect, 第二个参数 host 控制 SNI
-        //   SecureSocket.connect(address, port, host: sniHostname)
-        //   - address: TCP 连接的 IP
-        //   - host: TLS SNI + 证书验证的域名
-        upstream = await SecureSocket.connect(
+        // 填了优选 IP: TCP 连优选 IP, TLS SNI = workerDomain
+        final tcpSocket = await Socket.connect(
           preferIp,
           443,
-          host: workerDomain,
           timeout: const Duration(seconds: 10),
         );
+        try {
+          tcpSocket.setOption(SocketOption.tcpNoDelay, true);
+        } catch (_) {}
+        upstream = await SecureSocket.secure(tcpSocket, host: workerDomain);
       } else {
-        // 没配优选 IP, 走系统 DNS (SNI = workerDomain 自动)
+        // 没配优选 IP: 走系统 DNS (SNI = workerDomain 自动)
         upstream = await SecureSocket.connect(
           workerDomain,
           443,
           timeout: const Duration(seconds: 10),
         );
+        try {
+          upstream.setOption(SocketOption.tcpNoDelay, true);
+        } catch (_) {}
       }
-      try {
-        upstream.setOption(SocketOption.tcpNoDelay, true);
-      } catch (_) {}
 
       // 2. 发 HTTP/1.1 请求 (Host header = workerDomain)
       final ua = state.headers['user-agent'] ??
