@@ -145,16 +145,14 @@ class DoubanMovieDetails {
       return int.tryParse(value?.toString() ?? '');
     }
 
-    // 处理poster字段
+    // 处理poster字段 (v2.0.84: 不再把 cover_url (16:9 横版) fallback 当 poster)
     String poster = '';
     if (json['poster'] != null) {
       poster = json['poster']?.toString() ?? '';
-    } else if (json['cover_url'] != null) {
-      poster = json['cover_url']?.toString() ?? '';
     } else if (json['images'] != null) {
       final images = json['images'] as Map<String, dynamic>?;
-      poster = images?['large']?.toString() ?? 
-               images?['medium']?.toString() ?? 
+      poster = images?['large']?.toString() ??
+               images?['medium']?.toString() ??
                images?['small']?.toString() ?? '';
     } else if (json['pic'] != null) {
       final pic = json['pic'] as Map<String, dynamic>?;
@@ -162,6 +160,22 @@ class DoubanMovieDetails {
                pic?['normal']?.toString() ??
                pic?['medium']?.toString() ??
                pic?['small']?.toString() ?? '';
+    }
+
+    // v2.0.84: 拆 coverUrl (16:9 横版剧照) + photos (剧照列表) — 独立字段, 不再当 poster fallback
+    final String? coverUrl = nonEmptyString(json['cover_url']);
+    List<String> photos = const [];
+    final rawPhotos = json['photos'];
+    if (rawPhotos is List) {
+      photos = rawPhotos
+          .map((p) {
+            if (p is Map) {
+              return nonEmptyString(p['image']) ?? nonEmptyString(p['thumb']) ?? '';
+            }
+            return '';
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
     }
     
     // 处理rating字段
