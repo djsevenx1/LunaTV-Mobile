@@ -143,6 +143,10 @@ class DoubanService {
                 poster: map['poster']?.toString() ?? '',
                 rate: map['rate']?.toString(),
                 year: map['year']?.toString() ?? '',
+                // v2.0.84: 16:9 横版 cover_url. 列表接口可能没给, null fallback
+                coverUrl: (map['cover_url']?.toString() ?? '').isNotEmpty
+                    ? map['cover_url']?.toString()
+                    : null,
               );
             })
             .toList(),
@@ -310,6 +314,10 @@ class DoubanService {
                 poster: map['poster']?.toString() ?? '',
                 rate: map['rate']?.toString(),
                 year: map['year']?.toString() ?? '',
+                // v2.0.84: 16:9 横版 cover_url. 列表接口可能没给, null fallback
+                coverUrl: (map['cover_url']?.toString() ?? '').isNotEmpty
+                    ? map['cover_url']?.toString()
+                    : null,
               );
             })
             .toList(),
@@ -488,6 +496,23 @@ class DoubanService {
             id: map['id']?.toString() ?? '',
             title: map['title']?.toString() ?? '',
             poster: map['poster']?.toString() ?? '',
+            // v2.0.84: 16:9 横版 cover_url + 剧照列表
+            coverUrl: (map['cover_url']?.toString() ?? '').isNotEmpty
+                ? map['cover_url']?.toString()
+                : null,
+            photos: (map['photos'] is List)
+                ? (map['photos'] as List<dynamic>)
+                    .map((p) {
+                      if (p is Map) {
+                        return (p['image']?.toString() ?? '') != ''
+                            ? p['image'].toString()
+                            : (p['thumb']?.toString() ?? '');
+                      }
+                      return '';
+                    })
+                    .where((s) => s.isNotEmpty)
+                    .toList()
+                : const <String>[],
             rate: map['rate']?.toString(),
             year: map['year']?.toString() ?? '',
             summary: map['summary']?.toString(),

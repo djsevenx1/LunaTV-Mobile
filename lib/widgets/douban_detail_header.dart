@@ -55,6 +55,10 @@ class DoubanDetailHeader extends StatefulWidget {
   final String cover; // douban / bangumi URL (v2.0.77 自动升 l_ratio)
   final String source; // 'douban' / 'bangumi'
   final String? sourceName; // 「默认: 豆瓣」那行
+  // v2.0.84: 16:9 横版剧照 coverUrl (l_cover 1280x720). 平板/横屏用这个
+  //   当大背景 (iPad 屏 1024+ 宽, 竖海报 l_ratio_poster 600x900 缩到 2K 宽
+  //   边角糊, 横版 l_cover 1280x720 完美 cover). 有则用, 无则 fallback cover.
+  final String? coverUrl;
 
   const DoubanDetailHeader({
     super.key,
@@ -63,6 +67,7 @@ class DoubanDetailHeader extends StatefulWidget {
     required this.cover,
     required this.source,
     this.sourceName,
+    this.coverUrl,
   });
 
   @override
@@ -70,6 +75,15 @@ class DoubanDetailHeader extends StatefulWidget {
 }
 
 class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
+  /// v2.0.84: 平板背景 URL — coverUrl (横版) 优先, cover (竖版) 兜底.
+  ///   coverUrl 走 [getDoubanCoverUrl] 升级到 l_cover 1280x720 + CDN 切换
+  Future<String> _tabletBackgroundUrl() async {
+    if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty) {
+      return getDoubanCoverUrl(widget.coverUrl!);
+    }
+    return getImageUrl(widget.cover, widget.source);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<ThemeService>().isDarkMode;
@@ -212,15 +226,19 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
   /// v2.0.78: 平板 — 21:9 横版, 左侧 150x225 大竖海报 + 右侧渐变 + 标题
   ///
   /// v2.0.51 平板 21:9 比例, 给选集 / source list 留出空间.
+  /// v2.0.84: 背景用 coverUrl (16:9 横版剧照) 替代 cover (2:3 竖海报).
+  ///   平板 2K 屏 1024+ 宽, 竖海报 600x900 拉到全宽会糊;
+  ///   横版 l_cover 1280x720 完美 cover 平板宽度.
+  ///   无 coverUrl 时 fallback 到 cover (竖海报).
   Widget _buildTabletLayout(bool isDark) {
     return AspectRatio(
       aspectRatio: 21 / 9,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 1) 背景: 整张海报 + 重度渐变 (跟 v2.0.51 TMDB hero 一致)
+          // 1) 背景: 横版 coverUrl (有则) / 竖版 cover (无则)
           FutureBuilder<String>(
-            future: getImageUrl(widget.cover, widget.source),
+            future: _tabletBackgroundUrl(),
             builder: (context, snapshot) {
               final imageUrl = snapshot.data ?? widget.cover;
               final headers = getImageRequestHeaders(imageUrl, widget.source);

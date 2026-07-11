@@ -59,7 +59,9 @@ class DoubanRecommendItem {
 class DoubanMovieDetails {
   final String id;
   final String title;
-  final String poster;
+  final String poster; // 2:3 竖屏海报
+  final String? coverUrl; // v2.0.84: 16:9 横版剧照/cover (l_cover 1280x720)
+  final List<String> photos; // v2.0.84: 剧照列表 (16:9 横版)
   final String? rate;
   final String year;
   final String? summary;
@@ -80,6 +82,8 @@ class DoubanMovieDetails {
     required this.id,
     required this.title,
     required this.poster,
+    this.coverUrl,
+    this.photos = const [],
     this.rate,
     required this.year,
     this.summary,
@@ -230,6 +234,8 @@ class DoubanMovieDetails {
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       poster: poster,
+      coverUrl: coverUrl,
+      photos: photos,
       rate: rate,
       year: year,
       summary: nonEmptyString(json['summary'] ?? json['intro']),
@@ -256,6 +262,8 @@ class DoubanMovieDetails {
       'id': id,
       'title': title,
       'poster': poster,
+      'coverUrl': coverUrl,
+      'photos': photos,
       'rate': rate,
       'year': year,
       'summary': summary,
@@ -282,6 +290,8 @@ class DoubanMovie {
   final String poster;
   final String? rate;
   final String year;
+  // v2.0.84: 16:9 横版 cover_url (l_cover 1280x720). 详情页大头部用
+  final String? coverUrl;
 
   const DoubanMovie({
     required this.id,
@@ -289,6 +299,7 @@ class DoubanMovie {
     required this.poster,
     this.rate,
     required this.year,
+    this.coverUrl,
   });
 
   /// 从JSON创建DoubanMovie实例
@@ -325,6 +336,10 @@ class DoubanMovie {
       poster: poster,
       rate: rate,
       year: year,
+      // v2.0.84: 16:9 横版 cover_url. 移动端推荐/热门接口一般没给, null fallback
+      coverUrl: (json['cover_url']?.toString() ?? '').isNotEmpty
+          ? json['cover_url']?.toString()
+          : null,
     );
   }
 
@@ -334,6 +349,7 @@ class DoubanMovie {
       'id': id,
       'title': title,
       'poster': poster,
+      'cover_url': coverUrl,
       'rate': rate,
       'year': year,
     };
@@ -348,6 +364,8 @@ class DoubanMovie {
       sourceName: '豆瓣',
       year: year,
       cover: poster,
+      // v2.0.84: 把 16:9 横版 coverUrl 传给 VideoInfo, 详情页大头部背景用
+      coverUrl: coverUrl,
       index: 1,
       totalEpisodes: 1,
       playTime: 0,

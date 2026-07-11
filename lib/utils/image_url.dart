@@ -22,6 +22,24 @@ String _upgradeDoubanPosterUrl(String url) {
       .replaceFirst('photo/m', 'photo/l');
 }
 
+/// v2.0.84: 升级豆瓣 16:9 横版 cover (剧照/预告片) URL 到 l_cover (1280x720)
+///
+/// 豆瓣 `/view/photo/...` 路径里 cover 尺寸标识:
+/// - `s_cover` → 约 320×180 (小横版)
+/// - `m_cover` → 约 640×360 (中横版)
+/// - `l_cover` → 约 1280×720 (大横版, 公开图最大)
+///
+/// 默认 rexxar API 给的 `cover_url` 一般是 `m_cover`, 平板/详情页大头部
+/// 缩到 1024+ 宽就糊了. 升级到 `l_cover` 后 1280x720 平板 2K 屏都不糊.
+///
+/// 参考: 豆瓣 iPad app "剧照" 区 / 详情页 banner / Web 端 hero 用的就是这个
+///   l_cover 尺寸 (公开图最大, 无需登录)
+String _upgradeDoubanCoverUrl(String url) {
+  return url
+      .replaceFirst('s_cover', 'l_cover')
+      .replaceFirst('m_cover', 'l_cover');
+}
+
 /// 根据来源处理图片 URL（例如豆瓣域名替换）。
 /// - [originalUrl]: 原始图片地址
 /// - [source]: 数据来源（如 'douban'、'bangumi' 等）
@@ -80,6 +98,40 @@ Future<String> getImageUrl(
     return UserDataService.buildBangumiImageUrl(processed);
   }
   return originalUrl;
+}
+
+/// v2.0.84: 豆瓣 16:9 横版 cover_url 处理器 (跟 [getImageUrl] 类似, 但升级到
+///   l_cover 1280x720 横版, 平板/详情页大头部用). 返回可直接加载的 URL.
+///
+/// 升级策略: **永远升级** 到 l_cover (公开图最大, 320x180/640x360 -> 1280x720),
+///   不需要登录. 默认 rexxar API 给的 `cover_url` 是 m_cover (640x360),
+///   平板缩到 1024+ 宽会糊, l_cover 1280x720 平板 2K 屏不糊.
+///
+/// CDN 切换跟 [getImageUrl] 一致 (official_cdn / cdn_tencent / cdn_aliyun / direct).
+Future<String> getDoubanCoverUrl(String coverUrl) async {
+  if (coverUrl.isEmpty) return coverUrl;
+  final imageSourceKey = await UserDataService.getDoubanImageSourceKey();
+  String processed = _upgradeDoubanCoverUrl(coverUrl);
+  switch (imageSourceKey) {
+    case 'official_cdn':
+      return processed.replaceAll(
+        RegExp(r'img\d+\.doubanio\.com'),
+        'img3.doubanio.com',
+      );
+    case 'cdn_tencent':
+      return processed.replaceAll(
+        RegExp(r'img\d+\.doubanio\.com'),
+        'img.doubanio.cmliussss.net',
+      );
+    case 'cdn_aliyun':
+      return processed.replaceAll(
+        RegExp(r'img\d+\.doubanio\.com'),
+        'img.doubanio.cmliussss.com',
+      );
+    case 'direct':
+    default:
+      return processed;
+  }
 }
 
 /// 返回加载网络图片所需的 HTTP 头（主要用于绕过特定站点的反盗链）。

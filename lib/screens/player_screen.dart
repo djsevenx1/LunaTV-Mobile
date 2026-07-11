@@ -2355,12 +2355,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                 //   行为完全不变, 跟用户要求一致).
                 if (UserDataService.isDoubanLoggedIn() &&
                     widget.videoInfo.cover.isNotEmpty)
+                  // v2.0.84: 传 coverUrl (16:9 横版剧照 l_cover 1280x720)
+                  //   给详情页大头部背景. 平板/横屏缩到 2K 宽不糊.
                   DoubanDetailHeader(
                     title: widget.videoInfo.title,
                     year: widget.videoInfo.year,
                     cover: widget.videoInfo.cover,
                     source: widget.videoInfo.source,
                     sourceName: widget.videoInfo.sourceName,
+                    coverUrl: widget.videoInfo.coverUrl,
                   )
                 else
                   _buildPosterHeader(isDark),

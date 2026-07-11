@@ -17,6 +17,9 @@ class VideoInfo {
   final String? doubanId; // 豆瓣ID，用于豆瓣模式
   final int? bangumiId; // Bangumi ID，用于Bangumi模式
   final String? rate; // 评分，用于豆瓣模式
+  // v2.0.84: 16:9 横版 cover_url (l_cover 1280x720). 详情页大头部用,
+  //   比竖版海报 (l_ratio_poster 600x900) 在平板/横屏清晰
+  final String? coverUrl;
 
   VideoInfo({
     required this.id,
@@ -34,6 +37,7 @@ class VideoInfo {
     this.doubanId,
     this.bangumiId,
     this.rate,
+    this.coverUrl,
   });
 
   /// 从PlayRecord创建VideoInfo
@@ -41,6 +45,7 @@ class VideoInfo {
     String? doubanId,
     int? bangumiId,
     String? rate,
+    String? coverUrl,
   }) {
     return VideoInfo(
       id: playRecord.id,
@@ -58,6 +63,7 @@ class VideoInfo {
       doubanId: doubanId,
       bangumiId: bangumiId,
       rate: rate,
+      coverUrl: coverUrl,
     );
   }
 
@@ -67,7 +73,7 @@ class VideoInfo {
     final parts = key.split('+');
     final source = parts.length > 1 ? parts[0] : '';
     final id = parts.length > 1 ? parts[1] : key;
-    
+
     return VideoInfo(
       id: id,
       source: source,
@@ -84,6 +90,7 @@ class VideoInfo {
       doubanId: json['douban_id'],
       bangumiId: json['bangumi_id'],
       rate: json['rate'],
+      coverUrl: json['cover_url'],
     );
   }
 
@@ -94,6 +101,7 @@ class VideoInfo {
       'source_name': sourceName,
       'year': year,
       'cover': cover,
+      'cover_url': coverUrl,
       'index': index,
       'total_episodes': totalEpisodes,
       'play_time': playTime,
