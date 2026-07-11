@@ -3825,6 +3825,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                 ],
               ),
+              // v2.0.87: 诊断 tile — 长按 / 点开看 MpvFFI 加载状态 + 最近一次
+              //   property 读结果. 之前 v2.0.86 装上还是 0 B/s, 没有任何信号
+              //   知道为啥 (MpvFFI.isAvailable 早退 vs property 读不到 vs
+              //   handle 没拿到). 加这个 tile, 截图给开发者秒定位.
+              const SizedBox(height: 8),
+              _buildMpvFfiDebugTile(),
               // 提示
               if (accelLevel != 'full')
                 Padding(
@@ -4117,6 +4123,104 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// v2.0.34: 格式化下载速度 (Bytes/s → 人类可读)
+  /// v2.0.87: 诊断 tile — 加速链路弹窗底部, 显示 MpvFFI 加载状态 + 最近
+  ///   一次 property 读结果. v2.0.86 装上还是 0 B/s 不知道为啥 (MpvFFI.isAvailable
+  ///   早退 / symbol 找不到 / handle 没拿到 / property 读不到 4 种可能).
+  ///   加这个 tile, 截图给开发者秒定位.
+  ///
+  /// 布局: 默认折叠, 标题 "🔧 MpvFFI 诊断", 副标题 "点击展开".
+  ///   展开后: 显示 MpvFFI.debugStatus 多行文字 (lib 加载状态 / symbol 列表 /
+  ///   错误信息 / 最近一次 property 读结果). 用户截图给我看就能定位.
+  ///
+  /// v2.0.87 设计:
+  ///   - 默认折叠避免打扰普通用户
+  ///   - 字号小 (12sp), 颜色灰 (Color(0xFF9ca3af)), 不抢主视觉
+  ///   - 展开时背景深色 (Color(0xFF111827)), 跟整体弹窗风格一致
+  ///   - 自动 rebuild (FutureBuilder 走 setState 触发)
+  Widget _buildMpvFfiDebugTile() {
+    return StatefulBuilder(
+      builder: (ctx, setLocalState) {
+        final expanded = _mpvFfiDebugExpanded;
+        return GestureDetector(
+          onTap: () {
+            setLocalState(() {
+              _mpvFfiDebugExpanded = !_mpvFfiDebugExpanded;
+            });
+          },
+          child: Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: expanded ? const Color(0xFF111827) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: const Color(0xFF374151),
+                width: 0.5,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.bug_report,
+                        color: Color(0xFF9ca3af), size: 14),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'MpvFFI 诊断',
+                      style: TextStyle(
+                        color: Color(0xFF9ca3af),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      expanded ? Icons.expand_less : Icons.expand_more,
+                      color: const Color(0xFF9ca3af),
+                      size: 16,
+                    ),
+                  ],
+                ),
+                if (expanded) ...[
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    MpvFFI.debugStatus,
+                    style: const TextStyle(
+                      color: Color(0xFF9ca3af),
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: () {
+                      // 强制重新加载 (清除 lib 缓存, 重新 dlopen)
+                      setLocalState(() {});
+                    },
+                    child: const Text(
+                      '(点空白处折叠, 截图发开发者)',
+                      style: TextStyle(
+                        color: Color(0xFF6b7280),
+                        fontSize: 10,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// v2.0.87: 加速链路弹窗的下载速度 / 诊断展开状态
+  bool _mpvFfiDebugExpanded = false;
+
   /// < 1 KB/s → "0 B/s" (避免跳 0 误差)
   /// 1-1024 B/s → "512 B/s"
   /// 1-1024 KB/s → "256 KB/s"
