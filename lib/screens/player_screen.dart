@@ -1842,14 +1842,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     _startSpeedSampling();
   }
 
-  /// v2.0.34: 1Hz 采样 libmpv demuxer-bytes (累计下载字节), 算 delta = 实时下载速度
+  /// v2.0.86: 1Hz 采样 libmpv demuxer-bytes (累计下载字节), 算 delta = 实时下载速度
   ///
   /// 为什么不直接用 m3u8 测速:
   ///   m3u8 测速只在选源时跑一次 (player_sources_panel), 播放中不更新
   ///   demuxer-bytes 是 libmpv 持续统计的, 播放中每秒钟都变, 算 delta 准
   ///
-  /// demuxer-bytes 是 Number 类型 property, getPropertyString 拿到字符串数字
-  /// parse 一下, 简单可靠.
+  /// v2.0.86 改法: 走 MpvFFI.getPropertyI64 读 Number 类型 property
+  ///   之前 (v2.0.34 ~ v2.0.85) 用 MpvFFI.getPropertyString 读 demuxer-bytes
+  ///   永远返 null — libmpv 文档明说 mpv_get_property_string 对 Number 类型
+  ///   property 返 NULL. 结果: 实时下载速度一直显示 "0 B/s" (用户反馈).
+  ///   改用 mpv_get_property_i64 走 Number 类型通道, 拿 int64 稳.
+  ///
+  /// 兜底链: demuxer-bytes → cache-size → input-bitrate (瞬时码率)
+  ///   1. demuxer-bytes: libmpv demuxer 累计下载字节, HLS/MP4 都有
+  ///   2. cache-size: libmpv 缓存字节, 跟 demuxer-bytes 类似但跟 demuxer 无关
+  ///   3. input-bitrate: libmpv 内部统计的瞬时码率 (kb/s, double),
+  ///      用于前两个拿不到时 fallback (一定非 0, 但只能给瞬时值)
   void _startSpeedSampling() {
     _speedSampleTimer?.cancel();
     _lastDemuxerBytes = 0;
@@ -1861,9 +1870,22 @@ class _PlayerScreenState extends State<PlayerScreen>
       try {
         final handle = await _player.handle;
         if (handle == 0) return;
-        final s = MpvFFI.getPropertyString(handle, 'demuxer-bytes');
-        if (s == null) return;
-        final cur = int.tryParse(s) ?? 0;
+        // v2.0.86: 读累计下载字节. 优先 demuxer-bytes, 拿不到 fallback cache-size.
+        //   mpv_get_property_i64 走 Number 类型通道, 不会再像 get_property_string
+        //   那样对 Number 类型返 NULL.
+        int? cur = MpvFFI.getPropertyI64(handle, 'demuxer-bytes');
+        cur ??= MpvFFI.getPropertyI64(handle, 'cache-size');
+        if (cur == null) {
+          // v2.0.86: 两个累计 property 都拿不到, 退到 input-bitrate 瞬时码率
+          //   (kb/s, libmpv 内部统计, 一定非 0). 拿到后 bps = kbps * 1024 / 8.
+          final kbps = MpvFFI.getPropertyDouble(handle, 'input-bitrate');
+          if (kbps != null && kbps > 0 && mounted) {
+            setState(() {
+              _downloadSpeedBps = kbps * 1024 / 8; // kb/s → Bytes/s
+            });
+          }
+          return;
+        }
         final now = DateTime.now().millisecondsSinceEpoch;
         if (_lastSampleMs == 0 || cur < _lastDemuxerBytes) {
           // 首次采样 / demuxer 重置 (切集), 只记基线, 不算速度

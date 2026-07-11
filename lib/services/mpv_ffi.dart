@@ -41,6 +41,24 @@ typedef _MpvGetPropertyStringC = Pointer<Utf8> Function(
 typedef _MpvGetPropertyStringD = Pointer<Utf8> Function(
     Pointer<Void>, Pointer<Utf8>);
 
+// int mpv_get_property_i64(mpv_handle *ctx, const char *name, int64_t *out);
+//   拿 Number 类型 property (int64). v2.0.86+: 取代 getPropertyString 读
+//   demuxer-bytes — libmpv 文档明说 getProperty_string 对 Number 类型返 NULL,
+//   v2.0.86 之前用 getPropertyString(handle, 'demuxer-bytes') 永远拿 null,
+//   所以下载速度一直显示 "0 B/s". 改用 getProperty_i64 走 Number 类型通道, 稳.
+typedef _MpvGetPropertyI64C = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Int64>);
+typedef _MpvGetPropertyI64D = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Int64>);
+
+// double mpv_get_property_double(mpv_handle *ctx, const char *name, double *out);
+//   拿 Number 类型 property (double). v2.0.86+ 备用, 兜底 input-bitrate
+//   (瞬时码率 kb/s, 一定非 0, 用于 demuxer-bytes 拿不到时的 fallback).
+typedef _MpvGetPropertyDoubleC = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Double>);
+typedef _MpvGetPropertyDoubleD = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Double>);
+
 class MpvFFI {
   MpvFFI._();
 
@@ -48,9 +66,13 @@ class MpvFFI {
   static _MpvSetPropertyStringD? _setPropertyString;
   // v2.0.34+: 读 string property
   static _MpvGetPropertyStringD? _getPropertyString;
+  // v2.0.86+: 读 int64 property (demuxer-bytes / cache-size 等 Number 类型)
+  static _MpvGetPropertyI64D? _getPropertyI64;
+  // v2.0.86+: 读 double property (input-bitrate 瞬时码率)
+  static _MpvGetPropertyDoubleD? _getPropertyDouble;
   static String? _loadError;
 
-  /// 加载 libmpv + 找 mpv_set_property_string symbol. 多次调用只会真加载一次.
+  /// 加载 libmpv + 找所有 symbol. 多次调用只会真加载一次.
   static void _ensureLoaded() {
     if (_lib != null || _loadError != null) return;
     try {
@@ -75,6 +97,14 @@ class MpvFFI {
       final sym2 = _lib!.lookup<NativeFunction<_MpvGetPropertyStringC>>(
           'mpv_get_property_string');
       _getPropertyString = sym2.asFunction<_MpvGetPropertyStringD>();
+      // v2.0.86+: 加载 get_property_i64 (读 Number 类型 property, demuxer-bytes)
+      final sym3 = _lib!.lookup<NativeFunction<_MpvGetPropertyI64C>>(
+          'mpv_get_property_i64');
+      _getPropertyI64 = sym3.asFunction<_MpvGetPropertyI64D>();
+      // v2.0.86+: 加载 get_property_double (读 input-bitrate 兜底)
+      final sym4 = _lib!.lookup<NativeFunction<_MpvGetPropertyDoubleC>>(
+          'mpv_get_property_double');
+      _getPropertyDouble = sym4.asFunction<_MpvGetPropertyDoubleD>();
     } catch (e) {
       _loadError = 'Failed to load libmpv: $e';
     }
@@ -127,6 +157,63 @@ class MpvFFI {
       return null;
     } finally {
       calloc.free(namePtr);
+    }
+  }
+
+  /// v2.0.86+: 读 mpv int64 类型 property (e.g. demuxer-bytes / cache-size).
+  ///
+  /// 跟 getPropertyString 不同, libmpv 的 mpv_get_property_string 对
+  /// **Number 类型** property 返 NULL (mpv 文档明说), 所以之前拿
+  /// demuxer-bytes 一直拿 null → 下载速度一直 0 B/s. 改用
+  /// mpv_get_property_i64 走 Number 类型通道, 是 libmpv 专门给 Number 类型
+  /// 提供的 API, 拿 int64 数字稳.
+  ///
+  /// 返回:
+  ///   - 成功: int64 数字
+  ///   - 失败: null (load error / handle=0 / property 不存在 / 类型不匹配)
+  static int? getPropertyI64(int handle, String name) {
+    _ensureLoaded();
+    final fn = _getPropertyI64;
+    if (fn == null) return null;
+    if (handle == 0) return null;
+    final namePtr = name.toNativeUtf8();
+    final outPtr = calloc<Int64>();
+    try {
+      final rc = fn(Pointer<Void>.fromAddress(handle), namePtr, outPtr);
+      if (rc != 0) return null;
+      return outPtr.value;
+    } catch (_) {
+      return null;
+    } finally {
+      calloc.free(namePtr);
+      calloc.free(outPtr);
+    }
+  }
+
+  /// v2.0.86+: 读 mpv double 类型 property (e.g. input-bitrate 瞬时码率).
+  ///
+  /// 跟 getPropertyI64 同源, libmpv 专门给 Number 类型 (double 通道) 提供的
+  /// API. 给 demuxer-bytes 拿不到时做 fallback, 拿瞬时码率 (kb/s).
+  ///
+  /// 返回:
+  ///   - 成功: double 数字
+  ///   - 失败: null
+  static double? getPropertyDouble(int handle, String name) {
+    _ensureLoaded();
+    final fn = _getPropertyDouble;
+    if (fn == null) return null;
+    if (handle == 0) return null;
+    final namePtr = name.toNativeUtf8();
+    final outPtr = calloc<Double>();
+    try {
+      final rc = fn(Pointer<Void>.fromAddress(handle), namePtr, outPtr);
+      if (rc != 0) return null;
+      return outPtr.value;
+    } catch (_) {
+      return null;
+    } finally {
+      calloc.free(namePtr);
+      calloc.free(outPtr);
     }
   }
 }
