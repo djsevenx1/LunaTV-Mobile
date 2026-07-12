@@ -2616,9 +2616,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _buildDetailView(bool isDark) {
-    // v2.1.8: 平板 (宽 >= 600) header 右侧已显示简介, 下方不重复渲染独立 section;
-    //   手机 header 屏窄没显示简介, 仍走下方独立 section.
-    final isTablet = MediaQuery.of(context).size.width >= 600;
     return Column(
       children: [
         // 顶部 bar
@@ -2669,18 +2666,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                     coverUrl: widget.videoInfo.coverUrl,
                     tmdbBackdropUrl: _tmdbBackdropUrl,
                     // v2.1.8: 传 summary, 平板 header 右侧显示简介填满空白.
-                    //   手机 header 屏窄不显示 (DoubanDetailHeader 内部判断),
-                    //   走下方独立 _buildSummarySection.
+                    // v2.1.10: 手机 header 右侧也显示简介 (上面不够写可左滑),
+                    //   下方不再渲染独立 section.
                     summary: _summary,
                   )
                 else
                   _buildPosterHeader(isDark),
-                // v2.1.7: 剧情简介 (用户反馈"海报多的地方放上电影简介")
-                //   选集 section 上面. 走 DoubanService.getDoubanDetails 拉
-                //   doubanId 详情, 取 summary. 拉不到 / 字段空 = 不渲染.
-                // v2.1.8: 平板 header 右侧已显示简介, 不再重复渲染独立 section;
-                //   手机 header 屏窄没显示简介, 仍走独立 section.
-                if (_summary != null && !isTablet) _buildSummarySection(isDark),
+                // v2.1.10: 下方独立剧情简介 section 删除 — 手机/平板
+                //   header 右侧都已显示简介 (上面不够写可左滑). 用户反馈
+                //   "下面画圈的剧情简介去掉, 上面不够写的左滑动".
                 // 集数 (放在源上面,LunaTV Web 风格)
                 _buildEpisodeSection(isDark),
                 // 源 + 测速
