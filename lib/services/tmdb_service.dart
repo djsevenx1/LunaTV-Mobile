@@ -34,6 +34,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 
 class TmdbService {
@@ -145,21 +146,34 @@ class TmdbService {
     int? year,
   }) async {
     final cleaned = cleanTitle(title);
-    if (cleaned.isEmpty) return null;
+    if (cleaned.isEmpty) {
+      DiaryService.add('[TMDB] search skip: cleanTitle 空 (原 title="$title")');
+      return null;
+    }
 
     final apiKey = UserDataService.getTmdbApiKeySync();
-    if (apiKey == null || apiKey.isEmpty) return null;
+    if (apiKey == null || apiKey.isEmpty) {
+      DiaryService.add('[TMDB] search skip: apiKey 空');
+      return null;
+    }
 
     // v2.0.97: 配了 key 但数据源 = 'off' → 强制不走 TMDB, 走豆瓣兜底
     final source = UserDataService.getTmdbDataSourceSync();
     if (source == 'off') {
+      DiaryService.add('[TMDB] search skip: source=off');
       return null;
     }
+    DiaryService.add(
+        '[TMDB] search begin: cleaned="$cleaned" year=$year source=$source');
 
     // 1) 缓存查
     final cacheKey = 'tmdb_ref_${cleaned}_${year ?? ""}';
     final cached = await _readRefCache(cacheKey);
-    if (cached != null) return cached;
+    if (cached != null) {
+      DiaryService.add(
+          '[TMDB] cache hit: ${cached.mediaType}#${cached.id} (key=$cacheKey)');
+      return cached;
+    }
 
     // 2) search/multi 请求 — v2.0.96 不传 year 给 TMDB (命中率更高)
     final params = <String, String>{
@@ -174,26 +188,41 @@ class TmdbService {
     final query =
         params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
     final url = _buildTmdbApiUrl('$_baseUrl/search/multi?$query', source);
+    DiaryService.add('[TMDB] network req: $url');
 
     final http.Response resp;
     try {
       resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-    } catch (_) {
+    } catch (e) {
+      // v2.0.99.2: 网络错也写进日记, 用户排查 "TMDB 大背景没出来为啥"
+      DiaryService.add('[TMDB] network err: $e (timeout=10s)');
       return null;
     }
-    if (resp.statusCode != 200) return null;
+    if (resp.statusCode != 200) {
+      // v2.0.99.2: HTTP 错 (401 key 失效 / 429 限流 / 5xx) 写进日记
+      DiaryService.add(
+          '[TMDB] network err: statusCode=${resp.statusCode} (401=key 失效 / 429=限流 / 5xx=服务异常)');
+      return null;
+    }
 
     final Map<String, dynamic> json;
     try {
       json = jsonDecode(resp.body) as Map<String, dynamic>;
-    } catch (_) {
+    } catch (e) {
+      DiaryService.add('[TMDB] parse err: $e');
       return null;
     }
     final results = (json['results'] as List?) ?? [];
+    if (results.isEmpty) {
+      DiaryService.add('[TMDB] network ok 但 0 results (TMDB 真没这剧)');
+      return null;
+    }
+    DiaryService.add('[TMDB] network ok: ${results.length} results');
 
     String? bestMediaType;
     int? bestId;
     double bestScore = -1; // v2.0.96: 软 year bonus 后的综合分
+    String? bestDate;
     for (final r in results) {
       if (r is! Map) continue;
       final mediaType = r['media_type'] as String?;
@@ -205,10 +234,12 @@ class TmdbService {
       //   - year 为空: score = popularity + 0
       // 这样 year 匹配的剧优先, 但 year 不匹配时仍能选 popularity 最大的.
       double score = (r['popularity'] as num?)?.toDouble() ?? 0;
+      double bonus = 0;
       if (year != null) {
         final dateField = mediaType == 'movie' ? 'release_date' : 'first_air_date';
         final date = r[dateField] as String?;
         if (date != null && date.startsWith(year.toString())) {
+          bonus = 1000.0;
           score += 1000.0;
         }
       }
@@ -217,10 +248,22 @@ class TmdbService {
         bestScore = score;
         bestMediaType = mediaType;
         bestId = r['id'] as int?;
+        bestDate = r[mediaType == 'movie' ? 'release_date' : 'first_air_date']
+            as String?;
       }
     }
 
-    if (bestMediaType == null || bestId == null) return null;
+    if (bestMediaType == null || bestId == null) {
+      DiaryService.add(
+          '[TMDB] filter 后无候选 (movie/tv 类型都被过滤掉, 罕见)');
+      return null;
+    }
+    // v2.0.99.2: 选 best 写日记, 方便用户/开发者看为啥选了这个
+    final bonusStr = (year != null && bestDate != null && bestDate.startsWith(year.toString()))
+        ? '+1000 year bonus'
+        : '0 (year 不匹配)';
+    DiaryService.add(
+        '[TMDB] best pick: $bestMediaType#$bestId score=$bestScore (popularity=${bestScore - (bonusStr.contains('+1000') ? 1000 : 0)}, bonus=$bonusStr, date=$bestDate)');
 
     final result = (mediaType: bestMediaType, id: bestId);
     await _writeRefCache(cacheKey, result);
@@ -240,18 +283,28 @@ class TmdbService {
     required String mediaType,
   }) async {
     final apiKey = UserDataService.getTmdbApiKeySync();
-    if (apiKey == null || apiKey.isEmpty) return null;
+    if (apiKey == null || apiKey.isEmpty) {
+      DiaryService.add('[TMDB] fetchArt skip: apiKey 空');
+      return null;
+    }
 
     // v2.0.97: 配了 key 但数据源 = 'off' → 强制不走 TMDB
     final source = UserDataService.getTmdbDataSourceSync();
     if (source == 'off') {
+      DiaryService.add('[TMDB] fetchArt skip: source=off');
       return null;
     }
+    DiaryService.add(
+        '[TMDB] fetchArt begin: $mediaType#$id source=$source');
 
     // 缓存查
     final cacheKey = 'tmdb_art_${mediaType}_$id';
     final cached = await _readArtCache(cacheKey);
-    if (cached != null) return cached;
+    if (cached != null) {
+      DiaryService.add(
+          '[TMDB] cache hit art: backdrop=${cached.backdropUrl != null}, logo=${cached.logoUrl != null}');
+      return cached;
+    }
 
     // 1) 无语言版本 (backdrop 优选无语言, 跟 v2.0.43 风格一致)
     // 2) zh-CN 版本 (logo 优选中文, 跟 v2.0.43 风格一致)
@@ -266,25 +319,34 @@ class TmdbService {
         http.get(Uri.parse(noLangUrl)).timeout(const Duration(seconds: 10)),
         http.get(Uri.parse(zhUrl)).timeout(const Duration(seconds: 10)),
       ]);
-    } catch (_) {
+    } catch (e) {
+      DiaryService.add('[TMDB] fetchArt network err: $e');
       return null;
     }
-    if (responses[0].statusCode != 200) return null;
+    if (responses[0].statusCode != 200) {
+      DiaryService.add(
+          '[TMDB] fetchArt noLang statusCode=${responses[0].statusCode}');
+      return null;
+    }
 
     Map<String, dynamic> noLang;
     Map<String, dynamic> zh;
     try {
       noLang = jsonDecode(responses[0].body) as Map<String, dynamic>;
-    } catch (_) {
+    } catch (e) {
+      DiaryService.add('[TMDB] fetchArt parse err: $e');
       return null;
     }
     if (responses[1].statusCode == 200) {
       try {
         zh = jsonDecode(responses[1].body) as Map<String, dynamic>;
-      } catch (_) {
+      } catch (e) {
+        DiaryService.add('[TMDB] fetchArt zh parse err: $e');
         zh = <String, dynamic>{};
       }
     } else {
+      DiaryService.add(
+          '[TMDB] fetchArt zh statusCode=${responses[1].statusCode} (用空 {} 兜底)');
       zh = <String, dynamic>{};
     }
 
@@ -321,7 +383,6 @@ class TmdbService {
             '$_imageBase/w1280/${bestBackdropPath.startsWith('/') ? bestBackdropPath.substring(1) : bestBackdropPath}',
             source)
         : null;
-
     // logo 优选: w500, .png 后缀, zh > en > null 优先级, vote DESC
     final logos = <Map<String, dynamic>>[
       ...((zh['logos'] as List?) ?? const [])
@@ -355,6 +416,8 @@ class TmdbService {
         : null;
 
     final art = TmdbArt(backdropUrl: backdropUrl, logoUrl: logoUrl);
+    DiaryService.add(
+        '[TMDB] fetchArt done: backdrop=${backdropUrl != null}, logo=${logoUrl != null} (backdrops 候选 ${backdrops.length}, logos 候选 ${logos.length})');
     await _writeArtCache(cacheKey, art);
     return art;
   }

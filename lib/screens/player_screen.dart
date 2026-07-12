@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/m3u8_service.dart';
@@ -2432,11 +2433,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _loadTmdbBackdrop() async {
     if (!UserDataService.isTmdbConfigured()) {
       debugPrint('[TMDB] skip: key not configured');
+      DiaryService.add('[TMDB] skip: key not configured');
       return;
     }
     final title = widget.videoInfo.title.trim();
     if (title.isEmpty) {
       debugPrint('[TMDB] skip: title empty');
+      DiaryService.add('[TMDB] skip: title empty');
       return;
     }
 
@@ -2449,6 +2452,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
 
     debugPrint('[TMDB] search: title="$title" year=$year');
+    DiaryService.add('[TMDB] search: title="$title" year=$year');
 
     try {
       final ref = await TmdbService.search(title: title, year: year);
@@ -2456,24 +2460,32 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (ref == null) {
         debugPrint(
             '[TMDB] search: no result (key 失效 / 剧名无匹配 / year 不匹配)');
+        DiaryService.add(
+            '[TMDB] search: no result (key 失效 / 剧名无匹配 / year 不匹配)');
         // v2.0.96: 静默 fallback — SnackBar 删了, 不打扰用户
+        // v2.0.99.2: 但写进日记, 用户主动点开「日记」页能看到
         return;
       }
       debugPrint('[TMDB] search hit: ${ref.mediaType}#${ref.id}');
+      DiaryService.add('[TMDB] search hit: ${ref.mediaType}#${ref.id}');
       final art = await TmdbService.fetchArt(
           id: ref.id, mediaType: ref.mediaType);
       if (!mounted) return;
       if (art == null || art.backdropUrl == null) {
         debugPrint(
             '[TMDB] fetchArt: no backdrop (art=${art == null ? "null" : "empty"})');
+        DiaryService.add(
+            '[TMDB] fetchArt: no backdrop (art=${art == null ? "null" : "empty"})');
         return;
       }
       debugPrint('[TMDB] backdrop: ${art.backdropUrl}');
+      DiaryService.add('[TMDB] backdrop: ${art.backdropUrl}');
       setState(() {
         _tmdbBackdropUrl = art.backdropUrl;
       });
     } catch (e, st) {
       debugPrint('[TMDB] error: $e\n$st');
+      DiaryService.add('[TMDB] error: $e');
       // v2.0.96: 静默 fallback
     }
   }

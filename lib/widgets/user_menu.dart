@@ -11,6 +11,7 @@ import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/live_service.dart';
+import 'package:luna_tv/screens/diary_screen.dart';
 import 'package:luna_tv/services/local_search_cache_service.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/services/version_service.dart';
@@ -1708,6 +1709,23 @@ class _UserMenuState extends State<UserMenu> {
                 icon: LucideIcons.trash2,
                 iconColor: const Color(0xFFf59e0b),
                 onTap: _handleClearDoubanCache,
+              ),
+              _buildDivider(),
+              // v2.0.99.2: 日记 — 跳到 DiaryScreen, 看全流程运行日志
+              //   (TMDB 失败 / 网络错 / 关键事件). 跟 adb logcat 互补,
+              //   不用接电脑. 跟 v2.0.91 删的「log UI」区别: 那个是开发者
+              //   log 实时浮层, 这次是独立日记页 (按时间序, 用户主动点开).
+              _buildActionItem(
+                title: '日记',
+                icon: LucideIcons.notebook,
+                iconColor: const Color(0xFF8b5cf6),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DiaryScreen(),
+                    ),
+                  );
+                },
               ),
               _buildDivider(),
               // 检查更新按钮
