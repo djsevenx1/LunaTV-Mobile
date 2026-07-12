@@ -38,6 +38,11 @@
 //            当初直连 image.tmdb.org (CF 全球 CDN 跟 worker 一样快),
 //            但用户反馈国内 image.tmdb.org 偶发加载慢, 走 worker 稳.
 //            没配 worker 域名 = 直连 image.tmdb.org (v2.0.93 行为, 不变).
+//   v2.0.99: 解除「DoubanDetailHeader 必须豆瓣登录才显示」绑定 — 见
+//            player_screen.dart 注释. DoubanDetailHeader 内部本就不依赖
+//            登录态 (只用 cover / coverUrl / tmdbBackdropUrl), v2.0.93
+//            我在调用方加的 isDoubanLoggedIn() 条件错了, 改成
+//            `cover.isNotEmpty`. TMDB backdrop 独立生效, 跟登录无关.
 //
 // 数据流 (无网络):
 //   1. widget.videoInfo.cover  → getImageUrl(cover, source) 自动
@@ -46,7 +51,8 @@
 //   3. 渐变蒙版 + 圆角 16 + 阴影, 跟 TMDB hero 视觉一致.
 //
 // 用法 (player_screen 调用):
-//   if (UserDataService.isDoubanLoggedIn() && widget.videoInfo.cover.isNotEmpty)
+//   v2.0.99: 只要 cover 不空就显示大头部, 不依赖豆瓣登录.
+//   if (widget.videoInfo.cover.isNotEmpty)
 //     DoubanDetailHeader(
 //       title: widget.videoInfo.title,
 //       year: widget.videoInfo.year,

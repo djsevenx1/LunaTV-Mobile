@@ -2501,13 +2501,25 @@ class _PlayerScreenState extends State<PlayerScreen>
                 //   (登录态, 见 image_url.dart).
                 // 没登录 = 走 _buildPosterHeader (现有 110x150 小海报,
                 //   行为完全不变, 跟用户要求一致).
-                if (UserDataService.isDoubanLoggedIn() &&
-                    widget.videoInfo.cover.isNotEmpty)
+                // v2.0.99 fix: 去 isDoubanLoggedIn() 条件 — TMDB backdrop
+                //   不该跟豆瓣登录绑. v2.0.93 我把 TMDB 写进 DoubanDetailHeader
+                //   (大头部), 大头部又在 v2.0.78 跟豆瓣登录绑 (DoubanDetailHeader
+                //   加的时候没 TMDB, 大头部 = 豆瓣登录态, 当时合理). v2.0.93 加
+                //   TMDB 时保留 isDoubanLoggedIn 条件, 错了 — TMDB 是独立数据源,
+                //   跟登录无关. 用户反馈 "tmdb 还是没显示海报" + 截图显示豆瓣未
+                //   登录 → 走 _buildPosterHeader (小头部) → TMDB 永远不显示.
+                //   改成: 只要 cover 不空 (豆瓣/番剧源都给) 就走大头部, TMDB
+                //   backdrop 独立生效. 没豆瓣登录 = 大头部走 coverUrl/cover 兜底
+                //   (跟 v2.0.84/v2.0.85 行为一致, 跟 v2.0.78 没 DoubanDetailHeader
+                //   之前的 110x150 小海报完全不一样 — 现在是大头部视觉, 只是
+                //   背景图走豆瓣兜底).
+                if (widget.videoInfo.cover.isNotEmpty)
                   // v2.0.84: 传 coverUrl (16:9 横版剧照 l_cover 1280x720)
                   //   给详情页大头部背景. 平板/横屏缩到 2K 宽不糊.
                   // v2.0.93: 传 tmdbBackdropUrl (TMDB w1280 16:9 backdrop, 优
                   //   先级最高, 精准识别结果). 配了 TMDB key + 搜索成功 = 用
                   //   TMDB backdrop; 否则 = null, 走 coverUrl 兜底 (v2.0.84).
+                  // v2.0.99: tmdbBackdropUrl 不依赖豆瓣登录, 配了 TMDB key 就生效.
                   DoubanDetailHeader(
                     title: widget.videoInfo.title,
                     year: widget.videoInfo.year,
