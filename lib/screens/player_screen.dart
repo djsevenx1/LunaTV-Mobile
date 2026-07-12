@@ -11,11 +11,13 @@ import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/diary_service.dart';
+import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/m3u8_service.dart';
 import 'package:luna_tv/services/video_proxy_server.dart';
 import 'package:luna_tv/services/mpv_ffi.dart';
+import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -75,6 +77,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   替代豆瓣 coverUrl. 加载完成后 setState 触发 rebuild, 没加载完
   //   / 加载失败 / 没配 key = null, DoubanDetailHeader 走 coverUrl 兜底.
   String? _tmdbBackdropUrl;
+  // v2.1.7: 豆瓣剧情简介 — 通过 DoubanService.getDoubanDetails 拉 doubanId
+  //   详情, 取 summary 字段. 用户反馈"海报多的地方放上电影简介", 在选集
+  //   section 跟源 section 之间插一个简介 card. 没 doubanId / 拉不到 / 字段空
+  //   = 不渲染, 行为不变 (不占空白).
+  String? _summary;
+  bool _summaryExpanded = false; // 用户点击"展开"切换
 
   // 状态
   String _phase = 'detail'; // detail | playing
@@ -242,6 +250,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   不 await — fire-and-forget, 用户不卡, 加载完 DoubanDetailHeader
     //   自动切到更清的 TMDB backdrop.
     _loadTmdbBackdrop();
+    // v2.1.7: 拉豆瓣剧情简介 (跟 _loadTmdbBackdrop 同样静默 fallback)
+    _loadDoubanSummary();
     // 监听视频参数，获取宽高用于全屏方向判断
     _videoParamsSub = _player.streams.videoParams.listen((params) {
       final w = params.dw ?? params.w ?? 0;
@@ -2505,6 +2515,54 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  // v2.1.7: 拉豆瓣剧情简介 — 跟 _loadTmdbBackdrop 同样的静默 fallback 模式
+  //
+  // 流程:
+  //   1. 检查 widget.videoInfo.doubanId (源 API 拉的剧集都有)
+  //   2. 调 DoubanService.getDoubanDetails (m.douban.com rexxar JSON, 不需登录)
+  //   3. 成功: 拿 DoubanMovieDetails.summary, setState 触发 _buildSummarySection
+  //   4. 失败 / 没 doubanId / summary 字段空: 不渲染, 不打扰用户
+  //
+  // 跟 _loadTmdbBackdrop 区别: 没配 "summary" 之类的用户配置, doubanId 必来自源,
+  //   所以只检查 doubanId + summary 字段是否非空.
+  Future<void> _loadDoubanSummary() async {
+    final doubanId = widget.videoInfo.doubanId;
+    if (doubanId == null || doubanId.isEmpty) {
+      debugPrint('[Douban summary] skip: no doubanId');
+      DiaryService.add('[Douban summary] skip: no doubanId');
+      return;
+    }
+    debugPrint('[Douban summary] fetch: doubanId=$doubanId');
+    DiaryService.add('[Douban summary] fetch: doubanId=$doubanId');
+    try {
+      final resp = await DoubanService.getDoubanDetails(
+        context,
+        doubanId: doubanId,
+      );
+      if (!mounted) return;
+      if (!resp.success || resp.data == null) {
+        debugPrint('[Douban summary] fetch failed: ${resp.error}');
+        DiaryService.add('[Douban summary] fetch failed: ${resp.error}');
+        return;
+      }
+      final s = resp.data!.summary;
+      if (s == null || s.trim().isEmpty) {
+        debugPrint('[Douban summary] empty');
+        DiaryService.add('[Douban summary] empty');
+        return;
+      }
+      debugPrint('[Douban summary] hit: ${s.length} chars');
+      DiaryService.add('[Douban summary] hit: ${s.length} chars');
+      setState(() {
+        _summary = s.trim();
+      });
+    } catch (e, st) {
+      debugPrint('[Douban summary] error: $e\n$st');
+      DiaryService.add('[Douban summary] error: $e');
+      // 静默 fallback — 不打扰用户
+    }
+  }
+
   Widget _buildDetailView(bool isDark) {
     return Column(
       children: [
@@ -2558,6 +2616,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                   )
                 else
                   _buildPosterHeader(isDark),
+                // v2.1.7: 剧情简介 (用户反馈"海报多的地方放上电影简介")
+                //   选集 section 上面. 走 DoubanService.getDoubanDetails 拉
+                //   doubanId 详情, 取 summary. 拉不到 / 字段空 = 不渲染.
+                if (_summary != null) _buildSummarySection(isDark),
                 // 集数 (放在源上面,LunaTV Web 风格)
                 _buildEpisodeSection(isDark),
                 // 源 + 测速
@@ -2758,6 +2820,98 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   // ---------- 源选择 ----------
+
+  // v2.1.7: 剧情简介 section
+  //
+  // 视觉: 跟 _buildEpisodeSection / _buildSourceSection 一致 (圆角背景 +
+  //   16 horizontal padding), 标题 "剧情简介" + 简介文本 (maxLines 5 默认,
+  //   点击"展开"切到无 maxLines).
+  //
+  // 数据流: _summary 由 _loadDoubanSummary() 异步填充, 这里是纯渲染.
+  //   _summary == null (没 doubanId / 拉不到 / 字段空) → 上层 if 不渲染这
+  //   段, 这里只是用 _summary! 解 null 安全.
+  Widget _buildSummarySection(bool isDark) {
+    final summary = _summary!;
+    // 简介超过 5 行默认折叠, 短的全部显示
+    final isLong = summary.length > 120; // 阈值简单按字符数算
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle('剧情简介', isDark),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: isLong
+                ? () => setState(() => _summaryExpanded = !_summaryExpanded)
+                : null,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF1F2937)
+                    : const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    alignment: Alignment.topCenter,
+                    child: Text(
+                      summary,
+                      style: TextStyle(
+                        fontSize: 14,
+                        height: 1.55,
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.85)
+                            : Colors.black87,
+                      ),
+                      maxLines: isLong && !_summaryExpanded ? 5 : null,
+                      overflow: isLong && !_summaryExpanded
+                          ? TextOverflow.ellipsis
+                          : TextOverflow.visible,
+                    ),
+                  ),
+                  if (isLong) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          _summaryExpanded ? '收起' : '展开',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFF93C5FD)
+                                : const Color(0xFF2563EB),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Icon(
+                          _summaryExpanded
+                              ? Icons.keyboard_arrow_up
+                              : Icons.keyboard_arrow_down,
+                          size: 16,
+                          color: isDark
+                              ? const Color(0xFF93C5FD)
+                              : const Color(0xFF2563EB),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildSourceSection(bool isDark) {
     return Padding(
