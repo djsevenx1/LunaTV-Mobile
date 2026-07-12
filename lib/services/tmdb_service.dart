@@ -382,7 +382,8 @@ class TmdbService {
     DiaryService.add('[TMDB] network req (fetchArt zh): ${_maskKeyInUrl(zhUrl, apiKey)}');
 
     // v2.1.2: 并行 2 个请求, 任一网络/握手错自动 fallback to direct
-    final List<http.Response> responses;
+    // v2.1.5: 显式声明 List<Response?>, _httpGetWithFallback 返回 Future<Response?>
+    final List<http.Response?> responses;
     try {
       responses = await Future.wait([
         _httpGetWithFallback(

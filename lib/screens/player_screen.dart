@@ -2511,38 +2511,48 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   - 顶层: 现有 body (TopBar + SingleChildScrollView + BottomButton)
   //   海报作主元素, 不再是 110x150 thumbnail
   Widget _buildDetailView(bool isDark) {
+    // v2.1.5: 修 v2.1.3 编译错 — coverUrl 是 String?, getImageUrl 返 Future<String>,
+    //   不能直接当 String 用. 用 FutureBuilder<String?> + helper _backgroundImageUrl
+    //   异步拿 URL. 没 cover 也没 coverUrl 走纯色兜底.
     final hasCover = widget.videoInfo.cover.isNotEmpty;
-    final hasCoverUrl = widget.videoInfo.coverUrl.isNotEmpty;
-    // 海报背景 URL: 优先 coverUrl (16:9 横版剧照 l_cover 1280x720),
-    //   没有就 cover (l_ratio 600x900), 都没有就 null (走纯色兜底)
-    final bgUrl = hasCoverUrl
-        ? getImageUrl(widget.videoInfo.coverUrl, widget.videoInfo.source)
-        : (hasCover
-            ? getImageUrl(widget.videoInfo.cover, widget.videoInfo.source)
-            : null);
+    final hasCoverUrl = widget.videoInfo.coverUrl != null &&
+        widget.videoInfo.coverUrl!.isNotEmpty;
     return Stack(
       children: [
         // 1) 底层: 全页模糊海报背景
-        if (bgUrl != null)
+        if (hasCover || hasCoverUrl)
           Positioned.fill(
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-              child: CachedNetworkImage(
-                imageUrl: bgUrl,
-                fit: BoxFit.cover,
-                httpHeaders:
-                    getImageRequestHeaders(bgUrl, widget.videoInfo.source),
-                placeholder: (c, u) => Container(
-                  color: isDark
-                      ? const Color(0xFF111827)
-                      : const Color(0xFFF3F4F6),
-                ),
-                errorWidget: (c, u, e) => Container(
-                  color: isDark
-                      ? const Color(0xFF111827)
-                      : const Color(0xFFF3F4F6),
-                ),
-              ),
+            child: FutureBuilder<String?>(
+              future: _backgroundImageUrl(),
+              builder: (context, snapshot) {
+                final imageUrl = snapshot.data;
+                if (imageUrl == null || imageUrl.isEmpty) {
+                  return Container(
+                    color: isDark
+                        ? const Color(0xFF111827)
+                        : const Color(0xFFF3F4F6),
+                  );
+                }
+                return ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+                  child: CachedNetworkImage(
+                    imageUrl: imageUrl,
+                    fit: BoxFit.cover,
+                    httpHeaders: getImageRequestHeaders(
+                        imageUrl, widget.videoInfo.source),
+                    placeholder: (c, u) => Container(
+                      color: isDark
+                          ? const Color(0xFF111827)
+                          : const Color(0xFFF3F4F6),
+                    ),
+                    errorWidget: (c, u, e) => Container(
+                      color: isDark
+                          ? const Color(0xFF111827)
+                          : const Color(0xFFF3F4F6),
+                    ),
+                  ),
+                );
+              },
             ),
           )
         else
@@ -2638,6 +2648,21 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
       ],
     );
+  }
+
+  // v2.1.5: 修 v2.1.3 编译错 — bgUrl 是 Future<String>, 不能直接当 String 用.
+  //   改用 helper 返回 Future<String?>, 在 FutureBuilder 里 await 拿到 String.
+  //   优先 coverUrl (16:9 横版剧照 l_cover 1280x720), 没有就 cover (l_ratio 600x900).
+  //   返回 null = 走纯色兜底. 跟 DoubanDetailHeader._backgroundUrl() 模式一致.
+  Future<String?> _backgroundImageUrl() async {
+    final info = widget.videoInfo;
+    if (info.coverUrl != null && info.coverUrl!.isNotEmpty) {
+      return getImageUrl(info.coverUrl!, info.source);
+    }
+    if (info.cover.isNotEmpty) {
+      return getImageUrl(info.cover, info.source);
+    }
+    return null;
   }
 
   // v2.1.3: 前景 meta 卡片 — 海报作全页背景时, 标题/年/默认 显示在前景
