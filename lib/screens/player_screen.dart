@@ -2505,471 +2505,112 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  // v2.1.3: 选源/详情页 — 全页背景模糊 (Spotify 风格)
-  //   - 底层: 海报 coverUrl/cover 作全页背景, ImageFiltered blur 25
-  //   - 中层: 渐变遮罩 (顶透明 → 底主色 70%), 让前景内容清晰
-  //   - 顶层: 现有 body (TopBar + SingleChildScrollView + BottomButton)
-  //   海报作主元素, 不再是 110x150 thumbnail
   Widget _buildDetailView(bool isDark) {
-    // v2.1.5: 修 v2.1.3 编译错 — coverUrl 是 String?, getImageUrl 返 Future<String>,
-    //   不能直接当 String 用. 用 FutureBuilder<String?> + helper _backgroundImageUrl
-    //   异步拿 URL. 没 cover 也没 coverUrl 走纯色兜底.
-    final hasCover = widget.videoInfo.cover.isNotEmpty;
-    final hasCoverUrl = widget.videoInfo.coverUrl != null &&
-        widget.videoInfo.coverUrl!.isNotEmpty;
-    return Stack(
+    return Column(
       children: [
-        // 1) 底层: 全页模糊海报背景
-        if (hasCover || hasCoverUrl)
-          Positioned.fill(
-            child: FutureBuilder<String?>(
-              future: _backgroundImageUrl(),
-              builder: (context, snapshot) {
-                final imageUrl = snapshot.data;
-                if (imageUrl == null || imageUrl.isEmpty) {
-                  return Container(
-                    color: isDark
-                        ? const Color(0xFF111827)
-                        : const Color(0xFFF3F4F6),
-                  );
-                }
-                return ImageFiltered(
-                  imageFilter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-                  child: CachedNetworkImage(
-                    imageUrl: imageUrl,
-                    fit: BoxFit.cover,
-                    httpHeaders: getImageRequestHeaders(
-                        imageUrl, widget.videoInfo.source),
-                    placeholder: (c, u) => Container(
-                      color: isDark
-                          ? const Color(0xFF111827)
-                          : const Color(0xFFF3F4F6),
-                    ),
-                    errorWidget: (c, u, e) => Container(
-                      color: isDark
-                          ? const Color(0xFF111827)
-                          : const Color(0xFFF3F4F6),
-                    ),
-                  ),
-                );
-              },
-            ),
-          )
-        else
-          Positioned.fill(
-            child: Container(
-              color: isDark
-                  ? const Color(0xFF111827)
-                  : const Color(0xFFF3F4F6),
-            ),
-          ),
-        // 2) 中层: 渐变遮罩 — 顶透明让 AppBar 浮, 底深色让底部按钮清楚
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: isDark
-                    ? [
-                        Colors.black.withOpacity(0.25),
-                        Colors.black.withOpacity(0.55),
-                        Colors.black.withOpacity(0.85),
-                      ]
-                    : [
-                        Colors.white.withOpacity(0.45),
-                        Colors.white.withOpacity(0.70),
-                        Colors.white.withOpacity(0.92),
-                      ],
-                stops: const [0.0, 0.45, 1.0],
-              ),
-            ),
-          ),
-        ),
-        // 3) 顶层: 现有 body
-        Column(
-          children: [
-            // 顶部 bar
-            _buildTopBar(isDark),
-            // 内容滚动
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // v2.0.38: 配了 TMDB key → 大头部 (TMDB backdrop + 海报 + 简介),
-                    //            没配 → 原 110x150 小海报 + 标题/年份
-                    // v2.0.78: 登录豆瓣 → 大头部 (DoubanDetailHeader)
-                    //   - 手机: 2:3 竖版海报当背景 + 渐变压暗 + 底部标题
-                    //   - 平板: 21:9 横版 + 左侧 150x225 大竖海报 + 右侧标题
-                    // v2.0.77 (之前): 走 _buildPosterHeader (110x150 小海报)
-                    //   只升了图片质量, 没大头部布局. 用户反馈"豆瓣大海报在
-                    //   哪和 tmdb 一样啊" → 加这个.
-                    //   海报 URL 通过 getImageUrl 自动升 l_ratio_poster
-                    //   (登录态, 见 image_url.dart).
-                    // 没登录 = 走 _buildPosterHeader (现有 110x150 小海报,
-                    //   行为完全不变, 跟用户要求一致).
-                    // v2.0.99 fix: 去 isDoubanLoggedIn() 条件 — TMDB backdrop
-                    //   不该跟豆瓣登录绑. v2.0.93 我把 TMDB 写进 DoubanDetailHeader
-                    //   (大头部), 大头部又在 v2.0.78 跟豆瓣登录绑 (DoubanDetailHeader
-                    //   加的时候没 TMDB, 大头部 = 豆瓣登录态, 当时合理). v2.0.93 加
-                    //   TMDB 时保留 isDoubanLoggedIn 条件, 错了 — TMDB 是独立数据源,
-                    //   跟登录无关. 用户反馈 "tmdb 还是没显示海报" + 截图显示豆瓣未
-                    //   登录 → 走 _buildPosterHeader (小头部) → TMDB 永远不显示.
-                    //   改成: 只要 cover 不空 (豆瓣/番剧源都给) 就走大头部, TMDB
-                    //   backdrop 独立生效. 没豆瓣登录 = 大头部走 coverUrl/cover 兜底
-                    //   (跟 v2.0.84/v2.0.85 行为一致, 跟 v2.0.78 没 DoubanDetailHeader
-                    //   之前的 110x150 小海报完全不一样 — 现在是大头部视觉, 只是
-                    //   背景图走豆瓣兜底).
-                    // v2.1.3: 整页已经 Stack 化, 全页背景模糊. DoubanDetailHeader
-                    //   自己的 16:9 大背景跟全页模糊背景会有视觉冲突 (双重背景).
-                    //   简化: 只在 _buildPosterHeader 路径 (cover 空) 显示大头部,
-                    //   DoubanDetailHeader 路径走"无 header" — 海报当全页背景,
-                    //   标题/年/默认 显示在前景.
-                    if (hasCover)
-                      // v2.1.3: DoubanDetailHeader 路径不显示 (避免双背景),
-                      //   海报已经在全页模糊背景, 标题等用 _buildForegroundMeta
-                      //   显示在前景 (跟模糊背景融为一体).
-                      _buildForegroundMeta(isDark)
-                    else
-                      _buildPosterHeader(isDark),
-                    // 集数 (放在源上面,LunaTV Web 风格)
-                    _buildEpisodeSection(isDark),
-                    // 源 + 测速
-                    _buildSourceSection(isDark),
-                    const SizedBox(height: 100),
-                  ],
-                ),
-              ),
-            ),
-            // 底部播放按钮
-            _buildBottomPlayButton(isDark),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // v2.1.5: 修 v2.1.3 编译错 — bgUrl 是 Future<String>, 不能直接当 String 用.
-  //   改用 helper 返回 Future<String?>, 在 FutureBuilder 里 await 拿到 String.
-  //   优先 coverUrl (16:9 横版剧照 l_cover 1280x720), 没有就 cover (l_ratio 600x900).
-  //   返回 null = 走纯色兜底. 跟 DoubanDetailHeader._backgroundUrl() 模式一致.
-  Future<String?> _backgroundImageUrl() async {
-    final info = widget.videoInfo;
-    if (info.coverUrl != null && info.coverUrl!.isNotEmpty) {
-      return getImageUrl(info.coverUrl!, info.source);
-    }
-    if (info.cover.isNotEmpty) {
-      return getImageUrl(info.cover, info.source);
-    }
-    return null;
-  }
-
-  // v2.1.3: 前景 meta 卡片 — 海报作全页背景时, 标题/年/默认 显示在前景
-  //   跟 DoubanDetailHeader 里的"前景 row"视觉一致, 但放在 Stack 顶层,
-  //   跟全页模糊背景融为一体. 用半透明卡 + 大圆角, 浮在背景上.
-  Widget _buildForegroundMeta(bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withOpacity(0.10)
-                  : Colors.white.withOpacity(0.55),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withOpacity(0.12)
-                    : Colors.black.withOpacity(0.06),
-                width: 1,
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+        // 顶部 bar
+        _buildTopBar(isDark),
+        // 内容滚动
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 左侧: 130x175 大竖海报 (主元素, 跟全页模糊背景同图, 复用 memCache)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    width: 130,
-                    height: 175,
-                    decoration: BoxDecoration(
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.30),
-                          blurRadius: 14,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: widget.videoInfo.cover.isNotEmpty
-                        ? FutureBuilder<String>(
-                            future: getImageUrl(
-                                widget.videoInfo.cover, widget.videoInfo.source),
-                            builder: (context, snapshot) {
-                              final imageUrl = snapshot.data ??
-                                  widget.videoInfo.cover;
-                              final headers = getImageRequestHeaders(
-                                  imageUrl, widget.videoInfo.source);
-                              return CachedNetworkImage(
-                                imageUrl: imageUrl,
-                                fit: BoxFit.cover,
-                                width: 130,
-                                height: 175,
-                                httpHeaders: headers,
-                                memCacheWidth: (130 *
-                                        MediaQuery.of(context)
-                                            .devicePixelRatio)
-                                    .round(),
-                                memCacheHeight: (175 *
-                                        MediaQuery.of(context)
-                                            .devicePixelRatio)
-                                    .round(),
-                                placeholder: (c, u) => Container(
-                                  color: isDark
-                                      ? const Color(0xFF1F2937)
-                                      : const Color(0xFFE5E7EB),
-                                ),
-                                errorWidget: (c, u, e) => Container(
-                                  color: isDark
-                                      ? const Color(0xFF1F2937)
-                                      : const Color(0xFFE5E7EB),
-                                  child: const Icon(Icons.movie_outlined,
-                                      color: Colors.grey, size: 36),
-                                ),
-                              );
-                            },
-                          )
-                        : Container(
-                            color: isDark
-                                ? const Color(0xFF1F2937)
-                                : const Color(0xFFE5E7EB),
-                            child: const Icon(Icons.movie_outlined,
-                                color: Colors.grey, size: 36),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                // 右侧: 标题 + 年份 chip + 默认源 chip
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        widget.videoInfo.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : Colors.black,
-                          height: 1.25,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (widget.videoInfo.year.isNotEmpty)
-                            _buildTag(widget.videoInfo.year, isDark),
-                          if (widget.videoInfo.rate != null &&
-                              widget.videoInfo.rate!.isNotEmpty)
-                            _buildRatingTag(widget.videoInfo.rate!),
-                        ],
-                      ),
-                      if (widget.videoInfo.sourceName.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(Icons.cloud_outlined,
-                                size: 12,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.black54),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                '默认: ${widget.videoInfo.sourceName}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : Colors.black54,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+                // v2.0.38: 配了 TMDB key → 大头部 (TMDB backdrop + 海报 + 简介),
+                //            没配 → 原 110x150 小海报 + 标题/年份
+                // v2.0.78: 登录豆瓣 → 大头部 (DoubanDetailHeader)
+                //   - 手机: 2:3 竖版海报当背景 + 渐变压暗 + 底部标题
+                //   - 平板: 21:9 横版 + 左侧 150x225 大竖海报 + 右侧标题
+                // v2.0.77 (之前): 走 _buildPosterHeader (110x150 小海报)
+                //   只升了图片质量, 没大头部布局. 用户反馈"豆瓣大海报在
+                //   哪和 tmdb 一样啊" → 加这个.
+                //   海报 URL 通过 getImageUrl 自动升 l_ratio_poster
+                //   (登录态, 见 image_url.dart).
+                // 没登录 = 走 _buildPosterHeader (现有 110x150 小海报,
+                //   行为完全不变, 跟用户要求一致).
+                // v2.0.99 fix: 去 isDoubanLoggedIn() 条件 — TMDB backdrop
+                //   不该跟豆瓣登录绑. v2.0.93 我把 TMDB 写进 DoubanDetailHeader
+                //   (大头部), 大头部又在 v2.0.78 跟豆瓣登录绑 (DoubanDetailHeader
+                //   加的时候没 TMDB, 大头部 = 豆瓣登录态, 当时合理). v2.0.93 加
+                //   TMDB 时保留 isDoubanLoggedIn 条件, 错了 — TMDB 是独立数据源,
+                //   跟登录无关. 用户反馈 "tmdb 还是没显示海报" + 截图显示豆瓣未
+                //   登录 → 走 _buildPosterHeader (小头部) → TMDB 永远不显示.
+                //   改成: 只要 cover 不空 (豆瓣/番剧源都给) 就走大头部, TMDB
+                //   backdrop 独立生效. 没豆瓣登录 = 大头部走 coverUrl/cover 兜底
+                //   (跟 v2.0.84/v2.0.85 行为一致, 跟 v2.0.78 没 DoubanDetailHeader
+                //   之前的 110x150 小海报完全不一样 — 现在是大头部视觉, 只是
+                //   背景图走豆瓣兜底).
+                if (widget.videoInfo.cover.isNotEmpty)
+                  // v2.0.84: 传 coverUrl (16:9 横版剧照 l_cover 1280x720)
+                  //   给详情页大头部背景. 平板/横屏缩到 2K 宽不糊.
+                  // v2.0.93: 传 tmdbBackdropUrl (TMDB w1280 16:9 backdrop, 优
+                  //   先级最高, 精准识别结果). 配了 TMDB key + 搜索成功 = 用
+                  //   TMDB backdrop; 否则 = null, 走 coverUrl 兜底 (v2.0.84).
+                  // v2.0.99: tmdbBackdropUrl 不依赖豆瓣登录, 配了 TMDB key 就生效.
+                  DoubanDetailHeader(
+                    title: widget.videoInfo.title,
+                    year: widget.videoInfo.year,
+                    cover: widget.videoInfo.cover,
+                    source: widget.videoInfo.source,
+                    sourceName: widget.videoInfo.sourceName,
+                    coverUrl: widget.videoInfo.coverUrl,
+                    tmdbBackdropUrl: _tmdbBackdropUrl,
+                  )
+                else
+                  _buildPosterHeader(isDark),
+                // 集数 (放在源上面,LunaTV Web 风格)
+                _buildEpisodeSection(isDark),
+                // 源 + 测速
+                _buildSourceSection(isDark),
+                const SizedBox(height: 100),
               ],
             ),
           ),
         ),
-      ),
+        // 底部播放按钮
+        _buildBottomPlayButton(isDark),
+      ],
     );
   }
 
   Widget _buildTopBar(bool isDark) {
-    // v2.1.3: 半透明背景, 跟全页模糊背景融合. 顶部 1px 渐变 (透明 → 30% 黑/白)
-    //   让 AppBar 浮在背景上能看清按钮/标题, 不挡背景.
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isDark
-              ? [
-                  Colors.black.withOpacity(0.30),
-                  Colors.black.withOpacity(0.10),
-                  Colors.transparent,
-                ]
-              : [
-                  Colors.white.withOpacity(0.55),
-                  Colors.white.withOpacity(0.20),
-                  Colors.transparent,
-                ],
-          stops: const [0.0, 0.6, 1.0],
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          children: [
-            // v2.1.3: 按钮加半透明背景圈, 跟全页模糊背景融合时能看清
-            _buildCircleButton(
-              icon: Icons.arrow_back,
-              isDark: isDark,
-              onPressed: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: Text(
-                '选源播放',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-              ),
-            ),
-            // v2.1.3: 右侧占位让标题居中 (LunaTV 风格)
-            const SizedBox(width: 40),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // v2.1.3: 圆形半透明按钮 (AppBar 浮在模糊背景上, 纯 icon 会看不清,
-  //   加半透背景圈 + 边框, 跟 Apple Music / Spotify 详情页一致)
-  Widget _buildCircleButton({
-    required IconData icon,
-    required bool isDark,
-    required VoidCallback onPressed,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 40,
-          height: 40,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.black.withOpacity(0.25)
-                : Colors.white.withOpacity(0.55),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withOpacity(0.12)
-                  : Colors.black.withOpacity(0.06),
-              width: 1,
-            ),
-          ),
-          child: Icon(icon,
-              size: 20, color: isDark ? Colors.white : Colors.black),
-        ),
-      ),
-    );
-  }
-
-  // v2.1.3: 半透明浮卡 (Spotify 风格 — 选集/播放源 section 整体包成浮卡,
-  //   浮在全页模糊背景上). 跟 _buildForegroundMeta 视觉一致, 但用主色
-  //   gradient border 区分 (选集/源是绿色主调, meta 是中性色).
-  Widget _wrapInGlassCard({
-    required Widget child,
-    required bool isDark,
-    bool useAccentBorder = true,
-  }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withOpacity(0.06)
-                  : Colors.white.withOpacity(0.50),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: useAccentBorder
-                    ? const Color(0xFF22C55E).withOpacity(0.25)
-                    : (isDark
-                        ? Colors.white.withOpacity(0.10)
-                        : Colors.black.withOpacity(0.05)),
-                width: 1,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(Icons.arrow_back,
+                color: isDark ? Colors.white : Colors.black),
+            onPressed: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: Text(
+              '选源播放',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black,
               ),
             ),
-            child: child,
           ),
-        ),
+        ],
       ),
     );
   }
 
 
-  // v2.1.3: _buildPosterHeader 是 cover 空时的 fallback 路径. 跟
-  //   _buildForegroundMeta (有 cover 时) 视觉对齐 — 海报 130x175, 阴影,
-  //   圆角 16, 标题字号 22, year chip + 默认源 row. 包成半透明浮卡浮在
-  //   全页模糊背景上.
   Widget _buildPosterHeader(bool isDark) {
-    return _wrapInGlassCard(
-      isDark: isDark,
-      useAccentBorder: false,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // v2.1.3: 海报 110x150 → 130x175 (+35% 视觉重量), 圆角 14, 阴影
+          // 海报
           ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 130,
-              height: 175,
-              decoration: BoxDecoration(
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.30),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 110,
+              height: 150,
               child: widget.videoInfo.cover.isNotEmpty
                   ? FutureBuilder<String>(
                       future: getImageUrl(
@@ -2982,13 +2623,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                         return CachedNetworkImage(
                           imageUrl: imageUrl,
                           fit: BoxFit.cover,
-                          width: 130,
-                          height: 175,
+                          width: 110,
+                          height: 150,
                           httpHeaders: headers,
-                          memCacheWidth: (130 *
+                          memCacheWidth: (110 *
                                   MediaQuery.of(context).devicePixelRatio)
                               .round(),
-                          memCacheHeight: (175 *
+                          memCacheHeight: (150 *
                                   MediaQuery.of(context).devicePixelRatio)
                               .round(),
                           placeholder: (c, u) => Container(
@@ -3015,25 +2656,24 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
             ),
           ),
-          const SizedBox(width: 14),
-          // v2.1.3: 标题 18→22, 跟 _buildForegroundMeta 视觉一致
+          const SizedBox(width: 12),
+          // 标题 + 元信息
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   widget.videoInfo.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.w700,
                     color: isDark ? Colors.white : Colors.black,
-                    height: 1.25,
+                    height: 1.3,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -3054,16 +2694,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                           color:
                               isDark ? Colors.white60 : Colors.black54),
                       const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          '默认: ${widget.videoInfo.sourceName}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color:
-                                isDark ? Colors.white60 : Colors.black54,
-                          ),
+                      Text(
+                        '默认: ${widget.videoInfo.sourceName}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color:
+                              isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
                     ],
@@ -3124,9 +2760,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   // ---------- 源选择 ----------
 
   Widget _buildSourceSection(bool isDark) {
-    // v2.1.3: 整个播放源 section 包成半透明浮卡 (跟全页模糊背景融为一体)
-    return _wrapInGlassCard(
-      isDark: isDark,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3349,9 +2984,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildEpisodeSection(bool isDark) {
     final source = _selectedSource;
-    // v2.1.3: 整个选集 section 包成半透明浮卡 (跟全页模糊背景融为一体)
-    return _wrapInGlassCard(
-      isDark: isDark,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3662,28 +3296,18 @@ class _PlayerScreenState extends State<PlayerScreen>
             : (isPlaying
                 ? '继续播放 第${_currentEpisodeIndex + 1}集'
                 : '播放 第${_currentEpisodeIndex + 1}集'));
-    // v2.1.3: 底部按钮区加渐变遮罩 (透明 → 主色 70%), 让按钮浮在背景上
-    //   跟全页模糊背景融为一体. 按钮本身保留绿色 gradient + 阴影.
     return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isDark
-              ? [
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.30),
-                  Colors.black.withOpacity(0.70),
-                ]
-              : [
-                  Colors.transparent,
-                  Colors.white.withOpacity(0.30),
-                  Colors.white.withOpacity(0.85),
-                ],
-          stops: const [0.0, 0.4, 1.0],
+        color: isDark ? const Color(0xFF0F1117) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark
+                ? Colors.white.withOpacity(0.08)
+                : Colors.black.withOpacity(0.06),
+          ),
         ),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: SizedBox(
         width: double.infinity,
         height: 48,
