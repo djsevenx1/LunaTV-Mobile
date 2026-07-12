@@ -217,8 +217,35 @@ class M3U8Service {
   ///   2. URL host 跟 baseUrl host 不一致 (跨域)
   ///      - 主 m3u8 在 \`cdn.example.com\`, 广告 m3u8 在 \`ads.example.org\`
   ///      - 例外: 同一域名的不同子域不算跨域 (\`a.cdn.com\` vs \`b.cdn.com\`
-  ///        都属于 \`cdn.com\`)
-  ///   3. URL path 含 \`/ad/\` 形式 (\`/ad/seg.ts\`, \`/ads/seg.ts\`)
+  ///        都属于 `cdn.com`)
+  ///   3. URL path 含 `/ad/` 形式 (`/ad/seg.ts`, `/ads/seg.ts`)
+  ///
+  /// 注意: 这只是**轻量启发式**, 不会漏掉所有广告也不会误伤所有正片.
+  /// 真要彻底跳过广告需要在 worker 端改 m3u8 内容 (识别 EXT-X-DISCONTINUITY
+  /// 标签 + 重写 playlist), 不是 app 层能 100% 解决的事.
+  /// 这里只解决"测速被广告段污染" 的次要问题, 主要问题 (v1.0.76 加的 episode
+  /// 锁防死循环) 在 player_screen.dart.
+
+  /// v1.0.76 + v2.1.4: 判断一个 segment URL 是不是"明显广告段"
+  ///
+  /// 启发式规则 (按可靠性排序):
+  ///   1. URL 含广告关键词: `/ad/`, `/ads/`, `/advert/`, `doubleclick`,
+  ///      `googlevideo` (部分广告走 googlevideo CDN), `imasdk`, `adnxs`,
+  ///      `admarvel`, `pubmatic` — v1.0.76 加
+  ///      + v2.1.4 加赌博站特征: 澳门/葡京/威尼斯/凯发/bbin/365/666/7899 等
+  ///      (URL-encoded 形式 `%E6%BE%B3%E9%97%A8` 等, 实际 segment 出现时已
+  ///      URL-encode; 部分赌博站用纯数字 host 66588/8800/6666/9999/7899
+  ///      不走 path, 走 host 识别)
+  ///   2. URL host 跟 baseUrl host 不一致 (跨域)
+  ///      - 主 m3u8 在 `cdn.example.com`, 广告 m3u8 在 `ads.example.org`
+  ///      - 例外: 同一域名的不同子域不算跨域 (`a.cdn.com` vs `b.cdn.com`
+  ///        都属于 `cdn.com`)
+  ///   3. URL path 含 `/ad/` 形式 (`/ad/seg.ts`, `/ads/seg.ts`)
+  ///   4. **v2.1.4 新增**: 段 URL host 本身是赌博站特征 (4-5 位纯数字
+  ///      host + .co/.org/.cc/.top/.vip/.cyou 冷门 TLD, e.g. 66588.co,
+  ///      7899.cc, 8800.top, 6666.vip, 9999.cyou) — 主片 CDN 不会这样.
+  ///      赌博站常用这种 pattern 绕封, 主流片源 CDN 都是 `cdn.example.com`
+  ///      / `xxx.bilivideo.com` / `xxx.aliyuncs.com` 这种.
   ///
   /// 注意: 这只是**轻量启发式**, 不会漏掉所有广告也不会误伤所有正片.
   /// 真要彻底跳过广告需要在 worker 端改 m3u8 内容 (识别 EXT-X-DISCONTINUITY
@@ -235,7 +262,56 @@ class M3U8Service {
     'adnxs',
     'admarvel',
     'pubmatic',
+    // v2.1.4: 赌博站特征 (URL-encoded 中文, 因 segment URL 在 m3u8
+    //   里都是 encoded 形式)
+    // 葡京 / 澳门葡京 / 威尼斯人 / 凯发 / 永利 / 银河 / 太阳城
+    '%E8%91%A1%E4%BA%AC',     // 葡京
+    '%E6%BE%B3%E9%97%A8',     // 澳门
+    '%E5%87%AF%E5%8F%91',     // 凯发
+    '%E9%93%AD%E6%B2%B3',     // 银河
+    'bbin',                    // bbin 博彩平台
+    'ag88',
+    '365sb',
+    '6668',
+    '7899',
+    '9999',
+    '8800',
+    '66588',                   // 66588.co 赌博站
   ];
+
+  // v2.1.4: 赌博站 host TLD 冷门后缀. 主片 CDN 不会用这些.
+  static const List<String> _gamblingTlds = [
+    '.top',
+    '.cc',
+    '.vip',
+    '.cyou',
+    '.xyz',
+    '.click',
+    '.loan',
+    '.work',
+    '.kim',
+    '.rest',
+    '.support',
+  ];
+
+  // v2.1.4: 赌博站 host 模式: 4-5 位纯数字 (e.g. 66588, 7899, 8800, 9999).
+  //   主片 CDN host 不会是纯数字, 都是 `xxx.com` / `cdn.xxx.com`.
+  static bool _isGamblingHost(String host) {
+    if (host.isEmpty) return false;
+    // 纯数字 4-5 位 (66588, 7899, 8800, 6666, 9999)
+    final isAllDigits = RegExp(r'^\d{4,5}$').hasMatch(host);
+    if (isAllDigits) return true;
+    // 冷门 TLD (top/cc/vip/cyou/xyz 等赌博站常用)
+    for (final tld in _gamblingTlds) {
+      if (host.endsWith(tld)) {
+        // 二次确认: 域名没有 "cdn" / "static" / "media" / "video" / "img" / "vod" 字样
+        //   (主片 CDN 常含这些). 不过赌博站也可能用 cdn 字样伪装, 这里宽松处理.
+        //   主片用 top/cc/vip 等 TLD 几乎不存在, 判赌博够用.
+        return true;
+      }
+    }
+    return false;
+  }
 
   bool _looksLikeAdSegment(String url, String? baseHost) {
     final lower = url.toLowerCase();
@@ -246,9 +322,10 @@ class M3U8Service {
     }
 
     // 规则 2: 跨域 (跟 baseUrl host 不同)
+    String? segHost;
     if (baseHost != null && baseHost.isNotEmpty) {
       try {
-        final segHost = Uri.parse(url).host.toLowerCase();
+        segHost = Uri.parse(url).host.toLowerCase();
         if (segHost.isNotEmpty && segHost != baseHost) {
           // 例外: 同一二级域名 (e.g. a.cdn.example.com vs b.cdn.example.com
           // 都属于 cdn.example.com, 不算广告)
@@ -265,6 +342,18 @@ class M3U8Service {
           }
         }
       } catch (_) {}
+    }
+
+    // 规则 3 (v2.1.4): 段 URL host 是赌博站特征 (4-5 位纯数字 host 或
+    //   冷门 TLD). 即便 host 跟 baseHost 一致 (同源 CDN 套了赌博域),
+    //   也能识别.
+    if (segHost == null) {
+      try {
+        segHost = Uri.parse(url).host.toLowerCase();
+      } catch (_) {}
+    }
+    if (segHost != null && segHost.isNotEmpty && _isGamblingHost(segHost)) {
+      return true;
     }
 
     return false;

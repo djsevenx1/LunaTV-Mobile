@@ -40,6 +40,7 @@ import 'dart:io';
 
 
 import 'package:luna_tv/services/cf_optimizer.dart' show CfOptimizerHttpOverrides;
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 
 class VideoProxyServer {
@@ -605,8 +606,10 @@ class VideoProxyServer {
   }
 
   // ===== v2.0.92: m3u8 ad 段预过滤 =====
+  // v2.1.4: 加赌博站特征关键词 + 纯数字 host 识别 + 冷门 TLD 识别
 
   /// 跟 m3u8_service._looksLikeAdSegment 对齐, 测速/播放两种判断一致.
+  /// v1.0.76 关键词 + v2.1.4 赌博站特征 (66588.co 截图实测漏判的 pattern).
   static const List<String> _adKeywords = [
     '/ad/',
     '/ads/',
@@ -617,29 +620,80 @@ class VideoProxyServer {
     'adnxs',
     'admarvel',
     'pubmatic',
+    // v2.1.4: 赌博站特征关键词 (URL-encoded 形式, 因 m3u8 里 segment
+    //   URL 是 encoded)
+    '%E8%91%A1%E4%BA%AC',     // 葡京
+    '%E6%BE%B3%E9%97%A8',     // 澳门
+    '%E5%87%AF%E5%8F%91',     // 凯发
+    '%E9%93%AD%E6%B2%B3',     // 银河
+    'bbin',
+    'ag88',
+    '365sb',
+    '6668',
+    '7899',
+    '9999',
+    '8800',
+    '66588',                   // 66588.co 截图赌博站
   ];
+
+  // v2.1.4: 赌博站常用冷门 TLD. 主片 CDN 不会用.
+  static const List<String> _gamblingTlds = [
+    '.top',
+    '.cc',
+    '.vip',
+    '.cyou',
+    '.xyz',
+    '.click',
+    '.loan',
+    '.work',
+    '.kim',
+    '.rest',
+    '.support',
+  ];
+
+  // v2.1.4: 4-5 位纯数字 host (66588/7899/8800/9999/6666 等). 主片 CDN
+  //   不会用纯数字 host.
+  static bool _isGamblingHost(String host) {
+    if (host.isEmpty) return false;
+    if (RegExp(r'^\d{4,5}$').hasMatch(host)) return true;
+    for (final tld in _gamblingTlds) {
+      if (host.endsWith(tld)) return true;
+    }
+    return false;
+  }
 
   /// 段 URL 是不是明显广告. 跟 m3u8_service._looksLikeAdSegment 同规则.
   static bool _isAdUrl(String url, String baseHost) {
     final lower = url.toLowerCase();
+    // 规则 1: 关键词
     for (final kw in _adKeywords) {
       if (lower.contains(kw)) return true;
     }
+    // 规则 2 + 3: 跨域 + 赌博站 host
+    String? segHost;
     try {
-      final segHost = Uri.parse(url).host.toLowerCase();
-      if (segHost.isEmpty || segHost == baseHost) return false;
-      // 二级域名比对: a.cdn.example.com vs b.cdn.example.com 都不算跨域
-      final baseParts = baseHost.split('.');
-      final segParts = segHost.split('.');
-      if (baseParts.length >= 2 && segParts.length >= 2) {
-        final baseApex = baseParts.sublist(baseParts.length - 2).join('.');
-        final segApex = segParts.sublist(segParts.length - 2).join('.');
-        if (baseApex == segApex) return false;
+      segHost = Uri.parse(url).host.toLowerCase();
+    } catch (_) {}
+    if (segHost != null && segHost.isNotEmpty) {
+      // 赌博站 host (v2.1.4): 即便跟 baseHost 同域, 也能识别
+      if (_isGamblingHost(segHost)) return true;
+      // 跨域 (跟 baseHost 二级域名不同)
+      if (baseHost.isNotEmpty && segHost != baseHost) {
+        final baseParts = baseHost.split('.');
+        final segParts = segHost.split('.');
+        if (baseParts.length >= 2 && segParts.length >= 2) {
+          final baseApex = baseParts.sublist(baseParts.length - 2).join('.');
+          final segApex = segParts.sublist(segParts.length - 2).join('.');
+          if (baseApex != segApex) return true;
+        } else {
+          return true;
+        }
       }
+    } else if (baseHost.isNotEmpty) {
+      // host 解析不出来, 当跨域处理
       return true;
-    } catch (_) {
-      return false;
     }
+    return false;
   }
 
   /// 从 m3u8 内容所有段 URL 提取 base host.
@@ -736,6 +790,8 @@ class VideoProxyServer {
   }
 
   /// v2.0.92: 从 m3u8 playlist 里删 ad 段 + 删孤儿 discontinuity.
+  /// v2.1.4: 加日记记录删了多少段 + 列出 ad host (用户排查"卡住几秒
+  ///   然后回到 N 分钟前").
   ///
   /// 配合 player_screen 的 runtime ad 跳:
   ///   - 这里: m3u8 重写时**物理删掉 ad 段**, libmpv 根本看不到 ad,
@@ -751,6 +807,8 @@ class VideoProxyServer {
 
     final out = <String>[];
     var removedAny = false;
+    final removedHosts = <String, int>{}; // v2.1.4: ad host 统计
+    var removedCount = 0;
     var i = 0;
     while (i < lines.length) {
       final raw = lines[i];
@@ -768,9 +826,12 @@ class VideoProxyServer {
         if (i + 1 < lines.length) {
           final next = lines[i + 1].trimRight();
           if (_isAdUrl(next, baseHost)) {
+            // v2.1.4: 记录被删的 ad host (debug 给 user 看, 排查广告源)
+            _recordAdHost(removedHosts, next);
             // 删 #EXTINF + 段 URL
             i += 2;
             removedAny = true;
+            removedCount++;
             continue;
           }
         }
@@ -787,7 +848,9 @@ class VideoProxyServer {
       }
       // 段 URL 行 (罕见 — 不带 #EXTINF 的孤立段, 兜底删)
       if (_isAdUrl(line, baseHost)) {
+        _recordAdHost(removedHosts, line);
         removedAny = true;
+        removedCount++;
         i++;
         continue;
       }
@@ -796,9 +859,28 @@ class VideoProxyServer {
     }
 
     if (removedAny) {
+      // v2.1.4: 日记记删了多少段 + 哪些 host, 排查"播放卡住几秒/回到 N 分钟前"
+      try {
+        final hostList = removedHosts.entries
+            .map((e) => '${e.key}(${e.value})')
+            .take(5)
+            .join(', ');
+        DiaryService.add(
+            '[m3u8] stripped $removedCount ad segment(s), hosts=[$hostList], baseHost=$baseHost');
+      } catch (_) {} // DiaryService import 失败也不影响主流程
       return _pruneOrphanDiscontinuities(out).join('\n');
     }
     return out.join('\n');
+  }
+
+  // v2.1.4: 记录被删的 ad host 统计
+  static void _recordAdHost(Map<String, int> map, String url) {
+    try {
+      final h = Uri.parse(url).host.toLowerCase();
+      if (h.isNotEmpty) {
+        map[h] = (map[h] ?? 0) + 1;
+      }
+    } catch (_) {}
   }
 
   /// v2.0.58: 从 backend 首包解析 HTTP 响应状态行 (e.g. "HTTP/1.1 200 OK" → "200 OK").
