@@ -4,7 +4,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
-import 'package:luna_tv/utils/font_utils.dart';
 
 /// v2.0.99.2: 应用内「日记」页面 — 跟 v2.0.95 失败 SnackBar 错误提示互补.
 ///   v2.0.95 失败时弹 SnackBar (3 秒消失), 用户来不及看细节.
@@ -118,7 +117,7 @@ class _DiaryScreenState extends State<DiaryScreen> {
             child: Row(
               children: [
                 Icon(
-                  LucideIcons.notebook,
+                  LucideIcons.fileText,
                   size: 16,
                   color: isDark ? Colors.white70 : Colors.black54,
                 ),

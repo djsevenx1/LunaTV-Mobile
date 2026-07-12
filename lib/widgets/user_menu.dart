@@ -1717,7 +1717,7 @@ class _UserMenuState extends State<UserMenu> {
               //   log 实时浮层, 这次是独立日记页 (按时间序, 用户主动点开).
               _buildActionItem(
                 title: '日记',
-                icon: LucideIcons.notebook,
+                icon: LucideIcons.fileText,
                 iconColor: const Color(0xFF8b5cf6),
                 onTap: () {
                   Navigator.of(context).push(
