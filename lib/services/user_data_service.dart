@@ -23,6 +23,12 @@ class UserDataService {
   //   用户从浏览器 DevTools 复制 cookie 字符串粘进来, 存这里.
   //   申请的 cookie 失效了再粘一次就行.
   static const String _doubanCookieKey = 'douban_cookie';
+  // v2.0.93: TMDB API Key (v3) — 从 themoviedb.org/settings/api 申请.
+  //   配了 = 详情页大头部走 TMDB search/multi 拿精准 backdrop (w1280) +
+  //   logo (w500), 替代豆瓣 coverUrl (v2.0.84 之前). 留空 = 走豆瓣
+  //   coverUrl, 行为完全不变 (跟「豆瓣登录」「优选 IP」同 UX: 字段本身
+  //   就是开关, 不另加 toggle).
+  static const String _tmdbApiKeyKey = 'tmdb_api_key';
 
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -36,6 +42,8 @@ class UserDataService {
   static String? _cfBestIpCache;
   // v2.0.77
   static String? _doubanCookieCache;
+  // v2.0.93
+  static String? _tmdbApiKeyCache;
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -473,6 +481,52 @@ class UserDataService {
     await saveDoubanCookie(null);
   }
 
+  // ===== v2.0.93: TMDB API Key (v3) =====
+
+  /// 异步读 TMDB API key (v3). null = 未配.
+  /// 配了 = 详情页大头部走 TMDB search/multi 拿精准 backdrop 替代豆瓣
+  /// coverUrl; 留空 = 走原 DoubanDetailHeader (v2.0.84 行为).
+  static Future<String?> getTmdbApiKey() async {
+    if (_tmdbApiKeyCache != null) return _tmdbApiKeyCache;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_tmdbApiKeyKey);
+    if (v == null || v.isEmpty) {
+      _tmdbApiKeyCache = null;
+      return null;
+    }
+    _tmdbApiKeyCache = v;
+    return v;
+  }
+
+  /// 同步读 TMDB API key (build 时用). null = 未配.
+  static String? getTmdbApiKeySync() => _tmdbApiKeyCache;
+
+  /// 同步判断是否配了 TMDB API key (build 时用).
+  static bool isTmdbConfigured() {
+    final k = _tmdbApiKeyCache;
+    return k != null && k.isNotEmpty;
+  }
+
+  /// 保存 TMDB API key. trim + 非空校验. 传 null / 空 = 清除.
+  /// TMDB v3 API key 长度 32 字符 (hex), 形如 "1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p",
+  /// 不强制格式校验 — 留给 TMDB 服务端验 (用户可能输错, 但不会崩 app).
+  static Future<void> saveTmdbApiKey(String? input) async {
+    final cleaned = (input ?? '').trim();
+    final prefs = await SharedPreferences.getInstance();
+    if (cleaned.isEmpty) {
+      await prefs.remove(_tmdbApiKeyKey);
+      _tmdbApiKeyCache = null;
+    } else {
+      await prefs.setString(_tmdbApiKeyKey, cleaned);
+      _tmdbApiKeyCache = cleaned;
+    }
+  }
+
+  /// 清除 TMDB API key.
+  static Future<void> clearTmdbApiKey() async {
+    await saveTmdbApiKey(null);
+  }
+
   /// 同步读 (启动 warmup 后用)
   static String? getCfBestIpSync() {
     return _cfBestIpCache;
@@ -837,6 +891,12 @@ class UserDataService {
       final prefs = await SharedPreferences.getInstance();
       final v = prefs.getString(_doubanCookieKey);
       _doubanCookieCache = (v == null || v.isEmpty) ? null : v;
+    }
+    // v2.0.93: 缓存 TMDB API key, 给详情页大头部用 (build 时同步判断)
+    if (_tmdbApiKeyCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getString(_tmdbApiKeyKey);
+      _tmdbApiKeyCache = (v == null || v.isEmpty) ? null : v;
     }
   }
 }

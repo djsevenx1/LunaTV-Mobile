@@ -22,6 +22,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/douban_detail_header.dart';
+import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -69,6 +70,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   int _lastSampleMs = 0;
   // v2.0.34: 「加速链路」弹层用, 保存当前播放 URL (buildProxiedUrl 之后的最终 URL)
   String _currentPlayUrl = '';
+  // v2.0.93: TMDB 精准识别的 w1280 backdrop URL, 传给 DoubanDetailHeader
+  //   替代豆瓣 coverUrl. 加载完成后 setState 触发 rebuild, 没加载完
+  //   / 加载失败 / 没配 key = null, DoubanDetailHeader 走 coverUrl 兜底.
+  String? _tmdbBackdropUrl;
 
   // 状态
   String _phase = 'detail'; // detail | playing
@@ -229,6 +234,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         if (mounted && br != null) setState(() => _currentBrightness = br);
       } catch (_) {}
     }();
+    // v2.0.93: 后台调 TMDB search + fetchArt 拿 w1280 backdrop, 完成后
+    //   setState 触发 DoubanDetailHeader rebuild 用 TMDB backdrop 替
+    //   代豆瓣 coverUrl. 没配 key / 搜索失败 / 抓不到 backdrop = null,
+    //   DoubanDetailHeader 走 coverUrl 兜底, 行为完全不变.
+    //   不 await — fire-and-forget, 用户不卡, 加载完 DoubanDetailHeader
+    //   自动切到更清的 TMDB backdrop.
+    _loadTmdbBackdrop();
     // 监听视频参数，获取宽高用于全屏方向判断
     _videoParamsSub = _player.streams.videoParams.listen((params) {
       final w = params.dw ?? params.w ?? 0;
@@ -2398,6 +2410,45 @@ class _PlayerScreenState extends State<PlayerScreen>
     return 'movie';
   }
 
+  // v2.0.93: TMDB 精准识别 — 后台拉 w1280 backdrop, 拿到后 setState
+  //   触发 DoubanDetailHeader rebuild 切到 TMDB backdrop. 失败 / 没
+  //   配 key / 搜索无结果 = _tmdbBackdropUrl 保持 null, 走豆瓣 coverUrl.
+  //
+  // 守门:
+  //   - 配了 TMDB key (UserDataService.isTmdbConfigured)
+  //   - title 非空 (没标题搜不到)
+  //   - year 解析成功 (4 位数字; "2024-01-01" 截前 4 位, "2024" 直接用)
+  //
+  // 异常: 任何一步 throw / 网络超时 / 解析失败 = 静默吞掉, 用户感知
+  //   不到 (DoubanDetailHeader 继续走 coverUrl).
+  Future<void> _loadTmdbBackdrop() async {
+    if (!UserDataService.isTmdbConfigured()) return;
+    final title = widget.videoInfo.title.trim();
+    if (title.isEmpty) return;
+
+    // year 解析: "2024" 或 "2024-01-01" → 2024
+    int? year;
+    final y = widget.videoInfo.year;
+    if (y != null && y.isNotEmpty) {
+      final m = RegExp(r'^(\d{4})').firstMatch(y);
+      if (m != null) year = int.tryParse(m.group(1)!);
+    }
+
+    try {
+      final ref = await TmdbService.search(title: title, year: year);
+      if (!mounted || ref == null) return;
+      final art = await TmdbService.fetchArt(
+          id: ref.id, mediaType: ref.mediaType);
+      if (!mounted || art == null) return;
+      if (art.backdropUrl == null) return;
+      setState(() {
+        _tmdbBackdropUrl = art.backdropUrl;
+      });
+    } catch (_) {
+      // 静默吞掉 — 不打扰用户, DoubanDetailHeader 走 coverUrl 兜底.
+    }
+  }
+
   Widget _buildDetailView(bool isDark) {
     return Column(
       children: [
@@ -2425,6 +2476,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                     widget.videoInfo.cover.isNotEmpty)
                   // v2.0.84: 传 coverUrl (16:9 横版剧照 l_cover 1280x720)
                   //   给详情页大头部背景. 平板/横屏缩到 2K 宽不糊.
+                  // v2.0.93: 传 tmdbBackdropUrl (TMDB w1280 16:9 backdrop, 优
+                  //   先级最高, 精准识别结果). 配了 TMDB key + 搜索成功 = 用
+                  //   TMDB backdrop; 否则 = null, 走 coverUrl 兜底 (v2.0.84).
                   DoubanDetailHeader(
                     title: widget.videoInfo.title,
                     year: widget.videoInfo.year,
@@ -2432,6 +2486,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     source: widget.videoInfo.source,
                     sourceName: widget.videoInfo.sourceName,
                     coverUrl: widget.videoInfo.coverUrl,
+                    tmdbBackdropUrl: _tmdbBackdropUrl,
                   )
                 else
                   _buildPosterHeader(isDark),

@@ -25,6 +25,14 @@
 //            "手机也改下" — 手机屏 16:9 也把 l_ratio_poster 600x900 拉
 //            到 720-1200 物理像素宽, 边角糊. 改后手机/平板共用
 //            _backgroundUrl() (原 _tabletBackgroundUrl 重命名).
+//   v2.0.93: 加 tmdbBackdropUrl (TMDB w1280 16:9 backdrop, v2.0.93 引入,
+//            从 Selene-TV mk4.a 移植的精准识别产物), 优先级最高.
+//            配 TMDB key 时, player_screen 在调 DoubanDetailHeader
+//            之前用 TmdbService.search+fetchArt 拿到 w1280 backdrop URL
+//            传进来, 替代豆瓣 coverUrl. 没配 / 搜索失败 = 走 coverUrl
+//            (v2.0.84/v2.0.85 行为), 行为完全不变.
+//            设计选择: backdropUrl 是「已知最优质」信号, 直接信它, 不
+//            再回退 — 避免 TMDB 失败时混搭豆瓣图导致视觉割裂.
 //
 // 数据流 (无网络):
 //   1. widget.videoInfo.cover  → getImageUrl(cover, source) 自动
@@ -40,6 +48,8 @@
 //       cover: widget.videoInfo.cover,
 //       source: widget.videoInfo.source,
 //       sourceName: widget.videoInfo.sourceName,
+//       coverUrl: widget.videoInfo.coverUrl,         // v2.0.84
+//       tmdbBackdropUrl: state._tmdbBackdropUrl,    // v2.0.93 (可能为 null)
 //     )
 //   else
 //     _buildPosterHeader(isDark),
@@ -67,6 +77,10 @@ class DoubanDetailHeader extends StatefulWidget {
   //   当大背景 (iPad 屏 1024+ 宽, 竖海报 l_ratio_poster 600x900 缩到 2K 宽
   //   边角糊, 横版 l_cover 1280x720 完美 cover). 有则用, 无则 fallback cover.
   final String? coverUrl;
+  // v2.0.93: TMDB w1280 16:9 backdrop (精准识别结果). 配 TMDB key 时
+  //   player_screen 传进来, 优先级 > coverUrl > cover. 留空 = 走 coverUrl.
+  //   TMDB image CDN (image.tmdb.org) 直连即可, 不需要 worker 加速.
+  final String? tmdbBackdropUrl;
 
   const DoubanDetailHeader({
     super.key,
@@ -76,6 +90,7 @@ class DoubanDetailHeader extends StatefulWidget {
     required this.source,
     this.sourceName,
     this.coverUrl,
+    this.tmdbBackdropUrl,
   });
 
   @override
@@ -83,11 +98,21 @@ class DoubanDetailHeader extends StatefulWidget {
 }
 
 class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
-  /// v2.0.84: 背景 URL — coverUrl (16:9 横版剧照) 优先, cover (2:3 竖海报) 兜底.
-  ///   coverUrl 走 [getDoubanCoverUrl] 升级到 l_cover 1280x720 + CDN 切换.
+  /// v2.0.93: 背景 URL 优先级 —
+  ///   1) tmdbBackdropUrl (TMDB w1280 16:9 backdrop, 精准识别结果, 最优)
+  ///   2) coverUrl (豆瓣 16:9 横版剧照 l_cover 1280x720, v2.0.84 引入)
+  ///   3) cover (豆瓣 2:3 竖海报 l_ratio_poster 600x900, 兜底)
+  ///
+  /// v2.0.93: tmdbBackdropUrl 是「直连 TMDB image CDN」, 不走 worker 加速
+  /// (image.tmdb.org 是 CF 全球 CDN, 跟 worker 一样快). 直接用, 不需
+  /// 要 getImageUrl 升级.
+  /// v2.0.84: coverUrl 走 [getDoubanCoverUrl] 升级到 l_cover 1280x720 + CDN 切换.
   ///   无 coverUrl 时 fallback cover (竖海报, 走 getImageUrl 升 l_ratio_poster).
   ///   手机/平板都用这个 (v2.0.85 起手机也用, 之前只有平板用).
   Future<String> _backgroundUrl() async {
+    if (widget.tmdbBackdropUrl != null && widget.tmdbBackdropUrl!.isNotEmpty) {
+      return widget.tmdbBackdropUrl!;
+    }
     if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty) {
       return getDoubanCoverUrl(widget.coverUrl!);
     }

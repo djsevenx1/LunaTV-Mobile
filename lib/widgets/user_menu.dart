@@ -52,6 +52,9 @@ class _UserMenuState extends State<UserMenu> {
   String _cfSummary = '未配置';
   // v2.0.77: 豆瓣登录 cookie — 登录后给豆瓣图升到 l_ratio_poster (高清)
   bool _doubanLoggedIn = false;
+  // v2.0.93: TMDB API Key (v3) — 详情页大头部走 TMDB search/multi 拿
+  //   精准 w1280 backdrop 替代豆瓣 coverUrl. 配了 = true, 走精准识别.
+  bool _tmdbConfigured = false;
 
   @override
   void initState() {
@@ -92,6 +95,9 @@ class _UserMenuState extends State<UserMenu> {
     // v2.0.77: 豆瓣登录状态 — 决定详情页 / 轮播图走 l_ratio_poster 高清
     final doubanCookie = await UserDataService.getDoubanCookie();
     final doubanLoggedIn = doubanCookie != null && doubanCookie.isNotEmpty;
+    // v2.0.93: TMDB API key — 决定详情页大头部走 TMDB 精准 backdrop
+    final tmdbApiKey = await UserDataService.getTmdbApiKey();
+    final tmdbConfigured = tmdbApiKey != null && tmdbApiKey.isNotEmpty;
 
     if (mounted) {
       setState(() {
@@ -116,6 +122,7 @@ class _UserMenuState extends State<UserMenu> {
           resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
         );
         _doubanLoggedIn = doubanLoggedIn;
+        _tmdbConfigured = tmdbConfigured;
       });
     }
   }
@@ -381,6 +388,189 @@ class _UserMenuState extends State<UserMenu> {
   String _computeDoubanSummary() {
     if (_doubanLoggedIn) return '已登录 · 高清 l_ratio_poster';
     return '未登录 (现有图片不变化)';
+  }
+
+  /// v2.0.93: TMDB API key 入口行摘要
+  String _computeTmdbSummary() {
+    if (_tmdbConfigured) return '已配 · 详情页精准识别 (w1280 backdrop)';
+    return '未配 (走豆瓣 coverUrl)';
+  }
+
+  // v2.0.93: 弹出 TMDB API key 输入对话框
+  //   用户从 themoviedb.org/settings/api 申请 v3 key 粘进来.
+  //   配了 = 详情页大头部走 TMDB search/multi 拿精准 w1280 backdrop.
+  Future<void> _openTmdbApiKeyDialog() async {
+    final key = await UserDataService.getTmdbApiKey() ?? '';
+    final controller = TextEditingController(text: key);
+    controller.selection =
+        TextSelection(baseOffset: 0, extentOffset: key.length);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(LucideIcons.key, size: 20, color: Color(0xFF3b82f6)),
+            const SizedBox(width: 8),
+            Text(
+              'TMDB API Key',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 18,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '从 themoviedb.org 申请 v3 API key (免费) 粘进来。配了详情页大背景自动切到 TMDB 精准 16:9 剧照 (替代豆瓣 coverUrl)。',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '不填 = 走豆瓣 coverUrl (行为完全不变)。',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 1,
+              style: FontUtils.sourceCodePro(
+                ctx,
+                fontSize: 13,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+              ),
+              decoration: InputDecoration(
+                hintText: '32 位 hex 字符串, 例: 1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p',
+                hintStyle: FontUtils.sourceCodePro(
+                  ctx,
+                  fontSize: 12,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF6b7280)
+                      : const Color(0xFF9ca3af),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (_tmdbConfigured)
+            TextButton(
+              onPressed: () async {
+                await UserDataService.clearTmdbApiKey();
+                if (!ctx.mounted) return;
+                Navigator.of(ctx).pop();
+                if (!mounted) return;
+                setState(() => _tmdbConfigured = false);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('已清除 TMDB API Key')),
+                );
+              },
+              child: Text(
+                '清除',
+                style: FontUtils.poppins(
+                  ctx,
+                  fontSize: 14,
+                  color: const Color(0xFFef4444),
+                ),
+              ),
+            ),
+          TextButton(
+            onPressed: () async {
+              Clipboard.setData(ClipboardData(
+                text:
+                    '打开 https://www.themoviedb.org/settings/api → 申请 v3 API Key (免费, 需注册) → 复制 "API Key (v3 auth)" 栏的 32 位 hex 字符串',
+              ));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                    content: Text('已复制获取步骤 (请到 TMDB 官网申请)')),
+              );
+            },
+            child: Text(
+              '查看步骤',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              '取消',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final input = controller.text.trim();
+              await UserDataService.saveTmdbApiKey(
+                  input.isEmpty ? null : input);
+              if (!ctx.mounted) return;
+              Navigator.of(ctx).pop();
+              if (!mounted) return;
+              setState(() {
+                _tmdbConfigured = input.isNotEmpty;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(input.isEmpty
+                      ? '已清除 TMDB API Key'
+                      : '已保存 TMDB API Key, 详情页大背景将自动升级到精准剧照'),
+                ),
+              );
+            },
+            child: Text(
+              '保存',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: const Color(0xFF3b82f6),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
   }
 
   String _parseRoleFromCookies(String? cookies) {
@@ -1387,6 +1577,10 @@ class _UserMenuState extends State<UserMenu> {
           //     没登录 = 当前图片行为不变 (回退到 v2.0.76 之前没 TMDB 时的体验).
           //   单独做一个 section 跟"加速"视觉同等级, 跟"其他"杂项分开.
           //   点进去是 cookie 输入框 + 退出按钮, 不需要子页面.
+          //   v2.0.93: 重新加回 TMDB API Key (从反编译 Selene-TV v1.4.6 mk4
+          //     移植精准识别) — 详情页大头部走 TMDB search/multi 拿精准
+          //     16:9 backdrop, 跟豆瓣登录并列. 配了哪个就用哪个, 都没配
+          //     = 走 _buildPosterHeader (110x150 小海报, 旧行为).
           _buildSectionHeader('海报墙'),
           _buildCard(
             children: [
@@ -1399,6 +1593,18 @@ class _UserMenuState extends State<UserMenu> {
                     : LucideIcons.user,
                 iconColor: _doubanLoggedIn
                     ? const Color(0xFF10b981)
+                    : const Color(0xFF9ca3af),
+              ),
+              _buildDivider(),
+              _buildInputOption(
+                title: 'TMDB API Key',
+                currentValue: _computeTmdbSummary(),
+                onTap: _openTmdbApiKeyDialog,
+                icon: _tmdbConfigured
+                    ? LucideIcons.key
+                    : LucideIcons.key,
+                iconColor: _tmdbConfigured
+                    ? const Color(0xFF3b82f6)
                     : const Color(0xFF9ca3af),
               ),
             ],
