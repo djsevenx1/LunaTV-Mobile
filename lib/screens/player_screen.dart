@@ -137,6 +137,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 控制跳过按钮显示（避免反复触发）
   bool _showSkipIntro = false;
   bool _showSkipOutro = false;
+  // v2.1.18: 广告重置检测 — 锁定整段播放期不再触发跳过片头.
+  //   触发条件: currentTime 从正片位置 (>60s) 突然倒退到接近 0 (<10s),
+  //   而 _currentDuration 不变 (广告跟正片在同一条流里, 总时长不变).
+  //   触发后整个 _State 生命周期不再重置, 后续 3-4 次广告都不会再被误判.
+  //   用户拖进度条 (前跳) 不会触发, 因为不满足"倒退到 0".
+  bool _adResetDetected = false;
+  // 上一帧 position (秒), 用来算 delta 检测倒退. -1 表示未初始化.
+  int _lastPosForAdDetect = -1;
 
   // _lastKnownPosition: position stream 每帧更新, 记"上一次非 0 位置".
   // 用于进度同步兜底 (libmpv m3u8 reload 期间 state.position=0,
@@ -491,6 +499,28 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _updateSkipButtonVisibility() {
     final posSec = _currentPosition.inSeconds;
     final durSec = _currentDuration.inSeconds;
+    // v2.1.18: 广告重置检测 (一次触发, 整段播放期锁死).
+    //   特征: currentTime 从正片位置 (>60s) 突然倒退到接近 0 (<10s).
+    //   用户场景: 一集里有 4-5 次广告, 每次广告都从 0 开始播完跳回原位置.
+    //   总时长不变 (广告跟正片在同一条流里, durSec 不变), 跟 v2.1.13/v1.0.77
+    //   处理的"切流时 durSec 跳变"不同 — 这次 durSec 不动, 单纯 position 倒退.
+    //   触发后 _adResetDetected = true, shouldShowIntro 短路, 整个 _State
+    //   生命周期不再重置, 后续 3-4 次广告都不会再被误判跳过.
+    //   排除: 用户拖进度条是前跳 (不满足"倒退到 0"), 不会误判.
+    if (!_adResetDetected &&
+        _lastPosForAdDetect > 60 &&
+        posSec < 10 &&
+        durSec > 60) {
+      // v2.1.18: 倒退到接近 0 → 判定为广告重置, 锁定.
+      //   没用 (posSec - _lastPos) < -X, 因为源切流时可能一次 stream
+      //   跳变给一个 0, 下一帧又到 50, 中间没"delta 帧"被捕获. 直接用
+      //   "上次 > 60 + 这次 < 10" 两个绝对值判断, 跨帧跳变也能覆盖.
+      _adResetDetected = true;
+      // v2.1.18 debug: 记录一次, adb logcat | grep AD_RESET 能看到
+      debugPrint('[AD_RESET] detected: ${_lastPosForAdDetect}s -> ${posSec}s '
+          '(dur=${durSec}s) — 整段播放期禁用跳过片头');
+    }
+    _lastPosForAdDetect = posSec;
     // v1.0.77: 加 durSec > _skipIntroEnd 守门
     // 防止广告流 (durSec=30s) 切流时, position 跳 0 还没等 duration stream
     // 检测到跳变先触发, 这里误判成"还在片头"自动 seek 到 90s, 90s 超出
@@ -500,11 +530,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     // v2.1.13: 加 durSec > 60 守门 — 影片总时长低于 60s 不跳过片头.
     //   防止广告 (典型 30s) / m3u8 短段被误认为"影片重新播放"而触发
     //   跳过片头. 主片通常 > 60s, 正常判断不受影响.
+    // v2.1.18: 加 !_adResetDetected 守门 — 整段播放期检测到广告重置后
+    //   跳过片头直接短路, 不再 seek, 后续 3-4 次广告都不会再被误判.
     final shouldShowIntro = _skipIntroEnd > 0 &&
         posSec < _skipIntroEnd &&
         posSec > 1 &&
         durSec > _skipIntroEnd &&
-        durSec > 60;
+        durSec > 60 &&
+        !_adResetDetected;
     final hasNextEpisode = _selectedSource != null &&
         _currentEpisodeIndex < _selectedSource!.episodes.length - 1;
     // v1.0.77: shouldShowOutro 同样加 durSec 守门 (广告流 durSec=30
