@@ -1450,6 +1450,52 @@ class _UserMenuState extends State<UserMenu> {
                 icon: LucideIcons.image,
                 iconColor: const Color(0xFFf43f5e),
               ),
+              _buildDivider(),
+              // v2.1.19: TMDB 数据源从「海报墙」挪到「数据源」section —
+              //   跟豆瓣数据源 / Bangumi 数据源放一起, 跟其他数据源 1:1 UX.
+              //   用户反馈 "TMDB 数据源不应该放到数据源栏目吗" — 跟 Bangumi
+              //   数据源/豆瓣数据源对齐, 不再跟"豆瓣登录"+"TMDB API Key"
+              //   混在"海报墙"里.
+              // v2.1.19: 删「已关闭」选项, 只剩 CF Worker 加速 / 直连
+              //   2 选 1. 用户反馈 "关闭应该不需要吧" — 「数据源」不该有
+              //   「关闭」语义, 关了就没数据源了. 真要关 → 走 "清除 TMDB
+              //   缓存"上方条件渲染行? 不, 删 API key 就走豆瓣兜底 (跟
+              //   v2.0.93 行为一致). 数据源选项就专心管"怎么连".
+              _buildOptionSelector(
+                title: 'TMDB 数据源',
+                currentValue: UserDataService.getTmdbDataSourceDisplayName(
+                    _tmdbDataSource),
+                options: const [
+                  'CF Worker 加速',
+                  '直连',
+                ],
+                onChanged: (value) async {
+                  final key = UserDataService
+                      .getTmdbDataSourceKeyFromDisplayName(value);
+                  await UserDataService.saveTmdbDataSource(key);
+                  if (!mounted) return;
+                  setState(() {
+                    _tmdbDataSource = key;
+                  });
+                  // v2.0.98: 没配 key 时切了不生效, 告诉用户为啥.
+                  //   配了 key 的用户切了直接生效, 不打扰.
+                  // v2.1.19: 行为不变, 只是挪位置 + 删"已关闭".
+                  if (!_tmdbConfigured) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '已切换 TMDB 数据源, 但还没配 TMDB API Key, 详情页仍走豆瓣',
+                        ),
+                        duration: Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                icon: LucideIcons.database,
+                iconColor: _tmdbConfigured
+                    ? const Color(0xFFec4899)
+                    : const Color(0xFF9ca3af),
+              ),
             ],
           ),
           // ===== 加速 =====
@@ -1507,41 +1553,10 @@ class _UserMenuState extends State<UserMenu> {
               //   条件, 没配 key 不显示, 用户反馈 "改的啥玩意选项在哪" — 跟
               //   Bangumi 数据源一样 UX 永远显示, 切了存但没配 key 时不生效.
               //   没配 key 时 icon 灰色, 配了粉色, 一眼能看出状态.
-              _buildOptionSelector(
-                title: 'TMDB 数据源',
-                currentValue: UserDataService.getTmdbDataSourceDisplayName(
-                    _tmdbDataSource),
-                options: const [
-                  'CF Worker 加速',
-                  '直连',
-                  '已关闭',
-                ],
-                onChanged: (value) async {
-                  final key = UserDataService
-                      .getTmdbDataSourceKeyFromDisplayName(value);
-                  await UserDataService.saveTmdbDataSource(key);
-                  if (!mounted) return;
-                  setState(() {
-                    _tmdbDataSource = key;
-                  });
-                  // v2.0.98: 没配 key 时切了不生效, 告诉用户为啥.
-                  //   配了 key 的用户切了直接生效, 不打扰.
-                  if (!_tmdbConfigured) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          '已切换 TMDB 数据源, 但还没配 TMDB API Key, 详情页仍走豆瓣',
-                        ),
-                        duration: Duration(seconds: 3),
-                      ),
-                    );
-                  }
-                },
-                icon: LucideIcons.database,
-                iconColor: _tmdbConfigured
-                    ? const Color(0xFFec4899)
-                    : const Color(0xFF9ca3af),
-              ),
+              // v2.1.19: 整行挪到「数据源」section (跟 Bangumi 数据源
+              //   并列), 删「已关闭」选项 (剩 CF Worker 加速 / 直连
+              //   2 选 1). 这里不再渲染, 海报墙 section 只剩:
+              //   豆瓣登录 / TMDB API Key / 清除 TMDB 缓存 / 清除豆瓣缓存.
               if (_tmdbConfigured) ...[
                 _buildDivider(),
                 // v2.0.99.1: 清除 TMDB 缓存 — 用户排查 TMDB 大背景没出来

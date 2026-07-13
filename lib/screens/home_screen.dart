@@ -21,6 +21,9 @@ import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/bangumi_service.dart';
+import 'package:luna_tv/services/tmdb_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/widgets/hero_banner.dart';
 import 'package:luna_tv/screens/movie_screen.dart';
 import 'package:luna_tv/screens/tv_screen.dart';
@@ -193,9 +196,59 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _bannerItems = items;
         });
+        // v2.1.19: 用 TMDB 16:9 backdrop 替换豆瓣竖海报 (banner 全屏
+        //   宽屏视觉, 16:9 比 2:3 适配更好). 串行 enrich 每拉到 1 个
+        //   就 setState 替换, 失败/没配 key 保留豆瓣海报 (跟之前完全一致).
+        _enrichBannerItemsWithTmdb();
       }
     } catch (_) {
       // banner 加载失败不影响首页
+    }
+  }
+
+  /// v2.1.19: 用 TMDB 16:9 backdrop 升级 banner 背景图.
+  ///   串行处理 (避免触发 TMDB rate limit), 每个 item 拉到 backdrop 后
+  ///   立即 setState 替换 imageUrl, 失败/没配 key 保留豆瓣海报.
+  ///   番剧 (type=='anime') 跳过, 保留 bangumi 图 (TMDB 对番剧识别率低).
+  Future<void> _enrichBannerItemsWithTmdb() async {
+    if (!UserDataService.isTmdbConfigured()) return;
+    for (int i = 0; i < _bannerItems.length; i++) {
+      if (!mounted) return;
+      final item = _bannerItems[i];
+      // v2.1.19: 番剧不查 TMDB — Bangumi 已经有自己的图, TMDB 对日漫
+      //   识别率低 (老番/罗马字名), 留着 bangumi 图更稳.
+      if (item.type == 'anime') continue;
+      try {
+        // v2.1.19: 跟 _loadTmdbBackdrop 同样的 search-first 模式.
+        //   7 天 TTL 缓存, 重复进首页 0 网络.
+        final overview = await TmdbService.fetchOverview(
+          title: item.title, year: item.year);
+        if (overview == null || !mounted) continue;
+        final art = await TmdbService.fetchArt(
+          id: overview.id, mediaType: overview.mediaType);
+        if (art?.backdropUrl == null || !mounted) continue;
+        if (mounted) {
+          setState(() {
+            // v2.1.19: 直接替换 imageUrl 字段, 其它字段 (id/title/...)
+            //   全部保持. HeroBannerItem 是不可变数据类, 重新构造一次.
+            _bannerItems[i] = HeroBannerItem(
+              id: item.id,
+              title: item.title,
+              subtitle: item.subtitle,
+              imageUrl: art!.backdropUrl!,
+              type: item.type,
+              source: 'tmdb', // 标记来源, 走 worker 加速 (跟详情页大头部一致)
+              id_: item.id_,
+              year: item.year,
+              rate: item.rate,
+              description: item.description,
+            );
+          });
+        }
+      } catch (e) {
+        // v2.1.19: 静默 fallback — 拉取失败保留豆瓣海报, 不影响首页.
+        DiaryService.add('[TMDB banner] enrich error: $e');
+      }
     }
   }
 
