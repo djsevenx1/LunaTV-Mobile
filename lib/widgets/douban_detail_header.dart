@@ -225,16 +225,11 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
           // v2.1.8: 用 LayoutBuilder 拿容器高度, 海报高度 = 容器高 - padding,
           //   宽度 = 高度 * 2/3. 修复"海报和片名错位" — 之前海报固定 150x225,
           //   16:9 窄屏容器高 < 225 时海报溢出, Row 被撑高, 标题贴底对不齐海报.
-          // v2.1.9: 手机右侧也显示简介 (填空白, 跟平板一致). 外层加横向
-          //   SingleChildScrollView — 用户反馈"手机也是写不下就左滑", 标题/简介
-          //   超出可见宽度时可左滑查看. 右侧 meta column 用固定宽度 (不用
-          //   Expanded, 因为 Expanded 跟横向滚动冲突).
-          // v2.1.14: 量标题自然宽决定 metaW — 但标题通常短, metaW 仍=可见宽,
-          //   Row 不溢出, 左滑无效.
-          // v2.1.15: 改量简介自然宽. 简介单行宽 / 7 = 8 行能放下时所需列宽.
-          //   简介长时 desiredW > 可见宽 → metaW = desiredW → Row 溢出 → 左滑
-          //   生效, 简介在更宽列里也能显示更多内容. 简介短时 desiredW < 可见宽
-          //   → metaW = 可见宽, 不溢出 (跟原来一样). 上限 3 倍可见宽避免滑太远.
+          // v2.1.16: 简介改小说翻页式. 之前外层 SingleChildScrollView 把海报+
+          //   标题+简介整条左滑, 用户反馈"能不能只滑动文字往左滑动是下半段
+          //   内容而不是连着 / 和小说翻页一样". 改: 海报+标题+年份固定不动,
+          //   只有简介区用 PageView 横向翻页, 每页显示一段简介文本. 简介按
+          //   可见宽+高度切多页, 左滑翻下一页 (下半段), 右滑翻上一页.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
             child: LayoutBuilder(
@@ -245,83 +240,57 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
                 final posterW = posterH * 2 / 3;
                 // 右侧 meta 可见宽度 = 总宽 - 海报 - gap (padding 已在外层
                 // Padding 扣过, 不再重复减).
-                final availableForMeta =
-                    constraints.maxWidth - posterW - 14;
-                // 量简介单行自然宽, 算 8 行能放下时所需列宽 (留 1 行余量用 7).
-                // 简介长时 metaW > 可见宽 → Row 溢出 → 左滑生效.
-                double metaW = availableForMeta;
-                final summary = widget.summary?.trim() ?? '';
-                if (summary.isNotEmpty) {
-                  final summaryTp = TextPainter(
-                    text: TextSpan(
-                      text: summary,
-                      style: const TextStyle(
-                          fontSize: 13, height: 1.5),
-                    ),
-                    textDirection: TextDirection.ltr,
-                  )..layout(maxWidth: double.infinity);
-                  final summaryW = summaryTp.maxIntrinsicWidth;
-                  summaryTp.dispose();
-                  final desiredW = summaryW / 7;
-                  final maxMetaW = availableForMeta * 3;
-                  if (desiredW > availableForMeta) {
-                    metaW = desiredW > maxMetaW ? maxMetaW : desiredW;
-                  }
-                }
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: SizedBox(
-                          width: posterW,
-                          height: posterH,
-                          child: FutureBuilder<String>(
-                            future: getImageUrl(widget.cover, widget.source),
-                            builder: (context, snapshot) {
-                              final imageUrl = snapshot.data ?? widget.cover;
-                              final headers = getImageRequestHeaders(
-                                  imageUrl, widget.source);
-                              return CachedNetworkImage(
-                                imageUrl: imageUrl,
-                                fit: BoxFit.cover,
-                                httpHeaders: headers,
-                                memCacheWidth: (posterW *
-                                        MediaQuery.of(context).devicePixelRatio)
-                                    .round(),
-                                memCacheHeight: (posterH *
-                                        MediaQuery.of(context).devicePixelRatio)
-                                    .round(),
-                                placeholder: (c, u) => Container(
-                                  color: isDark
-                                      ? const Color(0xFF1F2937)
-                                      : const Color(0xFFE5E7EB),
-                                ),
-                                errorWidget: (c, u, e) => Container(
-                                  color: isDark
-                                      ? const Color(0xFF1F2937)
-                                      : const Color(0xFFE5E7EB),
-                                  child: const Icon(Icons.movie_outlined,
-                                      color: Colors.grey, size: 48),
-                                ),
-                              );
-                            },
-                          ),
+                final metaW = constraints.maxWidth - posterW - 14;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: SizedBox(
+                        width: posterW,
+                        height: posterH,
+                        child: FutureBuilder<String>(
+                          future: getImageUrl(widget.cover, widget.source),
+                          builder: (context, snapshot) {
+                            final imageUrl = snapshot.data ?? widget.cover;
+                            final headers = getImageRequestHeaders(
+                                imageUrl, widget.source);
+                            return CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              httpHeaders: headers,
+                              memCacheWidth: (posterW *
+                                      MediaQuery.of(context).devicePixelRatio)
+                                  .round(),
+                              memCacheHeight: (posterH *
+                                      MediaQuery.of(context).devicePixelRatio)
+                                  .round(),
+                              placeholder: (c, u) => Container(
+                                color: isDark
+                                    ? const Color(0xFF1F2937)
+                                    : const Color(0xFFE5E7EB),
+                              ),
+                              errorWidget: (c, u, e) => Container(
+                                color: isDark
+                                    ? const Color(0xFF1F2937)
+                                    : const Color(0xFFE5E7EB),
+                                child: const Icon(Icons.movie_outlined,
+                                    color: Colors.grey, size: 48),
+                              ),
+                            );
+                          },
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      // 右侧: 标题 + 年份 + 源 + 简介 (v2.1.9: 手机也显示简介)
-                      SizedBox(
-                        width: metaW,
-                        height: posterH,
-                        child: _buildMetaColumn(
-                            alignEnd: false, showSummary: true),
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 14),
+                    // 右侧: 标题 + 年份 + 源 + 简介 (简介区小说翻页式)
+                    SizedBox(
+                      width: metaW,
+                      height: posterH,
+                      child: _buildMetaColumn(
+                          alignEnd: false, showSummary: true, summaryW: metaW),
+                    ),
+                  ],
                 );
               },
             ),
@@ -429,8 +398,18 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
                 ),
                 const SizedBox(width: 14),
                 // 右侧: 标题 + 年份 + 源 + 简介 (v2.1.8: 平板填满右侧空白)
+                // v2.1.16: LayoutBuilder 拿 Expanded 给的宽度传给 summaryW,
+                //   让平板也能用小说翻页式简介 (跟手机一致).
                 Expanded(
-                  child: _buildMetaColumn(alignEnd: false, showSummary: true),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return _buildMetaColumn(
+                        alignEnd: false,
+                        showSummary: true,
+                        summaryW: constraints.maxWidth,
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -446,7 +425,13 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
   /// v2.1.8: 平板 (showSummary=true) 在年份下方加剧情简介, Expanded 撑满
   ///   剩余高度, 解决"右侧大片空白". 手机 (showSummary=false) 屏窄不放简介,
   ///   走独立 summary section. alignEnd 参数保留但当前都传 false.
-  Widget _buildMetaColumn({required bool alignEnd, bool showSummary = false}) {
+  /// v2.1.16: 简介改小说翻页式. [summaryW] = 简介区可见宽, 用它把简介切成
+  ///   多页, 用 PageView 横向翻页. 标题/年份固定不动, 左滑只翻简介下半段.
+  Widget _buildMetaColumn({
+    required bool alignEnd,
+    bool showSummary = false,
+    double summaryW = 0,
+  }) {
     final hasSummary = showSummary &&
         widget.summary != null &&
         widget.summary!.trim().isNotEmpty;
@@ -502,13 +487,112 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
               ),
           ],
         ),
-        // v2.1.8: 平板 — 剧情简介填满右侧剩余空间 (解决"右边空白")
+        // v2.1.16: 简介 — 小说翻页式 PageView. 标题/年份固定不动, 左滑只翻
+        //   简介下半段 (下一页), 右滑翻上一页. 简介短到一页放得下时只有 1 页,
+        //   PageView 不会滚动 (跟原来单 Text 视觉一致).
         if (hasSummary) ...[
           const SizedBox(height: 10),
           Expanded(
-            child: Text(
-              widget.summary!.trim(),
-              maxLines: 8,
+            child: _buildSummaryPager(summaryW),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// v2.1.16: 简介小说翻页器. 用 TextPainter 量简介在 [pageW] 宽度下的
+  /// 排版, 按"每页能放下的行数"把简介切成多页, PageView 横向翻页.
+  /// - 简介短 (1 页放得下): PageView 只 1 页, 不滚动, 视觉跟单 Text 一样.
+  /// - 简介长 (多页): 左滑翻下一页 (下半段), 右滑翻上一页. 海报/标题/年份
+  ///   固定不动, 只有简介区翻页.
+  Widget _buildSummaryPager(double pageW) {
+    final summary = widget.summary?.trim() ?? '';
+    if (summary.isEmpty || pageW <= 0) {
+      return const SizedBox.shrink();
+    }
+    // 用 TextPainter 量完整简介在 pageW 宽度下占多少行.
+    final tp = TextPainter(
+      text: TextSpan(
+        text: summary,
+        style: const TextStyle(fontSize: 13, height: 1.5),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: pageW);
+    final lines = tp.computeLineMetrics();
+    final fullLines = lines.length;
+    tp.dispose();
+    // 每页固定 8 行 (跟原来 maxLines:8 一致), 末页可能不满 8 行.
+    const linesPerPage = 8;
+    final pageCount = (fullLines / linesPerPage).ceil();
+    if (pageCount <= 1) {
+      // 1 页放得下, 不用翻页, 直接渲染 Text (跟原视觉一致).
+      return Text(
+        summary,
+        maxLines: 8,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 13,
+          height: 1.5,
+          color: Colors.white.withOpacity(0.82),
+          shadows: const [
+            Shadow(color: Colors.black54, blurRadius: 4),
+          ],
+        ),
+      );
+    }
+    // 多页: 用一次完整 layout 拿所有行的 right/baseline, 逐行取该行
+    // 最右一个字符的 offset → getPositionForOffset → TextPosition.offset
+    // 就是这行末尾字符在原文里的位置. 累加 linesPerPage 行切出一页.
+    final fullTp = TextPainter(
+      text: TextSpan(
+        text: summary,
+        style: const TextStyle(fontSize: 13, height: 1.5),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: pageW);
+    final allLines = fullTp.computeLineMetrics();
+    // 算每行末尾字符在原文中的 offset.
+    final lineEndOffsets = <int>[];
+    for (final line in allLines) {
+      // baseline 是文字基线 y, 行末 x 用 line.width (这行最后一个字符右沿).
+      // getPositionForOffset 返回最接近这个点的字符位置.
+      final pos = fullTp.getPositionForOffset(
+        Offset(line.width - 0.5, line.baseline - 0.5),
+      );
+      lineEndOffsets.add(pos.offset);
+    }
+    fullTp.dispose();
+    // 按 linesPerPage 行切页.
+    final pages = <String>[];
+    var lineIdx = 0;
+    var lastEnd = 0;
+    while (lineIdx < allLines.length) {
+      final pageLastLineIdx =
+          (lineIdx + linesPerPage - 1) < allLines.length
+              ? lineIdx + linesPerPage - 1
+              : allLines.length - 1;
+      final end = lineEndOffsets[pageLastLineIdx];
+      // +1 让 substring 包含末尾字符; 末行特殊处理到原文末尾.
+      final sliceEnd = end + 1 > summary.length ? summary.length : end + 1;
+      final pageText = summary.substring(lastEnd, sliceEnd).trim();
+      if (pageText.isNotEmpty) {
+        pages.add(pageText);
+      }
+      lastEnd = sliceEnd;
+      lineIdx = pageLastLineIdx + 1;
+    }
+    if (pages.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return PageView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: pages.length,
+      itemBuilder: (context, index) {
+        return Stack(
+          children: [
+            Text(
+              pages[index],
+              maxLines: linesPerPage,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 13,
@@ -519,9 +603,21 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
                 ],
               ),
             ),
-          ),
-        ],
-      ],
+            // 右下角页码提示, 告诉用户当前第几页 / 共几页.
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Text(
+                '${index + 1}/${pages.length}',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white.withOpacity(0.5),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
