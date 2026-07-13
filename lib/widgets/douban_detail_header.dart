@@ -96,6 +96,13 @@ class DoubanDetailHeader extends StatefulWidget {
   //   下方), 填满原来大片空白. 手机 layout 屏太窄不放 (走独立 summary section).
   //   null/空 = 不渲染简介部分, 跟 v2.1.7 之前完全一致.
   final String? summary;
+  // v2.1.17: 平板大头部背景图下半部嵌入横向滚动的演员头像+名字 (填充原来
+  //   大头部的空白). 用户反馈"海报内好多空白的地方 / 放上演员吧 / 都在一行
+  //   要有演员图片那种 / 不够排就滑动". 平板 build 时把它 Positioned 在背景
+  //   图下半部 (避开左边海报), 手机 build 忽略这个字段 (演员在手机端
+  //   不展示, 跟之前一致 — 用户只要平板). null = 不渲染 (没配 TMDB key /
+  //   拉不到演员), 跟 v2.1.16 视觉一致.
+  final Widget? castOverlay;
 
   const DoubanDetailHeader({
     super.key,
@@ -107,6 +114,7 @@ class DoubanDetailHeader extends StatefulWidget {
     this.coverUrl,
     this.tmdbBackdropUrl,
     this.summary,
+    this.castOverlay,
   });
 
   @override
@@ -414,6 +422,18 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
               ],
             ),
           ),
+          // v2.1.17: 演员卡司 — 浮在背景图下半部 (避开左边海报), 横向滚动的
+          //   圆形头像 + 名字. castOverlay 是个 SizedBox(100) ListView, 调用方
+          //   (player_screen) 传. null 时不渲染, 跟 v2.1.16 视觉一致.
+          //   高度 100 (头像 70 + 间距 6 + 名字 ~17 + 上下 padding) 在
+          //   21:9 大背景图下半部比例协调, 比 v2.1.17 首发 80 更显眼.
+          if (widget.castOverlay != null)
+            Positioned(
+              left: 180, // 避开左边海报 (150) + 间距 (14) + padding (16)
+              right: 16,
+              bottom: 14,
+              child: widget.castOverlay!,
+            ),
         ],
       ),
     );

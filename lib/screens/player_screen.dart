@@ -82,6 +82,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   section 跟源 section 之间插一个简介 card. 没 doubanId / 拉不到 / 字段空
   //   = 不渲染, 行为不变 (不占空白).
   String? _summary;
+  // v2.1.17: TMDB 卡司 (演员) — 平板大头部背景图下半部展示横向滚动的
+  //   演员头像 + 名字. 用户反馈"海报内好多空白的地方看到没 / 放上演员吧
+  //   怎么样 / 或者海报那个好 / 都在一行要有演员图片那种 / 不够排就滑动".
+  //   跟 _summary / _tmdbBackdropUrl 同模式: TMDB search → credits 接口,
+  //   不依赖 doubanId, 主页/历史/收藏页都能拉到. null = 没配 key / 拉不到.
+  List<TmdbCast>? _cast;
   bool _summaryExpanded = false; // 用户点击"展开"切换
 
   // 状态
@@ -234,6 +240,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _loadTmdbBackdrop();
     // v2.1.7: 拉豆瓣剧情简介 (跟 _loadTmdbBackdrop 同样静默 fallback)
     _loadDoubanSummary();
+    // v2.1.17: 拉 TMDB 演员 (跟 _loadTmdbBackdrop 同样静默 fallback)
+    _loadTmdbCast();
     // 监听视频参数，获取宽高用于全屏方向判断
     _videoParamsSub = _player.streams.videoParams.listen((params) {
       final w = params.dw ?? params.w ?? 0;
@@ -2505,7 +2513,39 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  // v2.1.17: 拉 TMDB 演员 — 跟 _loadTmdbBackdrop / _loadDoubanSummary 同样
+  //   静默 fire-and-forget 模式. 平板大头部背景图下半部显示用.
+  Future<void> _loadTmdbCast() async {
+    if (!UserDataService.isTmdbConfigured()) {
+      return;
+    }
+    final title = widget.videoInfo.title.trim();
+    if (title.isEmpty) return;
+    int? year;
+    final y = widget.videoInfo.year;
+    if (y != null && y.isNotEmpty) {
+      final m = RegExp(r'^(\d{4})').firstMatch(y);
+      if (m != null) year = int.tryParse(m.group(1)!);
+    }
+    try {
+      final cast = await TmdbService.fetchCredits(title: title, year: year);
+      if (!mounted) return;
+      if (cast != null && cast.isNotEmpty) {
+        setState(() {
+          _cast = cast;
+        });
+      }
+    } catch (e) {
+      debugPrint('[TMDB credits] error: $e');
+      DiaryService.add('[TMDB credits] error: $e');
+      // 静默 fallback
+    }
+  }
+
   Widget _buildDetailView(bool isDark) {
+    // v2.1.17: 平板判定 — DoubanDetailHeader 用同一标准 (>=600), 用来
+    //   决定要不要传 castOverlay (演员横向滚动 ListView).
+    final isTablet = MediaQuery.of(context).size.width >= 600;
     return Column(
       children: [
         // 顶部 bar
@@ -2559,6 +2599,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                     // v2.1.10: 手机 header 右侧也显示简介 (上面不够写可左滑),
                     //   下方不再渲染独立 section.
                     summary: _summary,
+                    // v2.1.17: 平板传演员横向滚动 ListView (浮在背景图下半部
+                    //   空白处). 手机不传 — DoubanDetailHeader 内部忽略, 跟
+                    //   v2.1.16 视觉一致. _cast 为空 (没配 TMDB key / 拉不到
+                    //   演员) 时不传, header 不渲染演员区.
+                    castOverlay: isTablet && _cast != null
+                        ? _buildCastOverlay(_cast!)
+                        : null,
                   )
                 else
                   _buildPosterHeader(isDark),
@@ -2577,6 +2624,78 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 底部播放按钮
         _buildBottomPlayButton(isDark),
       ],
+    );
+  }
+
+  // v2.1.17: 平板大头部背景图下半部浮层 — 横向滚动演员头像 + 名字.
+  //   只在平板 (isTablet) + _cast 非空时由 _buildDetailView 调用. 一行
+  //   排列, 不够就滑动. 头像用 TMDB w185 圆图, 名字 1 行省略号, 跟背景
+  //   图对比 + 阴影保持可读. 跟 v2.1.18 删掉的 episodesOverlay 同位置模式
+  //   (DoubanDetailHeader 内部 Positioned 浮在 left:180 right:16 bottom:14).
+  //   尺寸 (v2.1.17 微调): 头像 70 + 名字 12pt + 总高 100 — 21:9 大背景图
+  //   下半部比例协调, 比 v2.1.17 首发 50/10pt/80 显大 40%.
+  Widget _buildCastOverlay(List<TmdbCast> cast) {
+    return SizedBox(
+      height: 100,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: cast.length,
+        itemBuilder: (context, i) {
+          final c = cast[i];
+          final url = c.fullProfileUrl;
+          return Container(
+            margin: const EdgeInsets.only(right: 14),
+            child: Column(
+              children: [
+                ClipOval(
+                  child: SizedBox(
+                    width: 70,
+                    height: 70,
+                    child: url != null
+                        ? CachedNetworkImage(
+                            imageUrl: url,
+                            fit: BoxFit.cover,
+                            placeholder: (ctx, u) => Container(
+                              color: Colors.white12,
+                            ),
+                            errorWidget: (ctx, u, e) => Container(
+                              color: Colors.white12,
+                              child: const Icon(Icons.person,
+                                  color: Colors.white54, size: 36),
+                            ),
+                          )
+                        : Container(
+                            color: Colors.white12,
+                            child: const Icon(Icons.person,
+                                color: Colors.white54, size: 36),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: 80,
+                  child: Text(
+                    c.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.9),
+                      shadows: const [
+                        Shadow(
+                            color: Colors.black54,
+                            offset: Offset(0, 1),
+                            blurRadius: 3),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 

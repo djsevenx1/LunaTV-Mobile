@@ -587,6 +587,119 @@ class TmdbService {
     }
   }
 
+  /// v2.1.17: TMDB 卡司 (演员) — search 拿 (mediaType, id) → /credits 接口
+  ///   拿 cast 数组. 跟 fetchOverview / fetchArt 同样的 search-first 模式,
+  ///   不依赖 doubanId. 主页/历史/收藏页 (没 doubanId) 也能拉到演员.
+  ///
+  /// 返回 null = 没配 key / search 无结果 / credits 接口失败 / cast 数组空.
+  /// 缓存: 跟 overview / art 独立 key "tmdb_credits_{mediaType}_{id}", 7 天.
+  static Future<List<TmdbCast>?> fetchCredits({
+    required String title,
+    int? year,
+  }) async {
+    final apiKey = UserDataService.getTmdbApiKeySync();
+    if (apiKey == null || apiKey.isEmpty) {
+      DiaryService.add('[TMDB credits] skip: apiKey 空');
+      return null;
+    }
+    final source = UserDataService.getTmdbDataSourceSync();
+    if (source == 'off') {
+      DiaryService.add('[TMDB credits] skip: source=off');
+      return null;
+    }
+    final ref = await search(title: title, year: year);
+    if (ref == null) {
+      DiaryService.add('[TMDB credits] search 无结果, title="$title"');
+      return null;
+    }
+    // 缓存查
+    final cacheKey = 'tmdb_credits_${ref.mediaType}_${ref.id}';
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(cacheKey);
+    if (raw != null) {
+      try {
+        final json = jsonDecode(raw) as Map<String, dynamic>;
+        final ts = json['ts'] as int? ?? 0;
+        if (DateTime.now().millisecondsSinceEpoch - ts <
+            _cacheTtl.inMilliseconds) {
+          final list = (json['cast'] as List?) ?? [];
+          if (list.isNotEmpty) {
+            final casts = list
+                .whereType<Map<String, dynamic>>()
+                .map((m) => TmdbCast(
+                      id: (m['id'] as int?) ?? 0,
+                      name: (m['name'] as String?) ?? '',
+                      character: (m['character'] as String?) ?? '',
+                      profilePath: (m['profile_path'] as String?),
+                    ))
+                .where((c) => c.name.isNotEmpty)
+                .toList();
+            if (casts.isNotEmpty) {
+              DiaryService.add('[TMDB credits] cache hit: ${casts.length}');
+              return casts;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    // /credits 接口 — 跟前两个接口 (details / images) 同样的 search-first 模式
+    final origUrl =
+        '$_baseUrl/${ref.mediaType}/${ref.id}/credits?api_key=$apiKey&language=zh-CN';
+    final url = _buildTmdbApiUrl(origUrl, source);
+    DiaryService.add(
+        '[TMDB credits] network req: ${_maskKeyInUrl(url, apiKey)}');
+    try {
+      final resp = await _httpGetWithFallback(
+        origUrl: origUrl,
+        url: url,
+        source: source,
+        apiKey: apiKey,
+        tag: 'credits',
+      );
+      if (resp == null || resp.statusCode != 200) {
+        DiaryService.add(
+            '[TMDB credits] network fail: resp=${resp?.statusCode}');
+        return null;
+      }
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final list = (data['cast'] as List?) ?? [];
+      if (list.isEmpty) {
+        DiaryService.add('[TMDB credits] cast 数组空');
+        return null;
+      }
+      final casts = list
+          .whereType<Map<String, dynamic>>()
+          .map((m) => TmdbCast(
+                id: (m['id'] as int?) ?? 0,
+                name: (m['name'] as String?) ?? '',
+                character: (m['character'] as String?) ?? '',
+                profilePath: (m['profile_path'] as String?),
+              ))
+          .where((c) => c.name.isNotEmpty)
+          .toList();
+      if (casts.isEmpty) return null;
+      // 写缓存 (只存前 30 个, 避免 list 太大)
+      final cached = casts
+          .take(30)
+          .map((c) => {
+                'id': c.id,
+                'name': c.name,
+                'character': c.character,
+                'profile_path': c.profilePath,
+              })
+          .toList();
+      await prefs.setString(cacheKey, jsonEncode({
+        'ts': DateTime.now().millisecondsSinceEpoch,
+        'cast': cached,
+      }));
+      DiaryService.add('[TMDB credits] hit: ${casts.length}');
+      return casts.take(30).toList();
+    } catch (e) {
+      DiaryService.add('[TMDB credits] error: $e');
+      return null;
+    }
+  }
+
   /// 清空所有 TMDB 缓存 (切换 key 后调一次, 避免老 key 的结果污染)
   static Future<void> clearAllCache() async {
     final prefs = await SharedPreferences.getInstance();
@@ -665,4 +778,28 @@ class TmdbArt {
 
   bool get isEmpty => backdropUrl == null && logoUrl == null;
   bool get isNotEmpty => !isEmpty;
+}
+
+/// v2.1.17: TMDB 演员/卡司 — 来自 `/credits` 接口.
+class TmdbCast {
+  final int id;
+  final String name;
+  final String character; // 饰演角色 (可能空)
+  // TMDB image CDN path, 形如 "/abc.jpg" — 调用方拼成完整 URL.
+  // 配 TMDB image base: https://image.tmdb.org/t/p/w185{profilePath}
+  final String? profilePath;
+
+  const TmdbCast({
+    required this.id,
+    required this.name,
+    this.character = '',
+    this.profilePath,
+  });
+
+  /// 完整头像 URL (w185, ~80px 圆形头像够用). profilePath 为空时返 null,
+  /// 调用方显示占位灰圈.
+  String? get fullProfileUrl {
+    if (profilePath == null || profilePath!.isEmpty) return null;
+    return 'https://image.tmdb.org/t/p/w185$profilePath';
+  }
 }
