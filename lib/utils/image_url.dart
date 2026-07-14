@@ -27,15 +27,23 @@ class _WorkerHealthCache {
   }
 }
 
-/// 探测 worker 域名 1 次, HEAD 3s 超时.
+/// v2.1.34: 探测 worker 域名 1 次.
+///   - 旧: `http.head(...)` 走 dart:io 默认 IOClient, 走系统 DNS, 偶尔 3 秒
+///     超时 (CF edge TLS 1.3 cipher 协商 + HEAD 方法路径特殊) → cache false
+///     → 30s 内所有图片走直连 → image.tmdb.org / lain.bgm.tv 国内被墙 →
+///     用户看到 30s 黑洞 (tmdb 图 / bgm 图全不显示)
+///   - 新: `LunaImageHttp().get(...)` 走 Android OkHttp (强制 COMPATIBLE_TLS)
+///     + 优选 IP (overrideHost → overrideIp, SNI 仍原域名). iOS / 其他 / 失败
+///     退到 dart:io 兜底, 行为兼容
+///   - timeout 3s → 5s, 留更多余量
 /// 返回: true=通 / false=挂 / null=已探测 (用缓存).
 Future<bool?> _probeWorkerHealth(String worker) async {
   final cached = _WorkerHealthCache.alive;
   if (cached != null) return cached;
   try {
-    final resp = await http
-        .head(Uri.parse('https://$worker/'))
-        .timeout(const Duration(seconds: 3));
+    final resp = await LunaImageHttp()
+        .get(Uri.parse('https://$worker/'))
+        .timeout(const Duration(seconds: 5));
     final ok = resp.statusCode < 500;
     _WorkerHealthCache.set(ok);
     DiaryService.add(
