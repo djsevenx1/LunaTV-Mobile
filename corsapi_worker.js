@@ -111,7 +111,7 @@ function addOrReplacePrefix(obj, newPrefix) {
         const sourceId = extractSourceId(apiUrl)
 
         // 从 newPrefix 中提取 origin 和基础路径
-        // 例如：https://xx.workers.dev/?url= → https://xx.workers.dev/p/iqiyi?url=
+        // 例如：https://xx.fn0.qzz.io/?url= → https://xx.fn0.qzz.io/p/iqiyi?url=
         const baseUrl = newPrefix.replace(/\/?\?url=$/, '') // 去掉结尾的 /?url= 或 ?url=
         apiUrl = `${baseUrl}/p/${sourceId}?url=${apiUrl}`
       }
