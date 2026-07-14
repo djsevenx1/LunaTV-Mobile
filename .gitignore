@@ -147,3 +147,21 @@ $RECYCLE.BIN/
 *.bak
 *.backup
 .uploads/
+
+# ===== v2.1.26 开源准备: 挡掉根目录临时抓取 / release 残留 =====
+# GitHub Actions 抓的 HTML (调试时缓存, 不应入库)
+actions*.html
+r*.html
+# CI 编译日志 (调试用, 不应入库)
+logs*.txt
+# 仓库抓的 GitHub API 响应 (rels / runs)
+rels*.json
+runs*.json
+# 历史 release APK 残留 (build 完会出, 走 GitHub Release 不走仓库)
+app-release*.zip
+# 老的 CF Worker 包
+corsapi-netlify.tar.gz
+# Flutter plugin 跟踪文件 (已有 .flutter-plugins-dependencies 跟踪, 这个忽略)
+.flutter-plugins
+# ciao-cors README 备份 (项目 README 已经写)
+corsapi_README.md
