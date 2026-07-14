@@ -408,8 +408,11 @@ async function handleM3u8Request(request, targetUrlParam, currentOrigin) {
           'Cache-Control': 'public, max-age=60',
           'X-Cache': 'HIT',
           'X-Cache-TTL': '300',
-          // 借鉴: HTTP/3 Alt-Svc, 让客户端升级到 QUIC (CF 默认开, 几乎零成本)
-          'Alt-Svc': 'h3=":443"; ma=86400',
+          // v2.0.20d: 禁 HTTP/3 (QUIC) — 客户端 OpenSSL QUIC 跟 CF 边缘 QUIC
+          //   cipher 协商失败 → SSLV3_ALERT_HANDSHAKE_FAILURE → 视频/图片加载挂.
+          //   改用 h3-29=:443 ma=0 显式禁用 (RFC 8336 "假" HTTP/3 标识符),
+          //   强制走 HTTP/1.1 / HTTP/2 over TCP (TLS 1.2), 跟老 cipher 兼容.
+          'Alt-Svc': 'h3-29=":443"; ma=0',
           ...CORS_HEADERS,
         },
       })
@@ -529,7 +532,8 @@ async function handleM3u8Request(request, targetUrlParam, currentOrigin) {
         'Content-Type': 'application/vnd.apple.mpegurl',
         'Cache-Control': 'no-store',
         'X-Cache': nocache ? 'BYPASS' : 'MISS',
-        'Alt-Svc': 'h3=":443"; ma=86400',
+        // v2.0.20d: 禁 HTTP/3, 强制 TCP (见 line 411 注释)
+        'Alt-Svc': 'h3-29=":443"; ma=0',
         ...CORS_HEADERS,
       },
     })
@@ -880,7 +884,7 @@ async function handleHomePage(currentOrigin, defaultPrefix) {
         <div class="feat"><b>自反循环检测</b><br>防止 worker 套 worker</div>
         <div class="feat"><b>bgm.tv fallback</b><br>UA / Referer 自动补</div>
         <div class="feat"><b>M3U8 KV 缓存</b><br>5 分钟复用, 减少 worker CPU</div>
-        <div class="feat"><b>HTTP/3 (QUIC)</b><br>Alt-Svc 头提示升级, CF 默认开</div>
+        <div class="feat"><b>HTTP/3 禁用</b><br>Alt-Svc h3-29 ma=0, 避 OpenSSL QUIC 协商失败</div>
       </div>
     </div>
 
