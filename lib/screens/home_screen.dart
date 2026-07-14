@@ -108,10 +108,14 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 内容随时间变化；缓存由 DoubanCacheService（6小时）管理，无需一次性守卫。
   Future<void> _loadBannerData() async {
     try {
+      // v2.1.35: 第 4 个 banner (动漫) 改用豆瓣接口, 跟其他 3 张豆瓣风格统一
+      //   之前用 BangumiService.getTodayCalendar 拿 lain.bgm.tv 海报, 跟
+      //   豆瓣海报风格/比例/字体都不同, 用户反馈 "最后一张海报怎么不是 TMDB 的"
+      //   改用 DoubanService.getHotAnime (kind=tv, type=tv_animation), 对齐 web LunaTV
       final moviesResult = await DoubanService.getHotMovies(context);
       final tvResult = await DoubanService.getHotTvShows(context);
       final showResult = await DoubanService.getHotShows(context);
-      final animeResult = await BangumiService.getTodayCalendar(context);
+      final animeResult = await DoubanService.getHotAnime(context);
 
       if (!mounted) return;
 
@@ -165,29 +169,25 @@ class _HomeScreenState extends State<HomeScreen> {
           ));
         }
       }
-      // 新番放送 - 取前 1 部（对齐 web 版）
+      // 热门动漫 - 取前 1 部 (v2.1.35: 改豆瓣, 跟其他 3 张统一来源 + 风格)
+      //   之前 v2.1.6 用 BangumiService.getTodayCalendar 拿 "新番放送"
+      //   (Bangumi 海报来源 lain.bgm.tv, 跟豆瓣海报比例/字体/色温都不同)
+      //   用户反馈 "最后一张海报怎么不是 TMDB 的" - 期望跟其他几张一致
+      //   改用 DoubanService.getHotAnime, 跟 web LunaTV 行为一致
       if (animeResult.success && animeResult.data != null) {
         for (final a in animeResult.data!.take(1)) {
-          final name = (a.nameCn != null && a.nameCn!.isNotEmpty)
-              ? a.nameCn!
-              : a.name;
-          final year = a.airDate.isNotEmpty
-              ? a.airDate.split('-').first
-              : null;
-          final imageUrl = a.images.bestImageUrl;
+          final imageUrl = a.poster;
           if (imageUrl.isEmpty) continue;
           items.add(HeroBannerItem(
-            id: a.id.toString(),
-            title: name,
-            subtitle: '新番放送',
+            id: a.id,
+            title: a.title,
+            subtitle: '热门动漫',
             imageUrl: imageUrl,
             type: 'anime',
-            source: 'bangumi',
-            id_: a.id.toString(),
-            year: year,
-            rate: a.rating.score > 0
-                ? a.rating.score.toStringAsFixed(1)
-                : null,
+            source: 'douban',
+            id_: a.id,
+            year: a.year.isNotEmpty ? a.year : null,
+            rate: a.rate,
           ));
         }
       }
