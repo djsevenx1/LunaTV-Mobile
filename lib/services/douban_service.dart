@@ -276,28 +276,6 @@ class DoubanService {
     );
   }
 
-  /// v2.1.35: 获取热门动漫数据 (对齐 web LunaTV useHomePageQueries.ts:193-205)
-  ///   web LunaTV 用 `kind: 'tv', category: 'tv', type: 'tv_animation'`
-  ///   之前 App home_screen.dart 用了 BangumiService.getTodayCalendar() 取新番放送
-  ///   (Bangumi 海报来自 lain.bgm.tv), 跟其他 4 张豆瓣海报风格不一致
-  ///   (海报比例/色温/字体设计都不同), 用户反馈 "最后一张海报怎么不是 TMDB 的"
-  ///   改用豆瓣动漫接口, 全部 banner 统一豆瓣来源, 风格一致 + 加载更稳
-  ///   (豆瓣走 cmliussss 代理 + CORSAPI worker, 跟其他 4 张同链路)
-  static Future<ApiResponse<List<DoubanMovie>>> getHotAnime(
-    BuildContext context, {
-    int pageLimit = 25,
-    int page = 0,
-  }) async {
-    return getCategoryData(
-      context,
-      kind: 'tv',
-      category: 'tv',
-      type: 'tv_animation',
-      pageLimit: pageLimit,
-      page: page,
-    );
-  }
-
   /// 获取豆瓣推荐数据（新版筛选逻辑）
   static Future<ApiResponse<List<DoubanMovie>>> fetchDoubanRecommends(
     BuildContext context,
