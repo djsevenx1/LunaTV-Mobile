@@ -206,18 +206,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// v2.1.19: 用 TMDB 16:9 backdrop 升级 banner 背景图.
+  /// v2.1.37: 用 TMDB 16:9 backdrop 升级 banner 背景图.
   ///   串行处理 (避免触发 TMDB rate limit), 每个 item 拉到 backdrop 后
-  ///   立即 setState 替换 imageUrl, 失败/没配 key 保留豆瓣海报.
-  ///   番剧 (type=='anime') 跳过, 保留 bangumi 图 (TMDB 对番剧识别率低).
+  ///   立即 setState 替换 imageUrl, 失败/没配 key 保留豆瓣/bangumi 原图.
+  ///   v2.1.37: 去掉番剧跳过, 配置了 TMDB key 后第 6 张 (番剧) 也升级.
   Future<void> _enrichBannerItemsWithTmdb() async {
     if (!UserDataService.isTmdbConfigured()) return;
     for (int i = 0; i < _bannerItems.length; i++) {
       if (!mounted) return;
       final item = _bannerItems[i];
-      // v2.1.19: 番剧不查 TMDB — Bangumi 已经有自己的图, TMDB 对日漫
-      //   识别率低 (老番/罗马字名), 留着 bangumi 图更稳.
-      if (item.type == 'anime') continue;
       try {
         // v2.1.19: 跟 _loadTmdbBackdrop 同样的 search-first 模式.
         //   7 天 TTL 缓存, 重复进首页 0 网络.
