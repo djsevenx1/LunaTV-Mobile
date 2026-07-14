@@ -1598,8 +1598,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 配错时 fallback 也撞 worker 限制拿到 0. 跟 v1.0.66 修法精神一致:
     // CF 配对时 fallback 不用 (getStreamInfo 已经拿到真 KB/s), CF 配错时
     // fallback 测原始 URL 至少能给个真实数字, 不至于显示 0 让用户以为是源挂了.
+    //
+    // v2.1.34: fallback 加 altUrl (worker URL), 优先用 worker URL 测 latency
+    //   (走 CDN 加速, 国内稳), 测不到再退 originalUrl. 修 "打开 CF 加速后
+    //   测速没了 (连延迟都没有)" bug.
     final fallbackUrl = originalUrl ?? url;
-    return await _fallbackLightSpeed(fallbackUrl);
+    return await _fallbackLightSpeed(fallbackUrl, altUrl: url);
   }
 
   String _formatResolution(int h) {
@@ -1625,26 +1629,42 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///
   /// v1.0.74: 调 [_testOneUrl] 时传的 url 改成 originalUrl (上游 m3u8 URL),
   /// 这样 worker 配错时 fallback 测的是源真实速度, 不是 worker 限制撞墙.
-  Future<_SourceSpeedInfo> _fallbackLightSpeed(String url) async {
+  Future<_SourceSpeedInfo> _fallbackLightSpeed(String url, {String? altUrl}) async {
     final httpClient = http.Client();
+    // v2.1.34: 优先用 altUrl (worker URL) 测 latency, 因为 worker URL 走
+    //   CDN 加速 + 跨域代理, 在国内网络上更稳, 不容易被 upstream 拦
+    //   (e.g. 某些 m3u8 upstream 拒直连). 测不到再退到 originalUrl.
+    final latencyTarget = altUrl ?? url;
     try {
-      // v1.0.69 fix: Future.wait 返回 List<dynamic>, results[0/1] 是 dynamic,
-      // 直接赋给 _SourceSpeedInfo 的 int/double 形参编译报错 (argument type
-      // 'dynamic' can't be assigned to 'int'). 显式 .toInt()/.toDouble() 转一下.
-      // v1.0.45 同样套路: \`(result['latency'] as num).toInt()\`
       final results = await Future.wait([
-        _fallbackMeasureLatency(httpClient, url),
+        _fallbackMeasureLatency(httpClient, latencyTarget),
         _fallbackMeasureDownloadSpeed(httpClient, url),
-      ]).timeout(const Duration(milliseconds: 1800));
+      ]).timeout(const Duration(milliseconds: 2500));
       final ms = (results[0] as num).toInt();
       final kbps = (results[1] as num).toDouble();
+      // v2.1.34: ms < 5000 就算 success (ms=3000 是 fallback 失败默认值)
       return _SourceSpeedInfo(
         resolution: '',
         loadSpeedKBps: kbps,
         pingMs: ms,
-        success: ms < 3000 || kbps > 0,
+        success: ms > 0 && ms < 5000,
       );
     } catch (_) {
+      // v2.1.34: 兜底再试一次 originalUrl (如果 altUrl 失败)
+      if (altUrl != null && altUrl != url) {
+        try {
+          final ms = await _fallbackMeasureLatency(httpClient, url)
+              .timeout(const Duration(milliseconds: 1500));
+          if (ms > 0 && ms < 5000) {
+            return _SourceSpeedInfo(
+              resolution: '',
+              loadSpeedKBps: 0,
+              pingMs: ms,
+              success: true,
+            );
+          }
+        } catch (_) {}
+      }
       return _SourceSpeedInfo.unavailable();
     } finally {
       httpClient.close();
