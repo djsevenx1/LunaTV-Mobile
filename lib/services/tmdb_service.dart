@@ -144,20 +144,33 @@ class TmdbService {
         e is http.ClientException;
   }
 
-  // v2.1.2: 通用 http.get + fallback. cf_worker 模式下网络/握手/TLS/超时错
-  // 自动重试 1 次 direct (用 origUrl 重建, 不带 worker wrap). 其他 source
-  // (direct / off) 不 fallback. 返回 null = 网络层全失败.
+  // v2.1.21: 通用 http.get + 双层 fallback + 短超时.
+  //
+  // 网络/握手/TLS/超时类错 (cf_worker) → 立即 fallback to direct (短超时 6s, 不等满 10s).
+  // direct 失败 (国内被墙 / 抖) → 重试 1 次 (短超时 6s), 给抖的情况一次机会.
+  // 4xx/5xx 走的是 statusCode 分支, 不在这里 catch, 也不 fallback / 重试
+  // (key 失效 / 限流 / 服务异常, 直连也一样失败).
+  //
+  // 修 v2.1.20 的 TMDB SSL 握手失败:
+  //   - 旧 10s timeout 太长, 用户手机 OpenSSL 跟 worker TLS 1.3 协商失败
+  //     (SSLV3_ALERT_HANDSHAKE_FAILURE), 等满 10s 才 fallback 到 direct,
+  //     direct 也被墙 → 整段超时卡 20s+.
+  //   - 改 worker 模式 timeout 10s → 6s: 失败立即 fallback, 不等满.
+  //   - direct 加重试 1 次 (6s): 第一次 direct 失败 (网络抖) 立刻重试,
+  //     二次失败才返 null. 国内被墙场景下 retry 帮不上, 但抖的场景能给一次机会.
   static Future<http.Response?> _httpGetWithFallback({
     required String origUrl,
     required String url,
     required String source,
     required String apiKey,
     required String tag,
-    Duration timeout = const Duration(seconds: 10),
+    Duration timeout = const Duration(seconds: 6),
   }) async {
+    // 1) 第一次: cf_worker 模式 → worker; direct 模式 → direct
     try {
       return await http.get(Uri.parse(url)).timeout(timeout);
     } catch (e) {
+      // 网络/握手/TLS/超时错 → fallback (仅 cf_worker 模式有意义, direct 走不到这)
       if (source == 'cf_worker' && _isNetworkInfraError(e)) {
         DiaryService.add(
             '[TMDB] cf_worker $tag 网络/握手失败: $e (timeout=${timeout.inSeconds}s), fallback to direct');
@@ -167,9 +180,16 @@ class TmdbService {
         try {
           return await http.get(Uri.parse(directUrl)).timeout(timeout);
         } catch (e2) {
+          // 2) 第二次: direct 失败 → 重试 1 次 direct
           DiaryService.add(
-              '[TMDB] direct fallback $tag err: $e2 (timeout=${timeout.inSeconds}s)');
-          return null;
+              '[TMDB] direct fallback $tag err: $e2, retry 1 次');
+          try {
+            return await http.get(Uri.parse(directUrl)).timeout(timeout);
+          } catch (e3) {
+            DiaryService.add(
+                '[TMDB] direct retry $tag err: $e3 (cf_worker+direct+retry 全挂)');
+            return null;
+          }
         }
       }
       // v2.0.99.2: 网络错也写进日记, 用户排查 "TMDB 大背景没出来为啥"
