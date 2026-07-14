@@ -1,5 +1,53 @@
 // 通用图片地址处理工具
+import 'dart:async';
+import 'package:http/http.dart' as http;
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+
+// v2.1.28: Worker 健康状态缓存 — image 加载前探测 worker 通不通, 挂了就
+//   走直连, 跟 search/overview/credits 一样的 retry 兜底思路.
+// 之前 v2.1.25 ~ v2.1.27 image 走 CachedNetworkImage 不进 DiaryService,
+//   worker 挂时 image 静默挂, 用户看不到失败信息也不知道能切.
+// 改成探测 + 30s 缓存: worker 通就 wrap, 挂就直连, 探测 1 次结果复用 30s.
+class _WorkerHealthCache {
+  static const _cacheTtl = Duration(seconds: 30);
+  // null = 还没探测过, true = worker 通, false = worker 挂
+  static bool? _alive;
+  static DateTime? _expiry;
+
+  static bool? get alive {
+    if (_expiry == null) return null;
+    if (DateTime.now().isAfter(_expiry!)) return null;
+    return _alive;
+  }
+
+  static void set(bool value) {
+    _alive = value;
+    _expiry = DateTime.now().add(_cacheTtl);
+  }
+}
+
+/// 探测 worker 域名 1 次, HEAD 3s 超时.
+/// 返回: true=通 / false=挂 / null=已探测 (用缓存).
+Future<bool?> _probeWorkerHealth(String worker) async {
+  final cached = _WorkerHealthCache.alive;
+  if (cached != null) return cached;
+  try {
+    final resp = await http
+        .head(Uri.parse('https://$worker/'))
+        .timeout(const Duration(seconds: 3));
+    final ok = resp.statusCode < 500;
+    _WorkerHealthCache.set(ok);
+    DiaryService.add(
+        '[Worker health] $worker: ${ok ? "alive" : "dead (${resp.statusCode})"}, cache 30s');
+    return ok;
+  } catch (e) {
+    _WorkerHealthCache.set(false);
+    DiaryService.add(
+        '[Worker health] $worker: dead ($e), cache 30s');
+    return false;
+  }
+}
 
 /// 升级豆瓣图片 URL 到更高分辨率（用于大图展示场景如 Hero Banner）。
 ///
@@ -94,7 +142,20 @@ Future<String> getImageUrl(
     } else {
       processed = processed.replaceFirst('http://', 'https://');
     }
-    // CF Worker 加速:开关+域名就生效,否则按用户选择走直连
+    // v2.1.28: 探测 worker 健康, 挂了就走直连.
+    // buildBangumiImageUrl 内部已经按"配 worker + cf_worker mode"判断,
+    //   但 worker TLS 挂 (跟 search 同样的 SSLV3_ALERT_HANDSHAKE_FAILURE)
+    //   时 wrap 出来的 URL 还是 fail, image 静默挂.
+    // 这里先探测 worker 域名 1 次, 30s 缓存, 探测失败返直连.
+    final worker = UserDataService.getCfWorkerDomainSync();
+    if (worker.isNotEmpty) {
+      final alive = await _probeWorkerHealth(worker);
+      if (alive == false) {
+        DiaryService.add(
+            '[Bangumi image] worker $worker 探测挂, 走直连 (${processed.length} chars)');
+        return processed;
+      }
+    }
     return UserDataService.buildBangumiImageUrl(processed);
   }
   // v2.1.25: TMDB 图片 URL 走 CF Worker 加速 (跟 Bangumi 平行).
@@ -103,6 +164,16 @@ Future<String> getImageUrl(
   // 统一调 [UserDataService.buildTmdbImageUrl] 走包装.
   // 跟 Bangumi 区别: TMDB 没有 'cors_proxy' 选项, 只有 'cf_worker' / 'direct' / 'off'.
   if (source == 'tmdb' && originalUrl.isNotEmpty) {
+    // v2.1.28: 跟 Bangumi 平行, 探测 worker 健康, 挂了就走直连.
+    final worker = UserDataService.getCfWorkerDomainSync();
+    if (worker.isNotEmpty) {
+      final alive = await _probeWorkerHealth(worker);
+      if (alive == false) {
+        DiaryService.add(
+            '[TMDB image] worker $worker 探测挂, 走直连 (${originalUrl.length} chars)');
+        return originalUrl;
+      }
+    }
     return UserDataService.buildTmdbImageUrl(originalUrl);
   }
   return originalUrl;
