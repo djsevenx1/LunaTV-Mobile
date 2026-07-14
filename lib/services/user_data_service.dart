@@ -723,6 +723,11 @@ class UserDataService {
     return v;
   }
 
+  // v2.1.22: Bangumi 加速路径节流日记 — 启动首次打, 路径变了重打
+  // (用 path 字符串去重, 不打 URL 避免 key / 长 ID 灌进日记)
+  static String? _lastBangumiDataPathLog;
+  static String? _lastBangumiImagePathLog;
+
   // 获取 Bangumi 数据源显示名（异步）
   static Future<String> getBangumiDataSourceDisplayNameAsync() async {
     final key = await getBangumiDataSourceKey();
@@ -838,6 +843,7 @@ class UserDataService {
     // 1) CF Worker 域名:只看域名是否配了,不看开关
     final worker = _cfWorkerDomainCache;
     if (worker != null && worker.isNotEmpty) {
+      _logBangumiDataPath('worker:$worker');
       return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
     }
 
@@ -846,8 +852,10 @@ class UserDataService {
     if (key == 'cors_proxy') {
       // v2.0.12: ciao-cors 改用法 (?url= → path 拼接),
       // 老用法返 400 "Invalid URL format", 见 [buildCiaoCorsUrl]
+      _logBangumiDataPath('ciao-cors');
       return buildCiaoCorsUrl(originalUrl);
     }
+    _logBangumiDataPath('direct');
     return originalUrl;
   }
 
@@ -883,6 +891,7 @@ class UserDataService {
     // *.workers.dev 域名, 或后续加自定义域名白名单配置
     final worker = _cfWorkerDomainCache;
     if (worker != null && worker.isNotEmpty && _isValidWorkerDomain(worker)) {
+      _logBangumiImagePath('worker:$worker');
       return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
     }
 
@@ -890,6 +899,7 @@ class UserDataService {
     final key = getBangumiImageSourceKeySync();
     if (key == 'cors_proxy') {
       // v2.0.12: ciao-cors 改用法, 见 [buildCiaoCorsUrl]
+      _logBangumiImagePath('ciao-cors');
       return buildCiaoCorsUrl(originalUrl);
     }
     // v2.0.5 (历史注释): 之前 cf_worker case 缺了, 走 fallthrough 到
@@ -906,9 +916,30 @@ class UserDataService {
     if (key == 'cf_worker') {
       DiaryService.add(
           '[Bangumi image] cf_worker 模式但没配 CF Worker 域名, 走直连 (lain.bgm.tv 国内被墙, 配 CF Worker 域名才能加速)');
+      _logBangumiImagePath('direct(via cf_worker fallthrough)');
       return originalUrl;
     }
+    _logBangumiImagePath('direct');
     return originalUrl;
+  }
+
+  // v2.1.22: Bangumi 数据加速路径日记 (启动首次打, 路径变了重打).
+  // 用户反馈"bangumi 日记怎么没有" — 之前只在 cf_worker + 没配 worker 时打一条,
+  // 配 worker / 选 cors_proxy / 选直连时都没打. 现在每次首次打,
+  // 走哪条路径一目了然 (worker=api.fn0.qzz.io / ciao-cors / direct).
+  static void _logBangumiDataPath(String path) {
+    if (_lastBangumiDataPathLog == path) return;
+    _lastBangumiDataPathLog = path;
+    DiaryService.add('[Bangumi data] 加速: $path');
+  }
+
+  // v2.1.22: Bangumi 图片加速路径日记 (同 _logBangumiDataPath).
+  // 跟数据分开, 因为图片走 worker 还是 ciao-cors 是不同问题
+  // (worker 走通了 → 图加载; ciao-cors 走 lain.bgm.tv 403 → 图加载失败).
+  static void _logBangumiImagePath(String path) {
+    if (_lastBangumiImagePathLog == path) return;
+    _lastBangumiImagePathLog = path;
+    DiaryService.add('[Bangumi image] 加速: $path');
   }
 
   /// v2.0.72: 判断配置的 worker 域名是不是有效的 CF Worker.
