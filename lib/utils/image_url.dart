@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:luna_tv/services/diary_service.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 
 // v2.1.28: Worker 健康状态缓存 — image 加载前探测 worker 通不通, 挂了就
@@ -28,22 +29,30 @@ class _WorkerHealthCache {
 }
 
 /// v2.1.34: 探测 worker 域名 1 次.
-///   - 旧: `http.head(...)` 走 dart:io 默认 IOClient, 走系统 DNS, 偶尔 3 秒
-///     超时 (CF edge TLS 1.3 cipher 协商 + HEAD 方法路径特殊) → cache false
-///     → 30s 内所有图片走直连 → image.tmdb.org / lain.bgm.tv 国内被墙 →
-///     用户看到 30s 黑洞 (tmdb 图 / bgm 图全不显示)
-///   - 新: `LunaImageHttp().get(...)` 走 Android OkHttp (强制 COMPATIBLE_TLS)
-///     + 优选 IP (overrideHost → overrideIp, SNI 仍原域名). iOS / 其他 / 失败
-///     退到 dart:io 兜底, 行为兼容
-///   - timeout 3s → 5s, 留更多余量
-/// 返回: true=通 / false=挂 / null=已探测 (用缓存).
+///   探测 URL 用真实图片路径 (?url=image.tmdb.org/...),
+///   跟实际 CachedNetworkImage 走的路径完全一致:
+///   同一 worker URL, 同一 LunaImageHttp, 同一 OkHttp 强制 COMPATIBLE_TLS,
+///   同一优选 IP (overrideHost/overrideIp). 探测通 = 实际通.
+///   timeout 3s → 8s, 给 OkHttp connectTimeout 10s 留足余量.
+///
+///   历史:
+///   - v2.1.28~1.32 http.head 走 dart:io IOClient, 3s timeout
+///   - v2.1.33 改 http.head → LunaImageHttp().get('/') + 3s timeout,
+///     但 changelog 承认: "探测挂不影响 image 显示 (image 走 OkHttp 成功)"
+///     — 这就是说探测本身就是错路径, 不代表实际状态
+///   - v2.1.34 改探测路径为实际图片路径, 探测跟实际走同一栈
 Future<bool?> _probeWorkerHealth(String worker) async {
   final cached = _WorkerHealthCache.alive;
   if (cached != null) return cached;
   try {
+    // 拿 image.tmdb.org 一张已知图 (TMDB 1339713 的 backdrop w92 = 5KB 缩略图,
+    // 走 worker ?url= 路径, 跟 CachedNetworkImage 完全一致)
+    final probeUrl = 'https://$worker/?url=' +
+        Uri.encodeComponent(
+            'https://image.tmdb.org/t/p/w92/mCpwRayjXMFzKHbjbzc5JRKfq1O.jpg');
     final resp = await LunaImageHttp()
-        .get(Uri.parse('https://$worker/'))
-        .timeout(const Duration(seconds: 5));
+        .get(Uri.parse(probeUrl))
+        .timeout(const Duration(seconds: 8));
     final ok = resp.statusCode < 500;
     _WorkerHealthCache.set(ok);
     DiaryService.add(
@@ -51,8 +60,7 @@ Future<bool?> _probeWorkerHealth(String worker) async {
     return ok;
   } catch (e) {
     _WorkerHealthCache.set(false);
-    DiaryService.add(
-        '[Worker health] $worker: dead ($e), cache 30s');
+    DiaryService.add('[Worker health] $worker: dead ($e), cache 30s');
     return false;
   }
 }
