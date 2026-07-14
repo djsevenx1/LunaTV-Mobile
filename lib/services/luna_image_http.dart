@@ -45,13 +45,13 @@ class LunaImageHttp extends http.BaseClient {
   static const _channel = MethodChannel('org.moontechlab.lunatv/image_http');
 
   // v2.1.33: 内层 http.Client — 用于非 Android / 非 GET / 原生失败时的兜底
-  //   - 默认 [http.IOClient] 走 dart:io (跟 v2.1.25~32 行为一致)
+  //   - 内层默认 [IOClient] 走 dart:io (跟 v2.1.25~32 行为一致)
   //   - 构造函数允许注入自定义 client (测试用)
   final http.Client _inner;
 
   // v2.1.33: 单例 — OkHttp client 在 Kotlin 端是单例, 这里也单例避免重复
   //   跨所有 [CachedNetworkImage] 共享同一个 [LunaImageHttp] 实例
-  static final LunaImageHttp _instance = LunaImageHttp._(http.IOClient());
+  static final LunaImageHttp _instance = LunaImageHttp._(IOClient());
   factory LunaImageHttp() => _instance;
   LunaImageHttp._(this._inner);
 
