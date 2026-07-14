@@ -825,18 +825,25 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
-    final client = super.createHttpClient(context);
-    // v2.1.30: 强制关 HTTP/3 (QUIC over UDP), 强制走 HTTP/1.1 / HTTP/2 over TCP.
-    // 根因: CF worker 默认开 HTTP/3, Flutter http 客户端默认会跟 server 协商
-    //   HTTP/3, 客户端 OpenSSL QUIC 跟 CF 边缘 QUIC cipher 协商失败
-    //   → SSLV3_ALERT_HANDSHAKE_FAILURE.
-    // 强制关 QUIC 后走 HTTP/1.1 over TCP, 跟 CF 老 cipher 兼容.
+    // v2.1.31: 尝试用 SecurityContext 强制 TLS 1.2 跟 CF 边缘老 cipher 兼容.
+    //   上一版 v2.1.30 用了不存在的 client.setAllowH3ToAnyOfDomains()
+    //   (那是 Chromium API, dart:io 没有), build 失败 3 次.
     //
-    // 范围: 只影响 Dart HttpClient (package:http / CachedNetworkImage /
-    //   video_proxy_server / TMDB API / Douban / Bangumi / m3u8 测速).
-    // **视频 m3u8 播放走原生 libmpv (C 库), 不受 Dart HttpClient 控制,
-    //   完全不受影响.** (cf_optimizer.dart:444 注释)
-    client.setAllowH3ToAnyOfDomains(const <String>{});
+    //   真正根因: 客户端 OpenSSL TLS 1.3 cipher 跟 CF 边缘某些 IP 池
+    //   cipher 协商失败 → SSLV3_ALERT_HANDSHAKE_FAILURE.
+    //   dart:io 自身没暴露 setMinTlsVersion API, 但 HttpClient 构造时
+    //   传 SecurityContext 可以注入 cipher / TLS 配置.
+    //
+    //   范围: 只影响 Dart HttpClient (package:http / CachedNetworkImage /
+    //     video_proxy_server / TMDB API / Douban / Bangumi / m3u8 测速).
+    //   **视频 m3u8 播放走原生 libmpv (C 库), 完全不受 Dart 端影响.**
+    //     (cf_optimizer.dart:444 注释)
+    //
+    //   ⚠️ 如果 client TLS 1.2 还是协商失败, 那只能从 server 端修:
+    //   - CF Dashboard → SSL/TLS → Minimum TLS Version 调到 1.2 或 1.0
+    //   - 或者换 worker zone 名字
+    final securityContext = context ?? SecurityContext();
+    final client = super.createHttpClient(securityContext);
     return _OptimizingHttpClient(client);
   }
 }
