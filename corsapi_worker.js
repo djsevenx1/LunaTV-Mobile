@@ -111,7 +111,7 @@ function addOrReplacePrefix(obj, newPrefix) {
         const sourceId = extractSourceId(apiUrl)
 
         // 从 newPrefix 中提取 origin 和基础路径
-        // 例如：https://xx.workers.dev/?url= → https://xx.workers.dev/p/iqiyi?url=
+        // 例如：https://xx.fn0.qzz.io/?url= → https://xx.fn0.qzz.io/p/iqiyi?url=
         const baseUrl = newPrefix.replace(/\/?\?url=$/, '') // 去掉结尾的 /?url= 或 ?url=
         apiUrl = `${baseUrl}/p/${sourceId}?url=${apiUrl}`
       }
@@ -379,7 +379,7 @@ function applyDefaultHeadersForUpstream(headers, targetURL) {
       headers.set('Accept', 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8')
     }
   }
-  // v2.1.27+: TMDB 图片/数据系列
+  // v2.0.85+: TMDB 图片/数据系列
   // image.tmdb.org 不需要认证, 但 image 服务器要求 Referer 是允许的站点
   // (www.themoviedb.org 或 api.themoviedb.org), 否则 403
   // api.themoviedb.org v3 用 api_key query, v4 用 Bearer token, 这里不补认证头
