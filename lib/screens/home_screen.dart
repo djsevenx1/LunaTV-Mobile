@@ -209,23 +209,15 @@ class _HomeScreenState extends State<HomeScreen> {
   /// v2.1.19: 用 TMDB 16:9 backdrop 升级 banner 背景图.
   ///   串行处理 (避免触发 TMDB rate limit), 每个 item 拉到 backdrop 后
   ///   立即 setState 替换 imageUrl, 失败/没配 key 保留豆瓣海报.
-  ///
-  /// v2.1.36: 番剧 (type=='anime') 也走 TMDB 升级.
-  ///   之前 v2.1.19 跳过是因为第 5 张是 BangumiService.getTodayCalendar
-  ///   (Bangumi 来源有自己高质量海报, TMDB 对日漫识别率低, 留着 bangumi 更稳).
-  ///   v2.1.35 把第 5 张改成了 DoubanService.getHotAnime (豆瓣动漫),
-  ///   豆瓣有标准中文名/英文名, TMDB 能识别, 跳过就不对了 —
-  ///   5 张 banner 4 张 TMDB 第 5 张豆瓣, 风格割裂
-  ///   (用户反馈 "幻灯片最后一张海报怎么不是 tmdb 的").
-  ///   现在也让 anime 走 TMDB 升级, 失败静默 fallback 豆瓣 (不挂 banner).
+  ///   番剧 (type=='anime') 跳过, 保留 bangumi 图 (TMDB 对番剧识别率低).
   Future<void> _enrichBannerItemsWithTmdb() async {
     if (!UserDataService.isTmdbConfigured()) return;
     for (int i = 0; i < _bannerItems.length; i++) {
       if (!mounted) return;
       final item = _bannerItems[i];
-      // v2.1.36: 删 v2.1.19 的 `if (item.type == 'anime') continue;`
-      //   第 5 张 (anime) 也走 TMDB 升级, 失败静默 fallback 豆瓣
-      //   (v2.1.19 catch 已经处理, DiaryService.add log 错误).
+      // v2.1.19: 番剧不查 TMDB — Bangumi 已经有自己的图, TMDB 对日漫
+      //   识别率低 (老番/罗马字名), 留着 bangumi 图更稳.
+      if (item.type == 'anime') continue;
       try {
         // v2.1.19: 跟 _loadTmdbBackdrop 同样的 search-first 模式.
         //   7 天 TTL 缓存, 重复进首页 0 网络.
