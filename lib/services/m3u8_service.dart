@@ -453,20 +453,33 @@ class M3U8Service {
     }
   }
 
-  /// 测量下载速度 (v1.0.45: Range 请求只取 64KB, 比 Selene 的 3x 完整段快 10x)
+  /// 测量下载速度 (v2.1.26: 改成下完整第 1 个 segment, 跟 web LunaTV 的
+  ///   hls.js FRAG_LOADED 思路一致 — 测的是真实分片下载速度, 跟 libmpv
+  ///   实际播放走的链路完全一样, 比之前的 Range 64KB 准)
+  ///
+  /// 之前 v1.0.45 用的 Range 64KB 测的是"首字节 + 64KB" 速度, 在 CDN 边缘
+  /// 节点上经常虚高 (CDN burst 给首字节快, 实际播放时 m3u8 重写链 + libmpv
+  /// 加载是另一条路径). 用户看着 5MB/s 实际播放卡, 就是这个根因.
+  ///
+  /// 现在的做法: 拿 m3u8 解析后, 取第 1 个 segment (非广告段), 走
+  /// urlWrapper 包装 (跟播放同一条 m3u8 重写链), 完整 GET 拿数据,
+  /// 用实际 size/time 算. 跟 web LunaTV hls.js 的 FRAG_LOADED 事件
+  /// (size / loadTime) 等价. 测的就是 libmpv 实际播放走的链路速度.
+  ///
+  /// 1 个 1080p 5s segment 约 2-5MB, 慢链 (500KB/s) 10s 内能下完.
+  /// 12s timeout 兜底, 跟 web 版 9000ms 同量级, 防止卡死.
   Future<double> _measureDownloadSpeedFast(String url) async {
     try {
       final stopwatch = Stopwatch()..start();
-      // Range: bytes=0-65535 只取前 64KB, 测速够用了
-      // 64KB 在 100Mbps 链路上 ~5ms 传完, 慢链 ~500ms
+      // 不带 Range, 完整下载第 1 个 segment. 跟 web LunaTV 的 hls.js
+      //   FRAG_LOADED 等价 — 真实分片下载速度.
       final response = await _dio.get(
         url,
         options: Options(
           responseType: ResponseType.bytes,
-          // v2.0.21: 3s 偏紧, 走 CF Worker 跨洲路由偶尔首批字节就 > 3s
-          // → 直接返回 0 KB/s, UI 看着像"没速度". 放到 8s 给慢网留余量.
-          receiveTimeout: const Duration(seconds: 8),
-          headers: {'Range': 'bytes=0-65535'},
+          // v2.1.26: 8s -> 12s. 完整 segment 在慢链上 10s 都有可能,
+          //   12s 给慢网留余量. web LunaTV 用 9000ms timeout, 跟这同量级.
+          receiveTimeout: const Duration(seconds: 12),
         ),
       );
       stopwatch.stop();
