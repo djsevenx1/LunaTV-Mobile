@@ -21,6 +21,7 @@ import 'package:luna_tv/screens/youtube_screen.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/local_mode_storage_service.dart';
 import 'package:luna_tv/services/subscription_service.dart';
@@ -32,6 +33,11 @@ void main() async {
 
   // 初始化 media_kit（移动端播放器仍需）
   MediaKit.ensureInitialized();
+
+  // v2.1.22: 启动时加载日记配置 (容量/退出清空/持久化) + 可选加载历史日记.
+  // 必须在 add() 被任何地方调之前 load, 不然 SharedPreferences 里的配置
+  // 会被默认 _maxEntries=500 / _clearOnExit=true / _persist=false 覆盖.
+  await DiaryService.loadConfig();
 
   // 初始化豆瓣缓存服务
   final cacheService = DoubanCacheService();
