@@ -97,6 +97,14 @@ Future<String> getImageUrl(
     // CF Worker 加速:开关+域名就生效,否则按用户选择走直连
     return UserDataService.buildBangumiImageUrl(processed);
   }
+  // v2.1.25: TMDB 图片 URL 走 CF Worker 加速 (跟 Bangumi 平行).
+  // 之前 v2.0.94 ~ v2.1.24 是 [TmdbService.fetchArt] 内部 wrap 的,
+  // v2.1.25 改回返原始 image.tmdb.org URL, 消费者 (这里 + douban_detail_header)
+  // 统一调 [UserDataService.buildTmdbImageUrl] 走包装.
+  // 跟 Bangumi 区别: TMDB 没有 'cors_proxy' 选项, 只有 'cf_worker' / 'direct' / 'off'.
+  if (source == 'tmdb' && originalUrl.isNotEmpty) {
+    return UserDataService.buildTmdbImageUrl(originalUrl);
+  }
   return originalUrl;
 }
 

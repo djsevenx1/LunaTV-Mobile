@@ -19,6 +19,10 @@
 //      - .png 透底, 跟大背景叠好看; zh 优先, 没中文用英文.
 //   5. 缓存 7 天 (TMDB 资源稳定, 不像豆瓣 24h cookie 失效).
 //   6. API 走 worker 加速 (跟 v2.0.36 README 一致), 没 worker 直连.
+//   7. v2.1.25: image URL (backdrop / logo) **不在这里** wrap, 改返原始
+//      image.tmdb.org URL. 消费者 ([image_url.dart] tmdb case /
+//      [douban_detail_header.dart]) 调 [UserDataService.buildTmdbImageUrl]
+//      走包装, 跟 buildBangumiImageUrl 平行.
 //
 // 用法:
 //   final apiKey = UserDataService.getTmdbApiKeySync();
@@ -26,8 +30,9 @@
 //   final ref = await TmdbService.search(title: '剧名', year: 2024);
 //   if (ref == null) return null;
 //   final art = await TmdbService.fetchArt(id: ref.id, mediaType: ref.mediaType);
-//   final backdropUrl = art?.backdropUrl;  // w1280 backdrop URL (走 worker 加速, v2.0.94)
-//   final logoUrl = art?.logoUrl;          // w500 logo URL (走 worker 加速, v2.0.94)
+//   // v2.1.25: backdropUrl/logoUrl 是原始 image.tmdb.org URL, 消费者用 buildTmdbImageUrl 包装
+//   final backdropUrl = art?.backdropUrl;
+//   final logoUrl = art?.logoUrl;
 
 import 'dart:async';
 import 'dart:convert';
@@ -390,7 +395,10 @@ class TmdbService {
   ///   2. logo 优选 w500, .png 后缀, zh > en > null 优先级, vote DESC
   ///   3. 两次请求 (无语言 + zh-CN), 合并去重, 按上面规则选
   ///
-  /// 缓存 key: "tmdb_art_{mediaType}_{id}"
+  /// 缓存 key: "tmdb_art_v2_{mediaType}_{id}"
+  /// v2.1.25: cache key 加 _v2 suffix — 之前缓存存的是 worker-wrapped URL
+  ///   (e.g. `https://api.fn0.qzz.io/?url=...image.tmdb.org/...`), 现在改存
+  ///   原始 image.tmdb.org URL, 旧缓存格式跟新逻辑不兼容, 必须 invalidate
   static Future<TmdbArt?> fetchArt({
     required int id,
     required String mediaType,
@@ -410,8 +418,8 @@ class TmdbService {
     DiaryService.add(
         '[TMDB] fetchArt begin: $mediaType#$id source=$source');
 
-    // 缓存查
-    final cacheKey = 'tmdb_art_${mediaType}_$id';
+    // 缓存查 — v2.1.25 用 _v2 suffix, 跟旧 worker-wrapped 格式不兼容
+    final cacheKey = 'tmdb_art_v2_${mediaType}_$id';
     final cached = await _readArtCache(cacheKey);
     if (cached != null) {
       DiaryService.add(
@@ -509,10 +517,14 @@ class TmdbService {
         bestBackdropIsNullLang = isNullLang;
       }
     }
+    // v2.1.25: image URL 不再 _buildTmdbApiUrl wrap, 改返原始 image.tmdb.org URL.
+    // 消费者 (image_url.dart tmdb case / douban_detail_header.dart) 调
+    //   [UserDataService.buildTmdbImageUrl] 走包装, 跟 buildBangumiImageUrl 平行.
+    // 原因: 之前 _buildTmdbApiUrl wrap image URL 时跟用户配的 TMDB 数据源绑死,
+    //   消费者拿到已经是 wrap 好的, 想改加速路径得改 fetchArt. 抽到
+    //   buildTmdbImageUrl 后跟 Bangumi 一个模式, 加速路径集中在一个地方管.
     final backdropUrl = bestBackdropPath != null
-        ? _buildTmdbApiUrl(
-            '$_imageBase/w1280/${bestBackdropPath.startsWith('/') ? bestBackdropPath.substring(1) : bestBackdropPath}',
-            source)
+        ? '$_imageBase/w1280/${bestBackdropPath.startsWith('/') ? bestBackdropPath.substring(1) : bestBackdropPath}'
         : null;
     // logo 优选: w500, .png 后缀, zh > en > null 优先级, vote DESC
     final logos = <Map<String, dynamic>>[
@@ -540,10 +552,10 @@ class TmdbService {
         bestLogoVote = vote;
       }
     }
+    // v2.1.25: 同 backdropUrl — 改返原始 image.tmdb.org URL,
+    // 消费者走 [UserDataService.buildTmdbImageUrl] 包装
     final logoUrl = bestLogoPath != null
-        ? _buildTmdbApiUrl(
-            '$_imageBase/w500/${bestLogoPath.startsWith('/') ? bestLogoPath.substring(1) : bestLogoPath}',
-            source)
+        ? '$_imageBase/w500/${bestLogoPath.startsWith('/') ? bestLogoPath.substring(1) : bestLogoPath}'
         : null;
 
     final art = TmdbArt(backdropUrl: backdropUrl, logoUrl: logoUrl);

@@ -727,6 +727,8 @@ class UserDataService {
   // (用 path 字符串去重, 不打 URL 避免 key / 长 ID 灌进日记)
   static String? _lastBangumiDataPathLog;
   static String? _lastBangumiImagePathLog;
+  // v2.1.25: TMDB 图片加速路径节流日记 (跟 Bangumi 平行)
+  static String? _lastTmdbImagePathLog;
 
   // 获取 Bangumi 数据源显示名（异步）
   static Future<String> getBangumiDataSourceDisplayNameAsync() async {
@@ -923,6 +925,59 @@ class UserDataService {
     return originalUrl;
   }
 
+  /// 构造 TMDB 图片请求 URL (跟 [buildBangumiImageUrl] 平行, 风格一致)
+  ///
+  /// v2.1.25 加: TMDB image CDN (image.tmdb.org) 国内被墙, 走 worker 加速
+  /// 才能加载. 跟 Bangumi 图一个模式:
+  /// 1) TMDB 数据源是 'off' → return originalUrl (TMDB 整体关了, 也不会到这,
+  ///   fetchArt 入口就 return null 了. 兜底 return originalUrl 防意外)
+  /// 2) TMDB 数据源是 'direct' → return originalUrl (用户强制直连, 不走代理)
+  /// 3) TMDB 数据源是 'cf_worker' (默认) + 配 worker 域名 → wrap
+  ///   `https://$worker/?url=<encoded fullUrl>`, 让 worker 去拉 image.tmdb.org
+  /// 4) 'cf_worker' 模式但没配 worker 域名 → return originalUrl (直连)
+  ///   + 日记警告, 引导用户去配 worker
+  ///
+  /// 跟 [buildBangumiImageUrl] 的区别: TMDB 没有 'cors_proxy' 选项
+  /// (TMDB 没第三方 cors-proxy, 跟 Bangumi 那样 3 选 1 的 ciao-cors 不一样).
+  /// 数据源 2 选 1: 'cf_worker' (默认) / 'direct' / 'off'.
+  ///
+  /// v2.1.25 之前: TMDB image URL 在 [TmdbService.fetchArt] 里被
+  ///   [_buildTmdbApiUrl] wrap 了 (跟 API URL 一起 wrap). 但 wrap 跟
+  ///   "用户配的 TMDB 数据源"绑定得不够灵活 — 消费者 (image_url.dart /
+  ///   douban_detail_header.dart) 拿到的 URL 已经是 wrap 好的, 想改
+  ///   加速路径得改 fetchArt 内部. 抽到 `buildTmdbImageUrl` 后跟 Bangumi
+  ///   一个模式, 加速路径集中在一个地方管.
+  ///
+  /// v2.1.25 改: TmdbService.fetchArt 改返原始 image.tmdb.org URL,
+  ///   消费者 ([image_url.dart] tmdb case / [douban_detail_header.dart])
+  ///   调 `buildTmdbImageUrl` 走包装. 跟 [buildBangumiImageUrl] 1:1 平行.
+  static String buildTmdbImageUrl(String originalUrl) {
+    final source = getTmdbDataSourceSync();
+    if (source == 'off' || source == 'direct') {
+      _logTmdbImagePath(source);
+      return originalUrl;
+    }
+    // 'cf_worker' (默认) — 跟 Bangumi 一个判断, 配了 worker 域名且域名
+    // 有效就走 worker, 没配就直连 + 日记警告
+    final worker = _cfWorkerDomainCache;
+    if (worker != null && worker.isNotEmpty && _isValidWorkerDomain(worker)) {
+      _logTmdbImagePath('worker:$worker');
+      return 'https://$worker/?url=${Uri.encodeComponent(originalUrl)}';
+    }
+    // cf_worker 模式但没配 worker 域名 — 直连 + 日记警告 (跟 Bangumi 平行)
+    //
+    // v2.1.25 加 _tmdbDataSourceCache != null 守门: warmupCfWorkerConfig 还没跑
+    // 时 _tmdbDataSourceCache 是 null, getTmdbDataSourceSync 默认返 'cf_worker',
+    // 走到这里会误报"没配 worker". 缓存没初始化时静默返 originalUrl, 等 warmup
+    // 后再判断 (buildTmdbImageUrl 一般在 UI 渲染时调, warmup 早就跑完了)
+    if (_tmdbDataSourceCache != null) {
+      DiaryService.add(
+          '[TMDB image] cf_worker 模式但没配 CF Worker 域名, 走直连 (image.tmdb.org 国内被墙, 配 CF Worker 域名才能加速)');
+      _logTmdbImagePath('direct(via cf_worker fallthrough)');
+    }
+    return originalUrl;
+  }
+
   // v2.1.22: Bangumi 数据加速路径日记 (启动首次打, 路径变了重打).
   // 用户反馈"bangumi 日记怎么没有" — 之前只在 cf_worker + 没配 worker 时打一条,
   // 配 worker / 选 cors_proxy / 选直连时都没打. 现在每次首次打,
@@ -940,6 +995,15 @@ class UserDataService {
     if (_lastBangumiImagePathLog == path) return;
     _lastBangumiImagePathLog = path;
     DiaryService.add('[Bangumi image] 加速: $path');
+  }
+
+  // v2.1.25: TMDB 图片加速路径日记 (跟 _logBangumiImagePath 平行).
+  // 跟 Bangumi 分开, 因为 TMDB 走的是 image.tmdb.org (跟 api.themoviedb.org
+  // 完全不同的 host, 国内都墙但走的代理路径独立), 日志分开排查更清晰.
+  static void _logTmdbImagePath(String path) {
+    if (_lastTmdbImagePathLog == path) return;
+    _lastTmdbImagePathLog = path;
+    DiaryService.add('[TMDB image] 加速: $path');
   }
 
   /// v2.0.72: 判断配置的 worker 域名是不是有效的 CF Worker.

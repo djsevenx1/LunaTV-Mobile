@@ -127,15 +127,18 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
   ///   2) coverUrl (豆瓣 16:9 横版剧照 l_cover 1280x720, v2.0.84 引入)
   ///   3) cover (豆瓣 2:3 竖海报 l_ratio_poster 600x900, 兜底)
   ///
-  /// v2.0.93: tmdbBackdropUrl 是「直连 TMDB image CDN」, 不走 worker 加速
-  /// (image.tmdb.org 是 CF 全球 CDN, 跟 worker 一样快). 直接用, 不需
-  /// 要 getImageUrl 升级.
+  /// v2.1.25: tmdbBackdropUrl 走 [getImageUrl] 包装 (跟 Bangumi 图一个模式,
+  ///   跟 [getImageUrl] tmdb case 1:1 平行). 之前 v2.0.93 ~ v2.1.24 是直接
+  ///   信 art.backdropUrl (worker-wrapped URL), v2.1.25 改回原始
+  ///   image.tmdb.org URL, 这里必须走 buildTmdbImageUrl 包装, 不然国内
+  ///   image.tmdb.org 被墙, 大头部背景图加载不出来.
   /// v2.0.84: coverUrl 走 [getDoubanCoverUrl] 升级到 l_cover 1280x720 + CDN 切换.
   ///   无 coverUrl 时 fallback cover (竖海报, 走 getImageUrl 升 l_ratio_poster).
   ///   手机/平板都用这个 (v2.0.85 起手机也用, 之前只有平板用).
   Future<String> _backgroundUrl() async {
     if (widget.tmdbBackdropUrl != null && widget.tmdbBackdropUrl!.isNotEmpty) {
-      return widget.tmdbBackdropUrl!;
+      // v2.1.25: 走 getImageUrl 包装, 跟 hero_banner / 其它屏幕对齐
+      return getImageUrl(widget.tmdbBackdropUrl!, 'tmdb');
     }
     if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty) {
       return getDoubanCoverUrl(widget.coverUrl!);
