@@ -209,6 +209,33 @@ async function handleRequest(request) {
     return handleSpeedTest(reqUrl)
   }
 
+  // 🔑 路径格式代理: 兼容 /<完整URL> 形式
+  // LunaTV-Mobile 等 App 内部组装的请求经常是 https://worker/https://api.bgm.tv/v0/xxx
+  // 这种格式而不是 ?url= 格式, 这里解析出来转给通用代理
+  // 支持:
+  //   /https://api.bgm.tv/v0/subjects/1
+  //   /https%3A%2F%2Fapi.bgm.tv%2Fv0%2Fsubjects%2F1  (url-encoded)
+  //   /lain.bgm.tv/r/400/pic/cover/l/4b/4b/36624.jpg  (裸域名 + 路径, 自动补 https://)
+  //   /api.bgm.tv/v0/subjects/1
+  if (pathname.length > 1 && !targetUrlParam) {
+    let pathTarget = null
+    // 形式 1: /https://... 或 /http://...
+    if (/^\/(https?:\/\/)/i.test(pathname)) {
+      pathTarget = pathname.slice(1)
+    }
+    // 形式 2: /<urlencoded URL>
+    else if (/^\/[A-Za-z0-9%]{8,}/.test(pathname) && pathname.includes('%3A')) {
+      try { pathTarget = decodeURIComponent(pathname.slice(1)) } catch {}
+    }
+    // 形式 3: /<host.tld>/<path>  (裸域名, 自动补 https://)
+    else if (/^\/[a-z0-9.-]+\.[a-z]{2,}\//i.test(pathname)) {
+      pathTarget = 'https://' + pathname.slice(1)
+    }
+    if (pathTarget && /^https?:\/\//i.test(pathTarget)) {
+      return handleProxyRequest(request, pathTarget, currentOrigin)
+    }
+  }
+
   // 🔑 新增：处理源专属路径 /p/{sourceId}?url=...
   // 这样可以让 TVBox 认为每个源是不同的域名/路径
   if (pathname.startsWith('/p/') && targetUrlParam) {
@@ -350,6 +377,33 @@ function applyDefaultHeadersForUpstream(headers, targetURL) {
     }
     if (!headers.has('Accept')) {
       headers.set('Accept', 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8')
+    }
+  }
+  // v2.1.27+: TMDB 图片/数据系列
+  // image.tmdb.org 不需要认证, 但 image 服务器要求 Referer 是允许的站点
+  // (www.themoviedb.org 或 api.themoviedb.org), 否则 403
+  // api.themoviedb.org v3 用 api_key query, v4 用 Bearer token, 这里不补认证头
+  // (客户端传过来的 Authorization / api_key query 参数会原样转发, 不动)
+  if (host === 'image.tmdb.org' || host.endsWith('.image.tmdb.org')) {
+    if (!headers.has('User-Agent')) {
+      headers.set('User-Agent', 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36')
+    }
+    if (!headers.has('Referer')) {
+      headers.set('Referer', 'https://www.themoviedb.org/')
+    }
+    if (!headers.has('Accept')) {
+      headers.set('Accept', 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8')
+    }
+  }
+  if (host === 'api.themoviedb.org' || host.endsWith('.api.themoviedb.org')) {
+    if (!headers.has('User-Agent')) {
+      headers.set('User-Agent', 'LunaTV-Mobile/1.0 (https://github.com/djsevenx1/LunaTV-Mobile)')
+    }
+    if (!headers.has('Referer')) {
+      headers.set('Referer', 'https://www.themoviedb.org/')
+    }
+    if (!headers.has('Accept')) {
+      headers.set('Accept', 'application/json')
     }
   }
   // v2.0.28: 通用 fallback — 视频源/API 补 UA + Referer
