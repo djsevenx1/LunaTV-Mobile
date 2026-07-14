@@ -1,0 +1,22 @@
+v2.0.20d: 禁用 HTTP/3 (QUIC) — 修 SSLV3_ALERT_HANDSHAKE_FAILURE
+
+根因: Worker 默认在 m3u8 响应里返回 `Alt-Svc: h3=":443"; ma=86400`,
+告诉客户端"可以升级到 HTTP/3 (QUIC over UDP)"。客户端 (Dart HttpClient
++ 移动 OpenSSL) 跟 CF 边缘的 QUIC cipher 协商失败, 报
+SSLV3_ALERT_HANDSHAKE_FAILURE (alert 40) → 视频/图片加载静默挂。
+
+修法: 把 `h3` 换成 `h3-29` (RFC 8336 "假" HTTP/3 标识符) + `ma=0`,
+让客户端立即删除之前缓存的 h3 Alt-Svc 记录, 不协商 HTTP/3,
+强制走 HTTP/1.1 / HTTP/2 over TCP (TLS 1.2), 跟老 cipher 兼容。
+
+影响范围:
+- 只改 m3u8 端点响应 (line 415, 536) 和首页 HTML 介绍 (line 887)
+- 视频 m3u8 播放 (libmpv C 库) 不受影响
+- 优选 IP 测速 (raw Socket) 不受影响
+- 优选 IP 域名解析 (CfOptimizerHttpOverrides) 不受影响
+- 视频 m3u8 内容不变, 只改协议协商头
+
+App 端配套 (用户侧):
+- LunaTV-Mobile v2.1.30+ 已经强制关 HTTP/3 (setAllowH3ToAnyOfDomains)
+- LunaTV-Mobile v2.1.33 用 OkHttp 强制 COMPATIBLE_TLS 替代 dart:io
+- Worker 这层从源头关 QUIC, 让 v2.1.25 ~ v2.1.29 之间的老 App 也能用
