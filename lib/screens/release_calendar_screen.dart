@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/release_calendar_service.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/models/release_item.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/image_url.dart';
@@ -253,6 +254,9 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                         final imageUrl = snapshot.data ?? item.cover;
                         return CachedNetworkImage(
                           imageUrl: imageUrl,
+                          // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                          //   cipher 跟 CF edge zone 协商失败
+                          httpClient: LunaImageHttp(),
                           width: 60,
                           height: 85,
                           fit: BoxFit.cover,

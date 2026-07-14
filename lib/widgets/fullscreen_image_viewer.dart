@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 
 /// 全屏图片查看器
 class FullscreenImageViewer extends StatefulWidget {
@@ -233,6 +234,9 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
 
                       return CachedNetworkImage(
                         imageUrl: imageUrl,
+                        // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                        //   cipher 跟 CF edge zone 协商失败
+                        httpClient: LunaImageHttp(),
                         httpHeaders: headers,
                         fit: BoxFit.fitWidth,
                         width: MediaQuery.of(context).size.width,

@@ -480,6 +480,16 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
   /// v2.0.32: 拿到手动优选实际生效的 IP (null = 没配 / 解析失败)
   static String? getResolvedManualIp() => _resolvedManualIp;
 
+  /// v2.1.33: 给 [LunaImageHttp] (MethodChannel + OkHttp 路径) 用 —
+  ///   拿到当前 targetDomain (worker 域名), null = 没配
+  static String? getTargetDomain() => _targetDomainCache;
+
+  /// v2.1.33: 给 [LunaImageHttp] 用 — 优选开关是否启用
+  static bool isFeatureEnabled() => _featureEnabled;
+
+  /// v2.1.33: 给 [LunaImageHttp] 用 — 测速结果 (按延迟升序, 第一名最快)
+  static List<String>? getBestIps() => _bestIpsCache;
+
   /// v2.0.32: 上次解析时间 (人类可读, UI 显示用)
   static String getResolvedAtHuman() {
     if (_resolvedAt == 0) return '从未解析';
@@ -851,7 +861,7 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
     //   Android MethodChannel + OkHttp/HttpURLConnection (用系统 BoringSSL/Conscrypt),
     //   或者 package:cronet_http (用 Android Cronet). 这个改动大 (要碰
     //   android/app/build.gradle.kts + MainActivity.kt + 创建 Kotlin channel +
-    //   Dart wrapper + 24 个 CachedNetworkImage 调用点全改), 跟用户确认再干.
+    //   Dart wrapper + 17 个 CachedNetworkImage 调用点全改), 跟用户确认再干.
     return _OptimizingHttpClient(super.createHttpClient(context));
   }
 }

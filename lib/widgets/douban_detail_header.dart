@@ -68,6 +68,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
@@ -203,6 +204,9 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
               final headers = getImageRequestHeaders(imageUrl, widget.source);
               return CachedNetworkImage(
                 imageUrl: imageUrl,
+                // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                //   cipher 跟 CF edge zone 协商失败
+                httpClient: LunaImageHttp(),
                 fit: BoxFit.cover,
                 httpHeaders: headers,
                 placeholder: (c, u) => Container(
@@ -268,6 +272,9 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
                                 imageUrl, widget.source);
                             return CachedNetworkImage(
                               imageUrl: imageUrl,
+                              // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                              //   cipher 跟 CF edge zone 协商失败
+                              httpClient: LunaImageHttp(),
                               fit: BoxFit.cover,
                               httpHeaders: headers,
                               memCacheWidth: (posterW *
@@ -333,6 +340,9 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
               final headers = getImageRequestHeaders(imageUrl, widget.source);
               return CachedNetworkImage(
                 imageUrl: imageUrl,
+                // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                //   cipher 跟 CF edge zone 协商失败
+                httpClient: LunaImageHttp(),
                 fit: BoxFit.cover,
                 httpHeaders: headers,
                 placeholder: (c, u) => Container(
@@ -382,6 +392,9 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
                             getImageRequestHeaders(imageUrl, widget.source);
                         return CachedNetworkImage(
                           imageUrl: imageUrl,
+                          // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                          //   cipher 跟 CF edge zone 协商失败
+                          httpClient: LunaImageHttp(),
                           fit: BoxFit.cover,
                           httpHeaders: headers,
                           memCacheWidth: (150 *

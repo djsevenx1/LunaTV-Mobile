@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/utils/device_utils.dart';
@@ -97,6 +98,9 @@ class _VideoCardState extends State<VideoCard> {
                           borderRadius: BorderRadius.circular(8),
                           child: CachedNetworkImage(
                             imageUrl: imageUrl,
+                            // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                            //   cipher 跟 CF edge zone 协商失败
+                            httpClient: LunaImageHttp(),
                             fit: BoxFit.cover,
                             // 使用图片URL作为缓存key
                             cacheKey: imageUrl,

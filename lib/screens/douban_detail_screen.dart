@@ -4,6 +4,7 @@ import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:provider/provider.dart';
 
@@ -146,6 +147,9 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
           child: poster != null && poster.isNotEmpty
               ? CachedNetworkImage(
                   imageUrl: poster,
+                  // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                  //   cipher 跟 CF edge zone 协商失败
+                  httpClient: LunaImageHttp(),
                   fit: BoxFit.cover,
                   placeholder: (c, u) => Container(
                     color: isDark
@@ -315,6 +319,9 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
                 final headers = getImageRequestHeaders(imageUrl, 'douban');
                 return CachedNetworkImage(
                   imageUrl: imageUrl,
+                  // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                  //   cipher 跟 CF edge zone 协商失败
+                  httpClient: LunaImageHttp(),
                   width: 100,
                   height: 150,
                   fit: BoxFit.cover,
@@ -835,6 +842,9 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
                             getImageRequestHeaders(imageUrl, 'douban');
                         return CachedNetworkImage(
                           imageUrl: imageUrl,
+                          // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                          //   cipher 跟 CF edge zone 协商失败
+                          httpClient: LunaImageHttp(),
                           fit: BoxFit.cover,
                           width: double.infinity,
                           httpHeaders: headers,

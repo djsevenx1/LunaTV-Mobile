@@ -63,3 +63,14 @@ android {
 flutter {
     source = "../.."
 }
+
+// v2.1.33: OkHttp 给 ImageHttpChannel (Kotlin MethodChannel handler) 用
+//   - Android 系统库 Conscrypt/BoringSSL, 全 TLS 1.3 cipher 支持
+//   - dart:io 没 public API 强制 TLS 版本, dart:io 的 OpenSSL 跟
+//     CF edge zone (e.g., api.fn0.qzz.io) TLS 1.3 cipher 协商失败
+//     (SSLV3_ALERT_HANDSHAKE_FAILURE alert 40). OkHttp 可以强制 TLS 1.2,
+//     cipher 列表宽得多, 跟所有 CF zone 都有重叠.
+//   - 不影响视频 m3u8 播放 (libmpv C 库, 完全独立)
+dependencies {
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}

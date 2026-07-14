@@ -11,6 +11,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/bangumi_service.dart';
 import 'package:luna_tv/utils/image_url.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/widgets/fullscreen_image_viewer.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -709,6 +710,9 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
                                               borderRadius: BorderRadius.circular(8),
                                               child: CachedNetworkImage(
                                                 imageUrl: thumbUrl,
+                                                // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                                                //   cipher 跟 CF edge zone 协商失败
+                                                httpClient: LunaImageHttp(),
                                                 httpHeaders: headers,
                                                 fit: BoxFit.cover,
                                                 // 优化图片加载，避免动画卡顿

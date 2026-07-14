@@ -23,6 +23,7 @@ import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/cf_optimizer.dart';
+import 'package:luna_tv/services/luna_image_http.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/douban_detail_header.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
@@ -2699,6 +2700,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                     child: url != null
                         ? CachedNetworkImage(
                             imageUrl: url,
+                            // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                            //   cipher 跟 CF edge zone 协商失败
+                            httpClient: LunaImageHttp(),
                             fit: BoxFit.cover,
                             placeholder: (ctx, u) => Container(
                               color: Colors.white12,
@@ -2793,6 +2797,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                             imageUrl, widget.videoInfo.source);
                         return CachedNetworkImage(
                           imageUrl: imageUrl,
+                          // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                          //   cipher 跟 CF edge zone 协商失败
+                          httpClient: LunaImageHttp(),
                           fit: BoxFit.cover,
                           width: 110,
                           height: 150,
