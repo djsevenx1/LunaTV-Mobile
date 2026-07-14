@@ -165,3 +165,7 @@ corsapi-netlify.tar.gz
 .flutter-plugins
 # ciao-cors README 备份 (项目 README 已经写)
 corsapi_README.md
+
+# ===== v2.1.26: 真实地址过滤规则 (本地用, 不入库) =====
+# 包含用户真实 API/Worker 域名, 只在本地构建时使用, 防止地址泄露到仓库
+.filter-replace
