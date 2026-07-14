@@ -136,24 +136,39 @@ class _DiaryScreenState extends State<DiaryScreen> {
     }
   }
 
-  // v2.1.22: 分类识别 — 取 [] 里的第一段作为分类, 跟实际调用方约定一致
-  // (e.g. [TMDB] / [Bangumi image] / [Network] / [AD_RESET] / [History] / [Douban summary])
+  // v2.1.24: 分类识别 — v2.1.22 写错了, 只看第一个 [..] 块 (e.g. [09:48:08]),
+  // 而日记格式是 "[HH:mm:ss] [分类] 描述", 第一个块是时间戳, 不是分类 tag.
+  // 用户装 v2.1.22 后 122 条全归"其它", 因为所有 [..] 块都是 [HH:mm:ss] 形式.
+  // 修法: allMatches 拿所有 [..] 块, 跳过 HH:MM:SS 格式的, 用剩下的当 tag.
   String _categoryOf(String entry) {
-    final m = RegExp(r'^\[[^\]]+\]').firstMatch(entry);
-    if (m == null) return '其它';
-    final tag = m.group(0)!.toLowerCase();
-    if (tag.startsWith('[tmdb')) return 'TMDB';
-    if (tag.startsWith('[bangumi')) return 'Bangumi';
-    if (tag.startsWith('[network') ||
-        tag.contains('网络') ||
-        tag.contains('timeout') ||
-        tag.contains('handshake')) {
+    final matches = RegExp(r'\[([^\]]+)\]').allMatches(entry);
+    String? tag;
+    for (final m in matches) {
+      final inner = m.group(1)!;
+      // 跳过时间戳 (HH:mm:ss)
+      if (RegExp(r'^\d{2}:\d{2}:\d{2}$').hasMatch(inner)) continue;
+      tag = inner.toLowerCase();
+      break;
+    }
+    if (tag == null) return '其它';
+    if (tag.startsWith('tmdb')) return 'TMDB';
+    if (tag.startsWith('bangumi')) return 'Bangumi';
+    if (tag.startsWith('network') ||
+        tag.startsWith('ssl') ||
+        tag.startsWith('tls') ||
+        tag.startsWith('connect') ||
+        entry.contains('网络') ||
+        entry.contains('timeout') ||
+        entry.contains('handshake') ||
+        entry.contains('SSLV3') ||
+        entry.contains('ECONN')) {
       return '网络';
     }
-    if (tag.startsWith('[player') ||
-        tag.startsWith('[ad_reset') ||
-        tag.startsWith('[history') ||
-        tag.startsWith('[douban')) {
+    if (tag.startsWith('player') ||
+        tag.startsWith('ad_reset') ||
+        tag.startsWith('history') ||
+        tag.startsWith('douban') ||
+        tag.startsWith('video')) {
       return '视频';
     }
     return '其它';
@@ -310,7 +325,9 @@ class _DiaryScreenState extends State<DiaryScreen> {
                       final isNetworkError = _categoryOf(entry) == '网络' ||
                           entry.contains('timeout') ||
                           entry.contains('handshake') ||
-                          entry.contains('SocketException');
+                          entry.contains('SSLV3') ||
+                          entry.contains('SocketException') ||
+                          entry.contains('ECONN');
                       Color? bg;
                       if (isTmdbError) {
                         bg = isDark
