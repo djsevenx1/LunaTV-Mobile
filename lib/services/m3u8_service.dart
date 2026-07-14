@@ -122,8 +122,14 @@ class M3U8Service {
     return {'width': 0, 'height': 0};
   }
 
-  /// 直链 (非 M3U8) 测速: 用 Range 请求取前 64KB
+  /// 直链 (非 M3U8) 测速
   /// v1.0.74: 支持 urlWrapper 包装测速 URL (走 worker 测速)
+  /// v2.1.27: HEAD 拿 Content-Length + 算 ping, 再用 Range 1MB 测速.
+  ///   之前 v2.1.26 直接复用 `_measureDownloadSpeedFast` (完整 GET) —
+  ///   500MB-2GB 的 mp4 完整下完流量爆炸 + 12s timeout 永远返 0.
+  ///   现在的做法跟 web LunaTV 思路一致: HEAD 一次拿 fileSize + latency,
+  ///   然后 Range bytes=0-1048575 取前 1MB 算 speed, 跟 m3u8 测速
+  ///   (拿代表性块) 同思路.
   Future<Map<String, dynamic>> _measureDirectStream(
     String streamUrl, {
     String Function(String)? urlWrapper,
@@ -131,14 +137,40 @@ class M3U8Service {
     try {
       // 测速 URL: 直链的话, urlWrapper 包一次 (走 worker)
       final testUrl = urlWrapper != null ? urlWrapper(streamUrl) : streamUrl;
-      final futures = await Future.wait([
-        _measureLatency(testUrl),
-        _measureDownloadSpeedFast(testUrl),
-      ]);
+
+      // 1) HEAD 拿 file size + 算 ping
+      //    HEAD 不传 body, 比 GET 快, 而且部分 CDN HEAD 返的 metadata 更准
+      //    (Content-Length 直接给到原始 mp4 大小, 跟播放器实际下载一致).
+      final pingStopwatch = Stopwatch()..start();
+      int fileSizeBytes = 0;
+      try {
+        final headResponse = await _dio.head(
+          testUrl,
+          options: Options(
+            receiveTimeout: const Duration(seconds: 5),
+            // 某些 CDN HEAD 不带 Content-Length, 强制 receive response headers
+            followRedirects: true,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+        fileSizeBytes = int.tryParse(
+              headResponse.headers.value('content-length') ?? '',
+            ) ??
+            0;
+      } catch (_) {
+        // HEAD 失败不影响主流程, fileSize 留 0
+      }
+      pingStopwatch.stop();
+      final latency = pingStopwatch.elapsedMilliseconds;
+
+      // 2) Range 1MB 测速 (跟 web LunaTV 思路对齐)
+      final speed = await _measureRangeDownloadSpeed(testUrl);
+
       return {
         'resolution': {'width': 0, 'height': 0}, // 直链没法从 M3U8 拿分辨率
-        'downloadSpeed': futures[1] as double,
-        'latency': futures[0] as int,
+        'downloadSpeed': speed,
+        'latency': latency,
+        'fileSize': fileSizeBytes,
         'success': true,
         'error': '',
       };
@@ -147,6 +179,7 @@ class M3U8Service {
         'resolution': {'width': 0, 'height': 0},
         'downloadSpeed': 0.0,
         'latency': 0,
+        'fileSize': 0,
         'success': false,
         'error': e.toString(),
       };
@@ -486,6 +519,47 @@ class M3U8Service {
       final bytes = (response.data as Uint8List).length;
       if (bytes == 0) return 0.0;
       // 兼容服务端不返回 206 而是直接 200 全量, 也兼容 206 部分内容
+      final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+      if (elapsedSeconds <= 0) return 0.0;
+      return (bytes / 1024) / elapsedSeconds; // KB/s
+    } catch (e) {
+      return 0.0;
+    }
+  }
+
+  /// 测量下载速度 (v2.1.27: Range 1MB, 跟 web LunaTV 思路对齐)
+  ///
+  /// 用在 `_measureDirectStream`: 直链 (非 m3u8) mp4 等大文件测速.
+  /// 之前 v2.1.26 用 `_measureDownloadSpeedFast` (完整 GET) 测直链,
+  /// 500MB-2GB 的 mp4 完整 GET 会下完整个文件 → 流量爆炸 + 12s timeout
+  /// 永远返 0.
+  ///
+  /// 现在的做法: Range bytes=0-1048575 只取前 1MB, 算 speed = 1MB / elapsed.
+  /// 跟 web LunaTV iPad 简化路径思路一致 — 不下完整文件, 拿代表性块.
+  /// m3u8 测速用 `_measureDownloadSpeedFast` (完整 segment), 直链用这个 (Range 1MB).
+  ///
+  /// 1MB 在 1Mbps 链路上 ~8s 传完, 慢链 12s timeout 兜底.
+  /// 跟 m3u8 测速一样的"拿代表性块"思路, 跟 web LunaTV 对齐.
+  Future<double> _measureRangeDownloadSpeed(String url) async {
+    try {
+      final stopwatch = Stopwatch()..start();
+      // Range bytes=0-1048575 = 1MB. 跟 web LunaTV 思路一致.
+      final response = await _dio.get(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          // v2.1.27: 跟 m3u8 测速一样 12s. 1MB 在 1Mbps 链路上 ~8s,
+          //   慢链给 12s 留余量.
+          receiveTimeout: const Duration(seconds: 12),
+          headers: const {'Range': 'bytes=0-1048575'},
+        ),
+      );
+      stopwatch.stop();
+      final bytes = (response.data as Uint8List).length;
+      if (bytes == 0) return 0.0;
+      // 兼容服务端不返回 206 而是直接 200 全量 (少数 CDN 不支持 Range,
+      //   会返完整文件, bytes 会是完整 size; 我们用实际 elapsed 算
+      //   真实速度, 不强制 1MB)
       final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
       if (elapsedSeconds <= 0) return 0.0;
       return (bytes / 1024) / elapsedSeconds; // KB/s
