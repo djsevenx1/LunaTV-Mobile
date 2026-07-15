@@ -992,21 +992,64 @@ class UserDataService {
   /// v2.1.40 改: 删 cf_worker / ciao-cors 加速, 1:1 返原 URL.
   /// v2.1.42: 加 'bangumi_proxy' 分支, 其他仍 1:1 返 (老用户 + 未配
   ///   worker URL 的).
+  /// v2.1.43 改: 加详细 DiaryService 日记 (source / worker URL / 转换前
+  ///   URL / 转换后 URL), 用户在日记里直接看到 wrap 走没走, 不需要
+  ///   查代码. 之前 v2.1.42 没日记, 反馈「bangumi 加速不行」时只能
+  ///   翻 _bangumiDataSourceCache 状态, 排查不动.
   static String buildBangumiDataUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
     final source = getBangumiDataSourceKeySync();
     if (source == 'bangumi_proxy') {
       final proxy = getTmdbProxyDomainSync();
       if (proxy.isNotEmpty && originalUrl.startsWith('https://api.bgm.tv')) {
-        // 'https://api.bgm.tv/calendar' → 'https://proxy/bangumi/calendar'
-        return originalUrl.replaceFirst(
+        final wrapped = originalUrl.replaceFirst(
           'https://api.bgm.tv',
           '$proxy/bangumi',
         );
+        // v2.1.43: 转换成功 (source=bangumi_proxy + worker URL 配了 + URL 是
+        //   api.bgm.tv 开头) 写一行日记, 用户看日记能确认 wrap 真发生了.
+        //   记 wrap 前/后完整 URL, 排查 "worker URL 拼错了" 之类问题方便.
+        DiaryService.add(
+            '[Bangumi] buildDataUrl: source=bangumi_proxy, worker=$proxy');
+        DiaryService.add(
+            '[Bangumi] buildDataUrl wrap: in=$originalUrl out=$wrapped');
+        return wrapped;
+      } else {
+        // v2.1.43: source=bangumi_proxy 但没配 worker URL 或 URL 不是
+        //   api.bgm.tv 开头 — 走 1:1 passthrough 但写日记告知, 用户
+        //   在日记里看到这条就能知道 "加速没生效" 是这个原因.
+        final reason = proxy.isEmpty
+            ? 'worker URL 未配 (在「数据源 / TMDB / Bangumi 代理 URL」填)'
+            : 'URL 不是 api.bgm.tv 开头 (不起作用)';
+        DiaryService.add(
+            '[Bangumi] buildDataUrl: source=bangumi_proxy 但 passthrough, reason="$reason", in=$originalUrl');
+      }
+    } else {
+      // v2.1.43: source=direct (默认) 也写一行, 用户选 worker 加速
+      //   但日记里写 direct, 看到这一行就能定位 (通常是数据源选 direct).
+      //   注意: 这个函数是热路径, 详情页 / 列表都会调, 一次会话可能
+      //   调几十次, 日记会爆. 改成只记 "source 跟用户预期不一致"
+      //   的情况: source=direct 但有 worker URL 配了 (说明用户想加速
+      //   但数据源没切) — 这种情况提示一次; 选 direct + 没 worker URL
+      //   完全不记.
+      final proxy = getTmdbProxyDomainSync();
+      if (proxy.isNotEmpty) {
+        // v2.1.43: 配了 worker URL 但数据源选 direct, 提示一下
+        //   (只提示一次, 后续都跳过避免日记爆)
+        if (!_bangumiDataSourceNoProxyHinted) {
+          _bangumiDataSourceNoProxyHinted = true;
+          DiaryService.add(
+              '[Bangumi] buildDataUrl hint: 配了 worker URL ($proxy) 但 Bangumi 数据源选 direct, 加速不生效, 切到「Bangumi Worker 加速」');
+        }
       }
     }
     return originalUrl;
   }
+
+  // v2.1.43: 「配 worker URL 但 data source=direct」的一次性提示 flag,
+  //   避免 buildBangumiDataUrl 在详情页/列表里被调几十次, 日记满屏
+  //   重复 hint.
+  static bool _bangumiDataSourceNoProxyHinted = false;
 
   /// 构造 Bangumi 图片请求 URL
   ///
@@ -1023,20 +1066,47 @@ class UserDataService {
   /// v2.1.40 改: 删 cf_worker / ciao-cors 加速, 1:1 返原 URL.
   /// v2.1.42: 加 'bangumi_proxy' 分支, 其他仍 1:1 返 (老用户 + 未配
   ///   worker URL 的).
+  /// v2.1.43 改: 加详细 DiaryService 日记, 跟 buildBangumiDataUrl 平行.
+  ///   image URL 是热路径 (一个详情页 / 轮播可能调几十次), 跟数据源
+  ///   一样用一次性 hint flag 避免日记爆.
   static String buildBangumiImageUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
     final source = getBangumiImageSourceKeySync();
     if (source == 'bangumi_proxy') {
       final proxy = getTmdbProxyDomainSync();
       if (proxy.isNotEmpty && originalUrl.startsWith('https://lain.bgm.tv')) {
-        return originalUrl.replaceFirst(
+        final wrapped = originalUrl.replaceFirst(
           'https://lain.bgm.tv',
           '$proxy/bgm-img',
         );
+        DiaryService.add(
+            '[Bangumi] buildImageUrl: source=bangumi_proxy, worker=$proxy');
+        DiaryService.add(
+            '[Bangumi] buildImageUrl wrap: in=$originalUrl out=$wrapped');
+        return wrapped;
+      } else {
+        final reason = proxy.isEmpty
+            ? 'worker URL 未配'
+            : 'URL 不是 lain.bgm.tv 开头 (不起作用)';
+        DiaryService.add(
+            '[Bangumi] buildImageUrl: source=bangumi_proxy 但 passthrough, reason="$reason", in=$originalUrl');
+      }
+    } else {
+      // v2.1.43: 配了 worker URL 但图片源选 direct, 一次性 hint
+      final proxy = getTmdbProxyDomainSync();
+      if (proxy.isNotEmpty) {
+        if (!_bangumiImageSourceNoProxyHinted) {
+          _bangumiImageSourceNoProxyHinted = true;
+          DiaryService.add(
+              '[Bangumi] buildImageUrl hint: 配了 worker URL ($proxy) 但 Bangumi 图片源选 direct, 加速不生效, 切到「Bangumi Worker 加速」');
+        }
       }
     }
     return originalUrl;
   }
+
+  // v2.1.43: 一次性 hint flag (跟 data source hint 平行)
+  static bool _bangumiImageSourceNoProxyHinted = false;
 
   /// 构造 TMDB 图片请求 URL
   ///
@@ -1053,20 +1123,45 @@ class UserDataService {
   /// v2.1.40 改: 删 cf_worker / ciao-cors 加速, 1:1 返原 URL.
   /// v2.1.41: 仍然 1:1 返 (老用户 + 未配 worker URL 的). 新分支
   ///   只在 source='tmdb_proxy' 且 worker URL 已配时触发.
+  /// v2.1.43 改: 加详细 DiaryService 日记, 跟 Bangumi 平行.
   static String buildTmdbImageUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
     final source = getTmdbDataSourceSync();
     if (source == 'tmdb_proxy') {
       final proxy = getTmdbProxyDomainSync();
       if (proxy.isNotEmpty && originalUrl.startsWith('https://image.tmdb.org')) {
-        return originalUrl.replaceFirst(
+        final wrapped = originalUrl.replaceFirst(
           'https://image.tmdb.org',
           '$proxy/image',
         );
+        DiaryService.add(
+            '[TMDB] buildImageUrl: source=tmdb_proxy, worker=$proxy');
+        DiaryService.add(
+            '[TMDB] buildImageUrl wrap: in=$originalUrl out=$wrapped');
+        return wrapped;
+      } else {
+        final reason = proxy.isEmpty
+            ? 'worker URL 未配'
+            : 'URL 不是 image.tmdb.org 开头 (不起作用)';
+        DiaryService.add(
+            '[TMDB] buildImageUrl: source=tmdb_proxy 但 passthrough, reason="$reason", in=$originalUrl');
+      }
+    } else {
+      // v2.1.43: 配了 worker URL 但 TMDB 数据源选 direct, 一次性 hint
+      final proxy = getTmdbProxyDomainSync();
+      if (proxy.isNotEmpty) {
+        if (!_tmdbDataSourceNoProxyHinted) {
+          _tmdbDataSourceNoProxyHinted = true;
+          DiaryService.add(
+              '[TMDB] buildImageUrl hint: 配了 worker URL ($proxy) 但 TMDB 数据源选 direct, 加速不生效, 切到「TMDB Worker 加速」');
+        }
       }
     }
     return originalUrl;
   }
+
+  // v2.1.43: 一次性 hint flag
+  static bool _tmdbDataSourceNoProxyHinted = false;
 
   // Bangumi 数据源 key 同步初始化（main.dart 启动时调用）
   //
