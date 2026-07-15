@@ -563,10 +563,6 @@ class UserDataService {
         return '直连';
       case 'off':
         return '已关闭';
-      case 'cors_proxy':
-        // v2.1.39: TMDB 加公共代理兜底. 跟 Bangumi 数据的 'cors_proxy' 一致,
-        //   标签用 "CORS 公共代理 (ciao-cors)" 让用户知道是哪个公共代理.
-        return 'CORS 公共代理 (ciao-cors)';
       case 'cf_worker':
       default:
         return 'CF Worker 加速';
@@ -580,8 +576,6 @@ class UserDataService {
         return 'direct';
       case '已关闭':
         return 'off';
-      case 'CORS 公共代理 (ciao-cors)':
-        return 'cors_proxy';
       case 'CF Worker 加速':
       default:
         return 'cf_worker';
