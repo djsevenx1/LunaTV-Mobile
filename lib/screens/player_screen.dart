@@ -1671,16 +1671,28 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  /// v2.1.38: 改用 GET 测延迟 + 失败返回 -1 哨兵 (不再用 3000 模糊值)
+  ///   - 旧版本用 HEAD 测, 但 m3u8 源很多不支持 HEAD (405/501), 走到 catch
+  ///     返回 3000, 外面 success 检查 `ms > 0 && ms < 5000` 居然把 3000 当成
+  ///     成功, UI 显示假数据 "0KB/s · 3000ms" / "38KB/s · 3000ms".
+  ///   - 改用 GET Range: 0-0 拿 1 字节, 强制 drain stream 拿真实首字节延迟.
+  ///   - 失败返回 -1 (跟 m3u8_service._measureLatency 保持一致), success 改
+  ///     `ms > 0` 严格过滤.
   Future<int> _fallbackMeasureLatency(http.Client client, String url) async {
     final start = DateTime.now();
     try {
-      final req = http.Request('HEAD', Uri.parse(url))
+      final req = http.Request('GET', Uri.parse(url))
         ..followRedirects = true
-        ..maxRedirects = 2;
-      await client.send(req).timeout(const Duration(milliseconds: 1500));
+        ..maxRedirects = 2
+        ..headers['Range'] = 'bytes=0-0';
+      final resp = await client.send(req).timeout(const Duration(milliseconds: 2000));
+      // 关掉 stream 释放连接 (Range: 0-0 拿 0~1 字节, 读完就 OK)
+      try {
+        await resp.stream.drain<void>().timeout(const Duration(milliseconds: 300));
+      } catch (_) {}
       return DateTime.now().difference(start).inMilliseconds;
     } catch (_) {
-      return 3000;
+      return -1; // v2.1.38: 失败明确返回 -1, 不再用 3000 模糊
     }
   }
 
