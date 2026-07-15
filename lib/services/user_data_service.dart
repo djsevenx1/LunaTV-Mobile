@@ -526,9 +526,17 @@ class UserDataService {
 
   // ===== v2.0.97: TMDB 数据源 (跟 Bangumi 数据源一样 UX) =====
 
-  /// 保存 TMDB 数据源 (key 值: 'cf_worker' / 'direct' / 'off')
+  /// 保存 TMDB 数据源 (key 值: 'cf_worker' / 'cors_proxy' / 'direct' / 'off')
+  ///
+  /// v2.1.39 加 'cors_proxy': 走 `ciao-cors.is-an.org` 公共代理, 跟 Bangumi
+  ///   数据的 'cors_proxy' 一致. 适用场景: 用户没配 CF Worker 域名,
+  ///   又想看 TMDB 海报 (image.tmdb.org 国内被墙). 走 ciao-cors 实测
+  ///   `image.tmdb.org` 返 200 + 真实 JPEG 66KB, 跟 Bangumi API (api.bgm.tv)
+  ///   一样能代理 TMDB.
   static Future<void> saveTmdbDataSource(String key) async {
-    final cleaned = (key == 'direct' || key == 'off') ? key : 'cf_worker';
+    final cleaned = (key == 'direct' || key == 'off' || key == 'cors_proxy')
+        ? key
+        : 'cf_worker';
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tmdbDataSourceKey, cleaned);
     _tmdbDataSourceCache = cleaned;
@@ -555,6 +563,10 @@ class UserDataService {
         return '直连';
       case 'off':
         return '已关闭';
+      case 'cors_proxy':
+        // v2.1.39: TMDB 加公共代理兜底. 跟 Bangumi 数据的 'cors_proxy' 一致,
+        //   标签用 "CORS 公共代理 (ciao-cors)" 让用户知道是哪个公共代理.
+        return 'CORS 公共代理 (ciao-cors)';
       case 'cf_worker':
       default:
         return 'CF Worker 加速';
@@ -568,6 +580,8 @@ class UserDataService {
         return 'direct';
       case '已关闭':
         return 'off';
+      case 'CORS 公共代理 (ciao-cors)':
+        return 'cors_proxy';
       case 'CF Worker 加速':
       default:
         return 'cf_worker';
@@ -937,9 +951,11 @@ class UserDataService {
   /// 4) 'cf_worker' 模式但没配 worker 域名 → return originalUrl (直连)
   ///   + 日记警告, 引导用户去配 worker
   ///
-  /// 跟 [buildBangumiImageUrl] 的区别: TMDB 没有 'cors_proxy' 选项
-  /// (TMDB 没第三方 cors-proxy, 跟 Bangumi 那样 3 选 1 的 ciao-cors 不一样).
-  /// 数据源 2 选 1: 'cf_worker' (默认) / 'direct' / 'off'.
+  /// 跟 [buildBangumiImageUrl] 的区别: TMDB 数据源 v2.1.39 之前只有
+  /// 'cf_worker' / 'direct' / 'off' 3 选 1, 没有 'cors_proxy'. v2.1.39
+  /// 加 'cors_proxy' 公共代理选项 (走 ciao-cors.is-an.org, 实测能代理
+  /// image.tmdb.org). 现在跟 Bangumi 一样 4 选 1: 'cf_worker' (默认) /
+  /// 'cors_proxy' / 'direct' / 'off'.
   ///
   /// v2.1.25 之前: TMDB image URL 在 [TmdbService.fetchArt] 里被
   ///   [_buildTmdbApiUrl] wrap 了 (跟 API URL 一起 wrap). 但 wrap 跟
@@ -951,11 +967,21 @@ class UserDataService {
   /// v2.1.25 改: TmdbService.fetchArt 改返原始 image.tmdb.org URL,
   ///   消费者 ([image_url.dart] tmdb case / [douban_detail_header.dart])
   ///   调 `buildTmdbImageUrl` 走包装. 跟 [buildBangumiImageUrl] 1:1 平行.
+  ///
+  /// v2.1.39 加 'cors_proxy' 分支: 走 ciao-cors.is-an.org 公共代理.
+  ///   实测 image.tmdb.org/t/p/w500/xxx.jpg → 200 + 真实 JPEG, 跟
+  ///   api.bgm.tv 一样能代理. 适用: 用户没配 CF Worker 又想看 TMDB 海报.
   static String buildTmdbImageUrl(String originalUrl) {
     final source = getTmdbDataSourceSync();
     if (source == 'off' || source == 'direct') {
       _logTmdbImagePath(source);
       return originalUrl;
+    }
+    // v2.1.39: 'cors_proxy' 模式 — 走 ciao-cors.is-an.org 公共代理.
+    // 跟 Bangumi 数据 'cors_proxy' 走同一个 publicCorsProxyBase.
+    if (source == 'cors_proxy') {
+      _logTmdbImagePath('ciao-cors');
+      return buildCiaoCorsUrl(originalUrl);
     }
     // 'cf_worker' (默认) — 跟 Bangumi 一个判断, 配了 worker 域名且域名
     // 有效就走 worker, 没配就直连 + 日记警告

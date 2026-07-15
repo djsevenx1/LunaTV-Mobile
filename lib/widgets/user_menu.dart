@@ -1475,12 +1475,18 @@ class _UserMenuState extends State<UserMenu> {
               //   「关闭」语义, 关了就没数据源了. 真要关 → 走 "清除 TMDB
               //   缓存"上方条件渲染行? 不, 删 API key 就走豆瓣兜底 (跟
               //   v2.0.93 行为一致). 数据源选项就专心管"怎么连".
+              // v2.1.39: 加 'CORS 公共代理 (ciao-cors)' 选项, 3 选 1.
+              //   实测 ciao-cors 能代理 image.tmdb.org (200 + 真实 JPEG),
+              //   跟 api.bgm.tv 一样能代理 TMDB. 适用: 没配 CF Worker 域名
+              //   又想看 TMDB 海报/数据 (search/overview/credits).
+              //   重试链: ciao-cors → retry 1 次 → fallback direct → retry 1 次.
               _buildOptionSelector(
                 title: 'TMDB 数据源',
                 currentValue: UserDataService.getTmdbDataSourceDisplayName(
                     _tmdbDataSource),
                 options: const [
                   'CF Worker 加速',
+                  'CORS 公共代理 (ciao-cors)',
                   '直连',
                 ],
                 onChanged: (value) async {

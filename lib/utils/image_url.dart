@@ -162,7 +162,10 @@ Future<String> getImageUrl(
   // 之前 v2.0.94 ~ v2.1.24 是 [TmdbService.fetchArt] 内部 wrap 的,
   // v2.1.25 改回返原始 image.tmdb.org URL, 消费者 (这里 + douban_detail_header)
   // 统一调 [UserDataService.buildTmdbImageUrl] 走包装.
-  // 跟 Bangumi 区别: TMDB 没有 'cors_proxy' 选项, 只有 'cf_worker' / 'direct' / 'off'.
+  // v2.1.39: TMDB 数据源加 'cors_proxy' (ciao-cors.is-an.org 公共代理) 选项,
+  //   跟 Bangumi 4 选 1: 'cf_worker' / 'cors_proxy' / 'direct' / 'off'.
+  //   实测 image.tmdb.org 走 ciao-cors 返 200 + 真实 JPEG, 跟 api.bgm.tv
+  //   一样能代理, 给没配 CF Worker 的用户兜底看 TMDB 海报.
   if (source == 'tmdb' && originalUrl.isNotEmpty) {
     // v2.1.28: 跟 Bangumi 平行, 探测 worker 健康, 挂了就走直连.
     final worker = UserDataService.getCfWorkerDomainSync();
