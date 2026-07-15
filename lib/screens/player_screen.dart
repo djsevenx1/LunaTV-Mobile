@@ -1642,12 +1642,21 @@ class _PlayerScreenState extends State<PlayerScreen>
       ]).timeout(const Duration(milliseconds: 2500));
       final ms = (results[0] as num).toInt();
       final kbps = (results[1] as num).toDouble();
-      // v2.1.34: ms < 5000 就算 success (ms=3000 是 fallback 失败默认值)
+      // v2.1.38: 严格 success — ms>0 (没掉到 -1 哨兵) 或 kbps>0 (下载真成功).
+      //   旧判断 `ms > 0 && ms < 5000` 已废弃, 3000 不再返回, 但 ms<5000
+      //   还包含 -1 (latency 失败) + 真数据 组合场景, 也会漏出.
+      //   改 ms>0 || kbps>0 — 任一成功就算部分成功, 不让 -1 假数据漏出.
+      final latencyOk = ms > 0;
+      final downloadOk = kbps > 0;
+      if (!latencyOk && !downloadOk) {
+        return _SourceSpeedInfo.unavailable();
+      }
       return _SourceSpeedInfo(
         resolution: '',
-        loadSpeedKBps: kbps,
-        pingMs: ms,
-        success: ms > 0 && ms < 5000,
+        loadSpeedKBps: downloadOk ? kbps : 0,
+        // 测不到延迟时 pingMs=0, UI 端 `if (speed.pingMs > 0)` 自动过滤, 不会显示 "0ms"
+        pingMs: latencyOk ? ms : 0,
+        success: true,
       );
     } catch (_) {
       // v2.1.34: 兜底再试一次 originalUrl (如果 altUrl 失败)
@@ -1655,7 +1664,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         try {
           final ms = await _fallbackMeasureLatency(httpClient, url)
               .timeout(const Duration(milliseconds: 1500));
-          if (ms > 0 && ms < 5000) {
+          if (ms > 0) {
             return _SourceSpeedInfo(
               resolution: '',
               loadSpeedKBps: 0,
