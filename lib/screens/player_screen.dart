@@ -5114,7 +5114,7 @@ class _SourceSpeedInfo {
     required this.success,
   });
   static _SourceSpeedInfo unavailable() =>
-      const _SourceSpeedInfo(resolution: '', loadSpeedKBps: 0, pingMs: 0, success: false);
+      const _SourceSpeedInfo(resolution: '', loadSpeedKBps: 0, pingMs: 3000, success: false);
 
   /// 格式化下载速度 (KB/s → MB/s, 自动单位)
   String formatLoadSpeed() {
