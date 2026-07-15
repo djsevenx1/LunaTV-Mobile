@@ -60,7 +60,16 @@ class _UserMenuState extends State<UserMenu> {
   //   v2.1.40 改: 默认从 'cf_worker' 改成 'direct' (加速删了, 直连是
   //   唯一可选的 TMDB 数据源). 老用户存的 'cf_worker' / 'cors_proxy'
   //   在 saveTmdbDataSource 里 migrate 到 'direct'.
+  //   v2.1.41 改: 加 'tmdb_proxy' (用户自部署 CF Worker 加速, 跟
+  //   _cfWorkerDomain 视频加速是 2 个独立 worker). 删 'off' (用户
+  //   反馈「这个关闭不要」). 默认值看 _tmdbProxyDomain 配没配:
+  //   配了默认 'tmdb_proxy', 没配默认 'direct'.
   String _tmdbDataSource = 'direct';
+  // v2.1.41: TMDB 代理 URL — 用户自部署 [djsevenx1/tmdb-proxy] 部署
+  //   到 Cloudflare Pages 拿到的 https://xxx.pages.dev, 走 path-based
+  //   TMDB API + 图片加速. UI 在「数据源」section TMDB 数据源 selector
+  //   下面一行单独输入, 默认空, 跟 [TMDB API Key] 输入框同 UX.
+  String _tmdbProxyDomain = '';
 
   // v2.1.22: 日记 section 配置 (跟 DiaryService 同步)
   bool _diaryClearOnExit = true;
@@ -108,8 +117,12 @@ class _UserMenuState extends State<UserMenu> {
     // v2.0.93: TMDB API key — 决定详情页大头部走 TMDB 精准 backdrop
     final tmdbApiKey = await UserDataService.getTmdbApiKey();
     final tmdbConfigured = tmdbApiKey != null && tmdbApiKey.isNotEmpty;
-    // v2.0.97: TMDB 数据源 — 跟 Bangumi 数据源一样 UX, 3 选 1
+    // v2.0.97: TMDB 数据源 — 跟 Bangumi 数据源一样 UX, 2 选 1
+    // v2.1.41 改: 加 'tmdb_proxy' (用户自部署 CF Worker 加速, 跟视频
+    //   加速是 2 个独立 worker). 删 'off' (用户反馈「这个关闭不要」).
     final tmdbDataSource = await UserDataService.getTmdbDataSourceKey();
+    // v2.1.41: TMDB 代理 URL — 用户在 UI 输入的自部署 worker 地址
+    final tmdbProxyDomain = await UserDataService.getTmdbProxyDomain();
 
     // v2.1.22: 日记 section 配置
     final diaryClearOnExit = DiaryService.clearOnExit;
@@ -140,6 +153,7 @@ class _UserMenuState extends State<UserMenu> {
         _doubanLoggedIn = doubanLoggedIn;
         _tmdbConfigured = tmdbConfigured;
         _tmdbDataSource = tmdbDataSource;
+        _tmdbProxyDomain = tmdbProxyDomain;
         _diaryClearOnExit = diaryClearOnExit;
         _diaryMaxEntries = diaryMaxEntries;
         _diaryPersist = diaryPersist;
@@ -582,6 +596,203 @@ class _UserMenuState extends State<UserMenu> {
                 ctx,
                 fontSize: 14,
                 color: const Color(0xFF3b82f6),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+  }
+
+  // v2.1.41: 弹出 TMDB 代理 URL 输入对话框
+  //   用户从 [djsevenx1/tmdb-proxy] 部署到 Cloudflare Pages 拿到的
+  //   https://xxx.pages.dev 粘进来. 自动强转 https://, 去尾斜杠 / 空白.
+  //   空 = 清空. 选 'TMDB Worker 加速' 但这 URL 没配 → 弹 SnackBar
+  //   警告, 自动回落 '直连' (见上面 selector onChanged).
+  Future<void> _openTmdbProxyDomainDialog() async {
+    final current = await UserDataService.getTmdbProxyDomain();
+    final controller = TextEditingController(text: current);
+    controller.selection =
+        TextSelection(baseOffset: 0, extentOffset: current.length);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(LucideIcons.cloud, size: 20, color: Color(0xFF22C55E)),
+            const SizedBox(width: 8),
+            Text(
+              'TMDB 代理 URL',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 18,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '部署 [djsevenx1/tmdb-proxy] 到 Cloudflare Pages, 拿到 https://xxx.pages.dev 粘到这里. 配上后「TMDB 数据源」选「TMDB Worker 加速」即走 CF 加速, 解决国内 GFW 问题.',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '不填 = 走「直连」 (国内 GFW, 配 VPN 才通). 自动强转 https://, 去尾斜杠.',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 1,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              style: FontUtils.sourceCodePro(
+                ctx,
+                fontSize: 13,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+              ),
+              decoration: InputDecoration(
+                hintText: 'https://tmdb-8d1.pages.dev',
+                hintStyle: FontUtils.sourceCodePro(
+                  ctx,
+                  fontSize: 12,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF6b7280)
+                      : const Color(0xFF9ca3af),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (current.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await UserDataService.saveTmdbProxyDomain('');
+                // v2.1.41: 清了 URL 后如果当前选的是 tmdb_proxy, 自动
+                //   切回 direct, 避免 UI 显示「TMDB Worker 加速」但
+                //   URL 是空的 (点了选 direct 反而会落回 tmdb_proxy,
+                //   状态错乱). await 必须在 setState 外面, setState
+                //   回调是 sync 的不能用 await.
+                if (_tmdbDataSource == 'tmdb_proxy') {
+                  await UserDataService.saveTmdbDataSource('direct');
+                }
+                if (!ctx.mounted) return;
+                Navigator.of(ctx).pop();
+                if (!mounted) return;
+                setState(() {
+                  _tmdbProxyDomain = '';
+                  _tmdbDataSource = (UserDataService.getTmdbDataSourceSync() == 'tmdb_proxy')
+                      ? 'direct'
+                      : UserDataService.getTmdbDataSourceSync();
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('已清除 TMDB 代理 URL')),
+                );
+              },
+              child: Text(
+                '清除',
+                style: FontUtils.poppins(
+                  ctx,
+                  fontSize: 14,
+                  color: const Color(0xFFef4444),
+                ),
+              ),
+            ),
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(
+                text:
+                    '1. 打开 https://github.com/djsevenx1/tmdb-proxy\n2. Fork 或 Clone 仓库到本地\n3. 在 Cloudflare Dashboard 选 Workers & Pages → Create application → Pages → Upload assets, 把仓库根目录 (含 _worker.js) 上传\n4. 部署完拿到 https://<project>.pages.dev, 粘到这',
+              ));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                    content: Text('已复制部署步骤 (Fork djsevenx1/tmdb-proxy 上 CF Pages)')),
+              );
+            },
+            child: Text(
+              '查看步骤',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              '取消',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final input = controller.text.trim();
+              final cleaned =
+                  await UserDataService.saveTmdbProxyDomain(input);
+              if (!ctx.mounted) return;
+              Navigator.of(ctx).pop();
+              if (!mounted) return;
+              setState(() {
+                _tmdbProxyDomain = cleaned ?? '';
+                // v2.1.41: 刚配的 URL, 不自动切数据源, 尊重用户原选择.
+                //   万一用户只是想先存 URL 备用, 切了反而骚扰.
+                //   留个 snackbar 提示一下.
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(input.isEmpty
+                      ? '已清除 TMDB 代理 URL'
+                      : '已保存 TMDB 代理 URL, 在「TMDB 数据源」选「TMDB Worker 加速」即生效'),
+                ),
+              );
+            },
+            child: Text(
+              '保存',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: const Color(0xFF22C55E),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1437,17 +1648,43 @@ class _UserMenuState extends State<UserMenu> {
               // v2.1.40: 删 CF Worker / CORS 公共代理, 改回 '已关闭' +
               //   '直连' 2 选 1. "已关闭" 重新加回来 — 现在没加速可挑,
               //   反而需要个明确"关闭 TMDB" 的语义, 跟"直连"区分开.
+              // v2.1.41 改: 删 '已关闭' (用户反馈「这个关闭不要」),
+              //   加 'TMDB Worker 加速' (用户自部署 [djsevenx1/tmdb-proxy]
+              //   走 path-based 加速). 2 选 1: 'TMDB Worker 加速' / '直连'.
+              //   'TMDB Worker 加速' 但 _tmdbProxyDomain 没配 → 弹
+              //   SnackBar 警告 + 自动回落到 '直连' (跟 v2.1.40 之前
+              //   cf_worker 没配域名兜底行为一致). 下方新加
+              //   [TMDB 代理 URL] 输入行, 单独配 worker URL, 跟
+              //   [TMDB API Key] (在「海报墙」section) 同 UX.
               _buildOptionSelector(
                 title: 'TMDB 数据源',
                 currentValue: UserDataService.getTmdbDataSourceDisplayName(
                     _tmdbDataSource),
                 options: const [
+                  'TMDB Worker 加速',
                   '直连',
-                  '已关闭',
                 ],
                 onChanged: (value) async {
                   final key = UserDataService
                       .getTmdbDataSourceKeyFromDisplayName(value);
+                  // v2.1.41: 选了 'tmdb_proxy' 但 URL 没配 → 警告 + 落 'direct'
+                  if (key == 'tmdb_proxy' && _tmdbProxyDomain.isEmpty) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '请先在下方「TMDB 代理 URL」输入 worker 地址, 已自动回落「直连」',
+                        ),
+                        duration: Duration(seconds: 3),
+                      ),
+                    );
+                    await UserDataService.saveTmdbDataSource('direct');
+                    if (!mounted) return;
+                    setState(() {
+                      _tmdbDataSource = 'direct';
+                    });
+                    return;
+                  }
                   await UserDataService.saveTmdbDataSource(key);
                   if (!mounted) return;
                   setState(() {
@@ -1457,6 +1694,7 @@ class _UserMenuState extends State<UserMenu> {
                   //   配了 key 的用户切了直接生效, 不打扰.
                   // v2.1.19: 行为不变, 只是挪位置 + 删"已关闭".
                   // v2.1.40: 行为不变.
+                  // v2.1.41: 行为不变 (没配 TMDB API Key 还是走豆瓣).
                   if (!_tmdbConfigured) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -1472,6 +1710,26 @@ class _UserMenuState extends State<UserMenu> {
                 iconColor: _tmdbConfigured
                     ? const Color(0xFFec4899)
                     : const Color(0xFF9ca3af),
+              ),
+              _buildDivider(),
+              // v2.1.41: TMDB 代理 URL 输入行 — 用户自部署 [djsevenx1/tmdb-proxy]
+              //   到 Cloudflare Pages 拿到的 https://xxx.pages.dev. 配了
+              //   「TMDB 数据源」选 'TMDB Worker 加速' 才会用上, 没配选
+              //   '直连' 也允许配 (先存着, 切的时候不用再输一次).
+              //   跟 [TMDB API Key] (在「海报墙」section) 同 UX — 点击
+              //   弹 dialog, 单行 TextField, 保存.
+              _buildInputOption(
+                title: 'TMDB 代理 URL',
+                currentValue: _tmdbProxyDomain.isEmpty
+                    ? '未配置'
+                    : _tmdbProxyDomain,
+                onTap: _openTmdbProxyDomainDialog,
+                icon: _tmdbProxyDomain.isEmpty
+                    ? LucideIcons.cloudOff
+                    : LucideIcons.cloud,
+                iconColor: _tmdbProxyDomain.isEmpty
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF22C55E),
               ),
             ],
           ),

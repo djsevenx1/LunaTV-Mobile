@@ -1,5 +1,8 @@
 // 通用图片地址处理工具
 //
+// v2.1.41 改: TMDB 分支调 [UserDataService.buildTmdbImageUrl], 内部
+//   看 TMDB 数据源是不是 'tmdb_proxy' + 配 worker URL, 是的话 wrap
+//   成 path-based worker URL. 没配/没选 → 1:1 返原 URL.
 // v2.1.40 改: 删 TMDB / Bangumi 加速代码 (CF Worker 探测 / ciao-cors 包装
 //   / worker 健康检查) 整段, 一律直连. Douban 加速保留 (CDN 切换 / 高清升级
 //   不是 TMDB/Bangumi 加速, 用户没让删, 也不属于本次任务范围).
@@ -103,9 +106,13 @@ Future<String> getImageUrl(
     }
     return originalUrl.replaceFirst('http://', 'https://');
   }
-  // v2.1.40: TMDB 图片 URL 不再 wrap, 一律直连 image.tmdb.org.
+  // v2.1.41: TMDB 图片 URL 调 [UserDataService.buildTmdbImageUrl], 内部
+  //   按当前 TMDB 数据源选择 + worker URL 配置决定是否走 path-based
+  //   worker 加速 (例: https://image.tmdb.org/t/p/w1280/abc.jpg →
+  //   https://tmdb-8d1.pages.dev/image/t/p/w1280/abc.jpg). 老 v2.1.40
+  //   直连逻辑保留 (没选 tmdb_proxy 或没配 worker URL 时 1:1 返).
   if (source == 'tmdb' && originalUrl.isNotEmpty) {
-    return originalUrl;
+    return UserDataService.buildTmdbImageUrl(originalUrl);
   }
   return originalUrl;
 }

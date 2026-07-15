@@ -30,16 +30,25 @@ class UserDataService {
   //   coverUrl, 行为完全不变 (跟「豆瓣登录」「优选 IP」同 UX: 字段本身
   //   就是开关, 不另加 toggle).
   static const String _tmdbApiKeyKey = 'tmdb_api_key';
-  // v2.0.97: TMDB 数据源 — 跟 Bangumi 数据源一样 UX, 3 选 1.
-  //   - 'cf_worker' (默认): 配 worker 时 wrap `https://$worker/?url=...`,
-  //     没配 worker 域名时直连. 跟 v2.0.94 ~ v2.0.96 行为一致.
-  //   - 'direct': 强制直连 api.themoviedb.org / image.tmdb.org, 不走
-  //     worker 加速. 给用户在国内 worker 域名被墙 / 想用真直连的时用.
-  //   - 'off': 配了 TMDB key 也强制不走 TMDB, 直接返 null. 跟没配 key
-  //     行为完全一致 (大背景走豆瓣 coverUrl). 给临时关掉 TMDB 但保留
-  //     key 字段的用户用 (e.g. 觉得 TMDB 识别不准, 临时回退豆瓣,
-  //     缓存还在, 想开再切回).
+  // v2.0.97: TMDB 数据源 — 跟 Bangumi 数据源一样 UX, 2 选 1.
+  //   - 'tmdb_proxy' (v2.1.41 新): 走用户自部署 CF Worker 加速 (如
+  //     https://tmdb-8d1.pages.dev/), path-based API + 图片代理. 用户
+  //     在「数据源」section 配 worker URL, App 调 TMDB 时拼成
+  //     `${workerUrl}/movie/xxx?api_key=...` (api_key 透传, Worker 不需要
+  //     配 env). 配了 worker URL 但没配 API key → 跟 v2.1.40 一样 skip.
+  //   - 'direct' (默认): 强制直连 api.themoviedb.org / image.tmdb.org.
+  //     国内直连 100% 不可用 (GFW), 配了 CF Worker 域名也没用, 想用 TMDB
+  //     必须走 VPN. 切 tmdb_proxy 才能用国内 Worker 加速.
+  // v2.1.41 改: 删 'off' / 'cf_worker' / 'cors_proxy'. 'off' 删 (用户反馈
+  //   "这个关闭不要"). 'cf_worker' / 'cors_proxy' 在 v2.1.40 已删, 老值
+  //   自动 migrate.
   static const String _tmdbDataSourceKey = 'tmdb_data_source';
+  // v2.1.41: TMDB 代理 URL — 用户自部署的 CF Worker (e.g.
+  //   https://tmdb-8d1.pages.dev/), 走 path-based 加速. 跟 v2.0.77
+  //   _cfWorkerDomainKey 区分: _cfWorkerDomainKey 是视频加速 (CORSAPI
+  //   套娃), _tmdbProxyDomainKey 是 TMDB API + 图片 (独立 worker, 部署
+  //   在 [djsevenx1/tmdb-proxy]). 不共用, 互不影响.
+  static const String _tmdbProxyDomainKey = 'tmdb_proxy_domain';
 
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -57,6 +66,8 @@ class UserDataService {
   static String? _tmdbApiKeyCache;
   // v2.0.97
   static String? _tmdbDataSourceCache;
+  // v2.1.41
+  static String? _tmdbProxyDomainCache;
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -524,39 +535,72 @@ class UserDataService {
     await saveTmdbApiKey(null);
   }
 
-  // ===== v2.1.40: TMDB 数据源 (v2.1.40 删 cf_worker / cors_proxy, 只留 direct / off) =====
+  // ===== v2.1.41: TMDB 数据源 (v2.1.40 删 cf_worker / cors_proxy, v2.1.41 删 off, 加 tmdb_proxy) =====
 
-  /// 保存 TMDB 数据源 (key 值: 'direct' / 'off')
+  /// 保存 TMDB 数据源 (key 值: 'tmdb_proxy' / 'direct')
   ///
+  /// v2.1.41 改: 加 'tmdb_proxy' (用户自部署 CF Worker 加速, 见
+  ///   [_tmdbProxyDomainKey]). 删 'off' (用户反馈「这个关闭不要」).
+  ///   'tmdb_proxy' 但 worker URL 没配 → 自动回落到 'direct' (不报错,
+  ///   跟老 cf_worker 行为一致: 配 worker 域名才生效).
   /// v2.1.40 改: 删 'cf_worker' / 'cors_proxy'. 删 TMDB 加速代码后
   ///   只剩 2 选 1. 老用户存的 'cf_worker' / 'cors_proxy' 自动
   ///   migrate 到 'direct'.
   static Future<void> saveTmdbDataSource(String key) async {
-    final cleaned = (key == 'off') ? 'off' : 'direct';
+    String cleaned;
+    if (key == 'tmdb_proxy') {
+      // v2.1.41: tmdb_proxy 但 URL 没配 → 直接落 'direct', 不污染 store.
+      final proxy = getTmdbProxyDomainSync();
+      cleaned = proxy.isNotEmpty ? 'tmdb_proxy' : 'direct';
+    } else if (key == 'direct') {
+      cleaned = 'direct';
+    } else {
+      // 兜底: 老值 'off' / 'cf_worker' / 'cors_proxy' / 任何脏数据 → 'direct'
+      cleaned = 'direct';
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tmdbDataSourceKey, cleaned);
     _tmdbDataSourceCache = cleaned;
   }
 
-  /// 异步读 TMDB 数据源 key, 默认 'direct'
+  /// 异步读 TMDB 数据源 key, 默认值看 worker URL 是否配了
+  ///
+  /// v2.1.41 改: 默认值不再是死写 'direct'. 配了 worker URL 默认
+  ///   'tmdb_proxy' (用户大概率是知道这个功能才配的, 默认开启),
+  ///   没配默认 'direct' (worker URL 都没配, tmdb_proxy 选了也走
+  ///   不通). 老用户存的值保持不变 (尊重用户选择).
   static Future<String> getTmdbDataSourceKey() async {
     if (_tmdbDataSourceCache != null) return _tmdbDataSourceCache!;
     final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_tmdbDataSourceKey) ?? 'direct';
-    _tmdbDataSourceCache = v;
-    return v;
+    final v = prefs.getString(_tmdbDataSourceKey);
+    if (v != null && (v == 'tmdb_proxy' || v == 'direct')) {
+      _tmdbDataSourceCache = v;
+      return v;
+    }
+    // 老值 / 没存 → 按 worker URL 推断默认
+    final proxy = getTmdbProxyDomainSync();
+    final def = proxy.isNotEmpty ? 'tmdb_proxy' : 'direct';
+    _tmdbDataSourceCache = def;
+    return def;
   }
 
   /// 同步读 TMDB 数据源 key (build 时用, 比如 TmdbService._buildTmdbApiUrl)
   static String getTmdbDataSourceSync() {
-    return _tmdbDataSourceCache ?? 'direct';
+    if (_tmdbDataSourceCache != null) return _tmdbDataSourceCache!;
+    // 缓存没 warmup (老路径), 兜底走 default — 配了 worker URL 用 tmdb_proxy
+    final proxy = getTmdbProxyDomainSync();
+    return proxy.isNotEmpty ? 'tmdb_proxy' : 'direct';
   }
 
   /// key 值 → 显示名
+  ///
+  /// v2.1.41 改: 'tmdb_proxy' → 'TMDB Worker 加速', 删 'off' → '已关闭'.
+  ///   跟视频加速「CF Worker 加速」section 区分 (那是 CORSAPI 套娃,
+  ///   这里是 [djsevenx1/tmdb-proxy] path-based, 部署在 tmdb-8d1.pages.dev).
   static String getTmdbDataSourceDisplayName(String key) {
     switch (key) {
-      case 'off':
-        return '已关闭';
+      case 'tmdb_proxy':
+        return 'TMDB Worker 加速';
       case 'direct':
       default:
         return '直连';
@@ -566,12 +610,76 @@ class UserDataService {
   /// 显示名 → key 值
   static String getTmdbDataSourceKeyFromDisplayName(String name) {
     switch (name) {
-      case '已关闭':
-        return 'off';
+      case 'TMDB Worker 加速':
+        return 'tmdb_proxy';
       case '直连':
       default:
         return 'direct';
     }
+  }
+
+  // ===== v2.1.41: TMDB 代理 URL (用户自部署 CF Worker 加速) =====
+  //
+  // 用户场景: 部署 [djsevenx1/tmdb-proxy] (fork HuntzzZ/tmdb-proxy 加
+  //   Bangumi 路由) 到 Cloudflare Pages, 拿到一个 https://xxx.pages.dev
+  //   地址, 粘到这. App 调 TMDB API / 加载 TMDB 图时拼成
+  //   `${workerUrl}/movie/xxx?api_key=${userKey}` / `${workerUrl}/image/...`,
+  //   path-based 走 worker, 解决国内直连 GFW 问题. 跟 _cfWorkerDomainKey
+  //   (视频加速 CORSAPI) 完全独立, 互不干扰.
+
+  /// 保存 TMDB 代理 URL. 空串 = 清空. 返回清理后的字符串, null 表示输入无效.
+  ///
+  /// 接受格式 (大小写不敏感):
+  ///   - "tmdb-8d1.pages.dev"            → "https://tmdb-8d1.pages.dev"
+  ///   - "https://tmdb-8d1.pages.dev"    → "https://tmdb-8d1.pages.dev"
+  ///   - "https://tmdb-8d1.pages.dev/"   → "https://tmdb-8d1.pages.dev"  (去尾斜杠)
+  ///   - "http://tmdb-8d1.pages.dev"     → "https://tmdb-8d1.pages.dev"  (强转 https)
+  ///   - "  https://tmdb-8d1.pages.dev  "→ "https://tmdb-8d1.pages.dev"  (去空白)
+  ///
+  /// 无效输入 (空 / 解析失败 / 无 host) → 返回 null, prefs 不写.
+  static Future<String?> saveTmdbProxyDomain(String input) async {
+    final cleaned = _cleanWorkerBaseUrl(input);
+    final prefs = await SharedPreferences.getInstance();
+    if (cleaned == null) {
+      await prefs.remove(_tmdbProxyDomainKey);
+      _tmdbProxyDomainCache = '';
+    } else {
+      await prefs.setString(_tmdbProxyDomainKey, cleaned);
+      _tmdbProxyDomainCache = cleaned;
+    }
+    return cleaned;
+  }
+
+  /// 同步读 TMDB 代理 URL (build 时用, 比如 TmdbService._buildTmdbApiUrl).
+  /// 空串 = 没配.
+  static String getTmdbProxyDomainSync() {
+    return _tmdbProxyDomainCache ?? '';
+  }
+
+  /// 异步读 TMDB 代理 URL. 空串 = 没配.
+  static Future<String> getTmdbProxyDomain() async {
+    if (_tmdbProxyDomainCache != null) return _tmdbProxyDomainCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_tmdbProxyDomainKey) ?? '';
+    _tmdbProxyDomainCache = v;
+    return v;
+  }
+
+  /// 校验/清理 TMDB 代理 URL. 返回 null = 无效 (清空).
+  /// 强转 https://, 去尾斜杠 / 空白 / 协议, 保留 host:port.
+  static String? _cleanWorkerBaseUrl(String input) {
+    final s = input.trim().replaceAll(RegExp(r'\s+'), '');
+    if (s.isEmpty) return null;
+    // 强转 https (Cloudflare Pages 只发 https, http 上去也会 301)
+    String withScheme = s;
+    if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(withScheme)) {
+      withScheme = 'https://$withScheme';
+    }
+    withScheme = withScheme.replaceFirst(
+        RegExp(r'^http://', caseSensitive: false), 'https://');
+    final u = Uri.tryParse(withScheme);
+    if (u == null || u.host.isEmpty) return null;
+    return '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}';
   }
 
   /// 同步读 (启动 warmup 后用)
@@ -817,11 +925,31 @@ class UserDataService {
 
   /// 构造 TMDB 图片请求 URL
   ///
-  /// v2.1.40 改: 删 CF Worker / ciao-cors 加速, 一律直连 image.tmdb.org.
-  ///   老 4 选 1 逻辑 (cf_worker / cors_proxy / direct / off) 全删, 现在
-  ///   只看 TMDB 数据源是不是 'off' (整体关闭) — 关闭了仍返原 URL
-  ///   (上层 fetchArt 入口就 return null 了, 这里只是兜底).
+  /// v2.1.41 改: 加 'tmdb_proxy' 分支 — TMDB 数据源选 worker 加速且
+  ///   配了 worker URL 时, 走 path-based: 把 `https://image.tmdb.org`
+  ///   前缀换成 `${workerUrl}/image`, 例:
+  ///     https://image.tmdb.org/t/p/w1280/abc.jpg
+  ///     → https://tmdb-8d1.pages.dev/image/t/p/w1280/abc.jpg
+  ///   worker 端 ([djsevenx1/tmdb-proxy] fork HuntzzZ) 拿 `/image/...`
+  ///   path 转给 image.tmdb.org, 顺带做 1 天 Cache-Control. 跟
+  ///   v2.0.74 之前 cf_worker 套娃 (用 `?url=` 转) 不一样: path-based
+  ///   worker 不需要 URL encode, 日志 / 日记 / Cache-Control 都干净.
+  ///
+  /// v2.1.40 改: 删 cf_worker / ciao-cors 加速, 1:1 返原 URL.
+  /// v2.1.41: 仍然 1:1 返 (老用户 + 未配 worker URL 的). 新分支
+  ///   只在 source='tmdb_proxy' 且 worker URL 已配时触发.
   static String buildTmdbImageUrl(String originalUrl) {
+    if (originalUrl.isEmpty) return originalUrl;
+    final source = getTmdbDataSourceSync();
+    if (source == 'tmdb_proxy') {
+      final proxy = getTmdbProxyDomainSync();
+      if (proxy.isNotEmpty && originalUrl.startsWith('https://image.tmdb.org')) {
+        return originalUrl.replaceFirst(
+          'https://image.tmdb.org',
+          '$proxy/image',
+        );
+      }
+    }
     return originalUrl;
   }
 
@@ -856,7 +984,20 @@ class UserDataService {
     // v2.0.97: 缓存 TMDB 数据源, 给 TmdbService._buildTmdbApiUrl 同步读
     if (_tmdbDataSourceCache == null) {
       final prefs = await SharedPreferences.getInstance();
-      _tmdbDataSourceCache = prefs.getString(_tmdbDataSourceKey) ?? 'direct';
+      final stored = prefs.getString(_tmdbDataSourceKey);
+      if (stored == 'tmdb_proxy' || stored == 'direct') {
+        _tmdbDataSourceCache = stored;
+      } else {
+        // 老值 / 没存 → 按 worker URL 推断默认
+        final proxy = prefs.getString(_tmdbProxyDomainKey) ?? '';
+        _tmdbDataSourceCache = proxy.isNotEmpty ? 'tmdb_proxy' : 'direct';
+      }
+    }
+    // v2.1.41: 缓存 TMDB 代理 URL, 给 TmdbService._buildTmdbApiUrl /
+    //   buildTmdbImageUrl 同步读
+    if (_tmdbProxyDomainCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _tmdbProxyDomainCache = prefs.getString(_tmdbProxyDomainKey) ?? '';
     }
   }
 }

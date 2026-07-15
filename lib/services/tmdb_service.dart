@@ -96,14 +96,42 @@ class TmdbService {
     return current.trim();
   }
 
-  /// v2.1.40: 构造 API / image URL — 删 cf_worker / cors_proxy 加速, 只直连
+  /// v2.1.41: 构造 API / image URL — 加 'tmdb_proxy' 分支 (用户自部署
+  ///   CF Worker 加速, 部署在 [djsevenx1/tmdb-proxy] fork HuntzzZ).
   ///
   /// v2.1.40 改: 删 'cf_worker' (CORSAPI 套娃) 和 'cors_proxy' (ciao-cors
-  ///   公共代理) 两个分支. 现在 TMDB 数据源只有 'direct' (直连) /
-  ///   'off' (已关闭) 2 选 1, 本函数对 'direct' 直接返原 URL.
+  ///   公共代理) 两个分支. v2.1.40 ~ v2.1.40.x TMDB 数据源只有
+  ///   'direct' / 'off' 2 选 1, 本函数对 'direct' 直接返原 URL.
   ///   'off' 情况调用方 (search/fetchArt) 入口就 return null 了, 不会到这里.
   ///   老加速代码 (worker 域名判断 / ciao-cors 包装) 全删.
+  /// v2.1.41 改: 加 'tmdb_proxy' 分支, 走 path-based API:
+  ///   原始 URL:  https://api.themoviedb.org/3/movie/550?api_key=xxx&...
+  ///   拼成 URL:  https://<worker>/movie/550?api_key=xxx&...
+  ///   (剥 api.themoviedb.org/3 前缀, worker 端 handleTmdbApi 收
+  ///    /movie/550 自动加 /3 拼回上游). 跟 CORSAPI 套娃 (`?url=`)
+  ///    不一样: path-based worker 不需要 URL encode, 日志干净.
+  ///   api_key 从 App 存的 UserDataService.getTmdbApiKeySync() 读,
+  ///   worker 优先用 env.TMDB_API_KEY, 没有就用客户端 ?api_key= 透传.
+  ///   worker URL 没配 / 解析失败 → 兜底返原 URL (跟没配 worker 一样走
+  ///   direct 直连, 国内 GFW 还是不通, 但代码层不崩).
   static String _buildTmdbApiUrl(String fullUrl, String source) {
+    if (source == 'tmdb_proxy') {
+      final proxy = UserDataService.getTmdbProxyDomainSync();
+      if (proxy.isNotEmpty) {
+        // fullUrl 形如 'https://api.themoviedb.org/3/movie/550?api_key=xxx'
+        // 找 '/3' 位置, 后面是 '/movie/550?...'
+        final idx = fullUrl.indexOf('/3/');
+        if (idx > 0) {
+          final rest = fullUrl.substring(idx + 2); // 跳过 '/3'
+          // worker 端 handleTmdbApi 期望 pathname 形如 /movie/550
+          // api_key 走 query string 透传, 调用方 _httpGetWithFallback
+          // 的 origUrl 已经带了 api_key (TmdbService.search / fetchArt
+          // / fetchOverview / fetchCredits 全自己拼的), rest 里就有.
+          // 这里不动 query, 直接拼 proxy.
+          return '$proxy$rest';
+        }
+      }
+    }
     // v2.1.40: 删加速后只剩 'direct' 路径, 1:1 返原 URL.
     return fullUrl;
   }
