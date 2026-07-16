@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/video_proxy_server.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/screens/cf_ip_speed_test_page.dart'; // v2.0.82: IP 优选测速新页面
 
@@ -31,10 +35,43 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
   bool _videoProxyEnabled = false;
   bool _loading = true;
 
+  // v2.1.40: 实时状态 — 2s 轮询一次 VideoProxyStatus, 加速失败时实时显示
+  Timer? _statusTimer;
+  VideoProxyStatus _status = VideoProxyStatus.snapshot;
+
+  String _lastStatusSnapshot = '';
+
   @override
   void initState() {
     super.initState();
     _load();
+    // v2.1.40: 启动轮询, 加速链路页打开期间持续更新状态
+    _statusTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _refreshStatus(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _statusTimer?.cancel();
+    super.dispose();
+  }
+
+  void _refreshStatus() {
+    if (!mounted) return;
+    // v2.1.40: 序列化关键字段做字符串比较, 没变就不 rebuild
+    final snap = VideoProxyStatus.snapshot;
+    final sig =
+        '${snap.tryStartInvoked}|${snap.tryStartResult}|${snap.tryStartFailReason}|'
+        '${snap.lastFetchAt?.millisecondsSinceEpoch}|${snap.lastFetchStatus}|'
+        '${snap.lastFetchError}|${snap.lastFetchUsedIp}|${snap.totalFetches}|'
+        '${snap.totalFetchErrors}|${snap.totalM3u8Hits}';
+    if (sig == _lastStatusSnapshot) return;
+    setState(() {
+      _status = snap;
+      _lastStatusSnapshot = sig;
+    });
   }
 
   Future<void> _load() async {
@@ -797,6 +834,8 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
                   children: [
                     _buildInfoCard(isDark),
                     _buildSectionHeader('代理加速', LucideIcons.rocket, isDark),
+                    // v2.1.40: 实时状态卡片 — 加速失败时立刻看到原因
+                    _buildRealtimeStatusCard(isDark),
                     // v2.0.76: 两个开关语义重定义
                     //   上面 "视频代理" — 只控制视频, 关 = 视频直连原源
                     //   下面 "优选 IP 启用" — 控制所有资源 (视频 / 图片 / TMDB / Bangumi) 是否用优选 IP
@@ -868,5 +907,226 @@ class _CfAccelerationPageState extends State<CfAccelerationPage> {
         );
       },
     );
+  }
+
+  // ─── v2.1.40: 实时状态卡片 ─────────────────────────────────────
+  //
+  // 加速链路页打开期间 2s 轮询 VideoProxyStatus. 加速失败时立刻显示原因
+  //   (开关关 / 域名没配 / 优选 IP 解析失败 / 上游拒代理 等),
+  //   不需要用户去翻日记看 [VideoProxy] tag. 配合底下"复制失败摘要"
+  //   按钮可以直接贴到 issue / 反馈.
+  Widget _buildRealtimeStatusCard(bool isDark) {
+    final cardColor = isDark ? const Color(0xFF1c1c1c) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF2a2a2a) : const Color(0xFFe5e7eb);
+    final titleColor = isDark ? Colors.white : const Color(0xFF1f2937);
+
+    // 计算综合状态
+    final stat = _status;
+    final tryStartOk = stat.tryStartResult == true;
+    final tryStartFailed = stat.tryStartInvoked && stat.tryStartResult != true;
+    final lastFetchErr = stat.lastFetchError != null;
+    final lastFetchBadStatus =
+        stat.lastFetchStatus != null && stat.lastFetchStatus! >= 400;
+    final hasIssue = tryStartFailed || lastFetchErr || lastFetchBadStatus;
+
+    // 状态点颜色 + 文本
+    final Color dotColor;
+    final String statusText;
+    if (!stat.tryStartInvoked) {
+      dotColor = const Color(0xFF9ca3af); // 灰
+      statusText = '尚未触发 (还没放过视频)';
+    } else if (tryStartOk && !hasIssue) {
+      dotColor = const Color(0xFF22c55e); // 绿
+      statusText = '运行正常';
+    } else if (tryStartFailed) {
+      dotColor = const Color(0xFFef4444); // 红
+      statusText = '代理未启动';
+    } else {
+      dotColor = const Color(0xFFf59e0b); // 橙黄
+      statusText = '代理运行中, 上游有错误';
+    }
+
+    // 关键信息行
+    final List<Widget> rows = [];
+
+    // 1. tryStart 决策
+    if (stat.tryStartInvoked) {
+      final ts = stat.tryStartAt;
+      final tsStr = ts == null
+          ? ''
+          : '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}:${ts.second.toString().padLeft(2, '0')}';
+      if (tryStartOk) {
+        rows.add(_kv('tryStart', '✅ 代理已起 port=${stat.lastPort} ($tsStr)'));
+      } else {
+        rows.add(_kv('tryStart', '❌ ${stat.tryStartFailReason ?? "未知原因"} ($tsStr)'));
+      }
+    }
+
+    // 2. 优选 IP 实际状态
+    final manualInput = CfOptimizerHttpOverrides.getManualPreferredIpForUi();
+    final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    final resolvedAt = CfOptimizerHttpOverrides.getResolvedAtHuman();
+    String ipLine;
+    if (manualInput.isEmpty) {
+      ipLine = '⚪ 未配优选 IP (走系统 DNS)';
+    } else if (resolvedIp == null) {
+      ipLine = '⚠️ 手动=$manualInput, 未解析成功';
+    } else {
+      final enabled = _cfWorkerEnabled;
+      ipLine = enabled
+          ? '🟢 优选IP=$resolvedIp (手动=$manualInput, 解析=$resolvedAt)'
+          : '🟡 开关关, 手动=$manualInput 解析了但没用 (走系统 DNS)';
+    }
+    rows.add(_kv('优选 IP', ipLine));
+
+    // 3. 上游 fetch 最近一次
+    if (stat.lastFetchAt != null) {
+      final ago = DateTime.now().difference(stat.lastFetchAt!).inSeconds;
+      final agoStr = ago < 60 ? '${ago}s前' : '${ago ~/ 60}m前';
+      final errBit =
+          stat.lastFetchError != null ? ' ⚠️ ${stat.lastFetchError}' : '';
+      final statusBit = stat.lastFetchStatus != null
+          ? 'status=${stat.lastFetchStatus} '
+          : '';
+      final m3u8Bit = stat.totalM3u8Hits > 0 ? 'm3u8×${stat.totalM3u8Hits} ' : '';
+      rows.add(_kv(
+          '最近 fetch ($agoStr)',
+          '$statusBit$errBit ${stat.lastFetchUsedIp ?? "?"} ${stat.lastFetchMs ?? 0}ms $m3u8Bit'
+              .trim()));
+    } else if (stat.totalFetches > 0) {
+      rows.add(_kv('累计', 'fetch×${stat.totalFetches}, 错误×${stat.totalFetchErrors}'));
+    }
+
+    // 4. 累计统计 (总览, 永远显示)
+    if (stat.totalFetches > 0) {
+      rows.add(_kv(
+          '累计',
+          'fetch ${stat.totalFetches} 次'
+              ' · 错误 ${stat.totalFetchErrors} 次'
+              ' · m3u8 ${stat.totalM3u8Hits} 次'));
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: hasIssue
+              ? const Color(0xFFef4444).withOpacity(0.4)
+              : borderColor,
+          width: hasIssue ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: dotColor.withOpacity(0.4),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '实时加速状态',
+                style: FontUtils.poppins(context,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: titleColor),
+              ),
+              const Spacer(),
+              Text(
+                statusText,
+                style: FontUtils.poppins(context,
+                    fontSize: 11,
+                    color: dotColor,
+                    fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          if (rows.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ...rows,
+          ],
+          if (hasIssue) ...[
+            const SizedBox(height: 10),
+            // 一键复制失败摘要, 反馈时贴出去就行
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  final lines = <String>[
+                    '【LunaTV 加速诊断摘要】',
+                    '时间: ${DateTime.now().toIso8601String()}',
+                    '开关: 视频代理=$_videoProxyEnabled 优选IP=$_cfWorkerEnabled',
+                    '域名: $_cfWorkerDomain',
+                    '优选IP配置: $manualInput (resolved=${resolvedIp ?? "null"} @ $resolvedAt)',
+                    'tryStart: ${stat.tryStartResult}  ${stat.tryStartFailReason ?? ""}',
+                    '最近 fetch: ${stat.lastFetchAt}',
+                    '  status=${stat.lastFetchStatus}',
+                    '  IP=${stat.lastFetchUsedIp}',
+                    '  err=${stat.lastFetchError}',
+                    '累计 fetch=${stat.totalFetches} 错误=${stat.totalFetchErrors}',
+                  ];
+                  // 用一个完整版的复制: 走 Clipboard 静态方法
+                  _copyToClipboard(lines.join('\n'));
+                },
+                icon: const Icon(LucideIcons.copy, size: 14),
+                label: const Text('复制诊断摘要',
+                    style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFef4444),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String k, String v) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(fontSize: 12, color: Color(0xFF6b7280)),
+          children: [
+            TextSpan(
+              text: '$k: ',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            TextSpan(text: v),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _copyToClipboard(String text) {
+    // 简单调用 Clipboard — 失败也不抛
+    try {
+      Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('诊断摘要已复制, 可贴到反馈')),
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('copy failed: $e');
+    }
   }
 }

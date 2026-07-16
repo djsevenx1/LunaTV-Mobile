@@ -480,6 +480,10 @@ class CfOptimizerHttpOverrides extends HttpOverrides {
   /// v2.0.32: 拿到手动优选实际生效的 IP (null = 没配 / 解析失败)
   static String? getResolvedManualIp() => _resolvedManualIp;
 
+  /// v2.1.40: 拿到用户原始输入 (IP 或域名), 跟 [getResolvedManualIp] 区别
+  ///   在于这是没解析的原文, 给日记/UI 显示 "用户填的啥"
+  static String getManualPreferredIpForUi() => _manualPreferredIp ?? '';
+
   /// v2.1.33: 给 [LunaImageHttp] (MethodChannel + OkHttp 路径) 用 —
   ///   拿到当前 targetDomain (worker 域名), null = 没配
   static String? getTargetDomain() => _targetDomainCache;

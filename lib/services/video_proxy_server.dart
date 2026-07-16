@@ -43,6 +43,77 @@ import 'package:luna_tv/services/cf_optimizer.dart' show CfOptimizerHttpOverride
 import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 
+/// v2.1.40: 实时状态 — 加速链路页要实时显示代理运行状态 / 失败原因.
+///   存最近一次 tryStart 决策 + 最近一次 _handleLocalHttp 上游连接结果,
+///   UI 轮询 getLastStatus() 拿到最新值. 避免加速链路页要自己跑一遍所有 gate.
+class VideoProxyStatus {
+  /// 静态共享, UI 直接 [VideoProxyStatus.snapshot] 拿
+  static VideoProxyStatus _instance = VideoProxyStatus._();
+  static VideoProxyStatus get snapshot => _instance;
+
+  /// tryStart 决策结果
+  bool tryStartInvoked = false;       // tryStart 是否被调用过
+  bool? tryStartResult;               // true=代理起来了, false/null=没起来
+  String? tryStartFailReason;         // 没起来的原因 (e.g. "视频代理开关关", "域名未配")
+  int? lastPort;                      // 起代理成功时的端口
+  DateTime? tryStartAt;               // 决策时间
+
+  /// _handleLocalHttp 上游连接结果
+  DateTime? lastFetchAt;              // 最近一次 fetch 时间
+  int? lastFetchStatus;               // 上游 HTTP 状态码 (502 表示 worker 拒代理)
+  int? lastFetchBytes;                // 上游回包字节数
+  int? lastFetchMs;                   // 上游 fetch 耗时 (ms)
+  String? lastFetchTarget;            // 上游 URL (worker /?url=...)
+  String? lastFetchUsedIp;            // 实际连的 IP (优选 IP 或 system DNS)
+  bool lastFetchPreferIp;             // 是否走了优选 IP
+  String? lastFetchError;             // 上游连接错误 (超时/拒连/TLS 失败)
+
+  /// 累计
+  int totalFetches = 0;               // 累计 fetch 次数
+  int totalFetchErrors = 0;           // 累计 fetch 错误次数
+  int totalM3u8Hits = 0;              // 累计 m3u8 代理次数
+  int totalM3u8AdStripped = 0;        // 累计 ad 段删除数
+
+  /// v2.1.40: 触发 tryStart 决策时记一笔
+  void recordTryStart({
+    required bool result,
+    int? port,
+    String? failReason,
+  }) {
+    tryStartInvoked = true;
+    tryStartResult = result;
+    tryStartFailReason = result ? null : (failReason ?? '未知原因');
+    lastPort = result ? port : null;
+    tryStartAt = DateTime.now();
+  }
+
+  /// v2.1.40: 记一次 _handleLocalHttp fetch 结果
+  void recordFetch({
+    required String target,
+    required String? usedIp,
+    required bool preferIp,
+    int? status,
+    int? bytes,
+    int? ms,
+    String? error,
+    bool isM3u8 = false,
+  }) {
+    lastFetchAt = DateTime.now();
+    lastFetchTarget = target;
+    lastFetchUsedIp = usedIp;
+    lastFetchPreferIp = preferIp;
+    lastFetchStatus = status;
+    lastFetchBytes = bytes;
+    lastFetchMs = ms;
+    lastFetchError = error;
+    totalFetches++;
+    if (error != null || (status != null && status >= 400)) {
+      totalFetchErrors++;
+    }
+    if (isM3u8) totalM3u8Hits++;
+  }
+}
+
 class VideoProxyServer {
   VideoProxyServer._();
 
@@ -67,31 +138,77 @@ class VideoProxyServer {
   ///   _resolvedManualIp 在 App 启动时 + 5min 周期 resolve, 进入播放页时
   ///   大概率已经拿到, 万一没拿到 (刚开机瞬开 app) 走 tryStart 返回 null,
   ///   libmpv 走原 URL, 不影响播放.
+  /// v2.1.40: 写全日记 — 每道门的开关状态 + 决策结果都记进 DiaryService.
+  ///   用户打开加速链路页就能直接看到为啥没加速. 之前 tryStart 失败只
+  ///   静默返 null, 用户根本不知道是开关关了 / 域名没配 / 优选 IP 没填.
   static Future<VideoProxyServer?> tryStart() async {
     // v2.0.76: 守门改成 getVideoProxyEnabled() — 该开关现在是「视频代理」,
     //   关 = 视频不走代理, 直接原源; 开 = 视频走 VideoProxyServer.
     final videoProxyOn = await UserDataService.getVideoProxyEnabled();
-    if (!videoProxyOn) return null;
 
     // 守门 2: 域名配了
     final domain = await UserDataService.getCfWorkerDomain();
-    if (domain.isEmpty) return null;
 
     // v2.0.76: 「优选 IP 启用」开关 (v2.0.75 之前叫 "代理总开关") 决定视频流走不走优选 IP.
     //   这里只读状态打日志 + 算 effectiveIp, 不作守门 — 开关关也能启代理 (走 worker 系统 DNS).
     final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
     final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp();
+    final manualInput = CfOptimizerHttpOverrides.getManualPreferredIpForUi();
+    final resolvedAt = CfOptimizerHttpOverrides.getResolvedAtHuman();
+    final resolveErr = CfOptimizerHttpOverrides.getResolveError();
     final effectiveIp = (preferIpEnabled && resolvedIp != null && resolvedIp.isNotEmpty)
         ? resolvedIp
         : null;
+
+    // 守门 1: 视频代理开关
+    if (!videoProxyOn) {
+      VideoProxyStatus.snapshot.recordTryStart(
+        result: false,
+        failReason: '视频代理开关已关闭 → 视频将直连原源, 不走代理',
+      );
+      DiaryService.add(
+          '[VideoProxy] tryStart FAIL: 视频代理开关已关闭 (domain=$domain, 优选IP开关=$preferIpEnabled, 手动IP=$manualInput)');
+      return null;
+    }
+
+    // 守门 2: 域名
+    if (domain.isEmpty) {
+      VideoProxyStatus.snapshot.recordTryStart(
+        result: false,
+        failReason: 'CF Worker 加速域名未配置 → 无法转发, 视频将直连',
+      );
+      DiaryService.add(
+          '[VideoProxy] tryStart FAIL: CF Worker 域名未配置 (在 代理加速 页填一个 *.workers.dev 或自定义域名)');
+      return null;
+    }
+
+    // 日记记全: 实际生效配置 (UI 显示用, 日记也用)
+    final usedIpDesc = effectiveIp != null
+        ? '优选IP=$effectiveIp (开关开, 手动=$manualInput, 解析=$resolvedAt)'
+        : (manualInput.isNotEmpty
+            ? '系统DNS (优选IP开关关 or 未解析: 手动=$manualInput, err=$resolveErr)'
+            : '系统DNS (未配优选IP)');
+    DiaryService.add(
+        '[VideoProxy] tryStart 决策: domain=$domain, 视频代理=ON, 优选IP开关=$preferIpEnabled, 走=$usedIpDesc');
 
     // 全部满足, 启代理
     try {
       final s = VideoProxyServer._();
       await s._bind();
+      VideoProxyStatus.snapshot.recordTryStart(
+        result: true,
+        port: s._port,
+      );
+      DiaryService.add(
+          '[VideoProxy] tryStart OK: 代理已起 port=${s._port} (libmpv 走 --http-proxy=http://127.0.0.1:${s._port})');
       return s;
     } catch (e, st) {
-      // v2.0.39: 不再静默吞, 打印详细原因.
+      VideoProxyStatus.snapshot.recordTryStart(
+        result: false,
+        failReason: '代理启动异常: $e',
+      );
+      DiaryService.add(
+          '[VideoProxy] tryStart FAIL: 代理启动异常: $e\n$st');
       return null;
     }
   }
@@ -996,6 +1113,15 @@ class VideoProxyServer {
     final workerDomain = await UserDataService.getCfWorkerDomain();
     if (workerDomain.isEmpty) {
       _sendHttpError(client, 502, 'worker domain not set', closeAll);
+      VideoProxyStatus.snapshot.recordFetch(
+        target: target,
+        usedIp: null,
+        preferIp: false,
+        status: 502,
+        error: 'worker domain not set',
+      );
+      DiaryService.add(
+          '[VideoProxy] fetch FAIL: CF Worker 域名未配置, target=$target');
       return;
     }
 
@@ -1021,8 +1147,13 @@ class VideoProxyServer {
         ? resolvedIp
         : null;
     final fetchStart = DateTime.now();
+    final usedIpDesc = preferIp != null ? '优选IP=$preferIp' : '系统DNS';
+    final isM3u8 = target.contains('/m3u8');
+    DiaryService.add(
+        '[VideoProxy] fetch BEGIN: target=$target, worker=$workerDomain, 走=$usedIpDesc, m3u8=$isM3u8');
 
     Socket? upstream;
+    String? usedActualIp; // 实际连接的 IP (Socket.remoteAddress 拿)
     try {
       // v2.0.68: 正确的 TLS SNI 做法
       //   SecureSocket.connect 没有 host: 命名参数 (编译错误).
@@ -1038,6 +1169,7 @@ class VideoProxyServer {
         try {
           tcpSocket.setOption(SocketOption.tcpNoDelay, true);
         } catch (_) {}
+        usedActualIp = preferIp;
         upstream = await SecureSocket.secure(tcpSocket, host: workerDomain);
       } else {
         // 没配优选 IP: 走系统 DNS (SNI = workerDomain 自动)
@@ -1048,6 +1180,10 @@ class VideoProxyServer {
         );
         try {
           upstream.setOption(SocketOption.tcpNoDelay, true);
+        } catch (_) {}
+        // v2.1.40: 拿到实际连的 IP (e.g. CF anycast 104.x), 写日记方便排查
+        try {
+          usedActualIp = upstream.remoteAddress.address;
         } catch (_) {}
       }
 
@@ -1102,6 +1238,7 @@ class VideoProxyServer {
           target.contains('/m3u8');
       final contentLength = int.tryParse(headers['content-length'] ?? '');
       final isChunked = (headers['transfer-encoding'] ?? '').toLowerCase().contains('chunked');
+      int? rewrittenSize; // v2.1.40: m3u8 重写后大小, 给状态用
 
       if (isM3u8) {
         // v2.0.69: 先发响应头 (chunked), 让 libmpv 不会 5 秒超时放弃.
@@ -1136,6 +1273,7 @@ class VideoProxyServer {
         final filtered = _stripAdsFromM3u8(body, workerDomain);
         final rewritten = filtered.replaceAll(workerBase, localBase);
         final rewrittenBytes = utf8.encode(rewritten);
+        rewrittenSize = rewrittenBytes.length; // v2.1.40: 记录到状态
 
         // chunked: 长度行 (hex) + 数据 + \r\n + 结束 chunk (0\r\n\r\n)
         client.add(utf8.encode('${rewrittenBytes.length.toRadixString(16)}\r\n'));
@@ -1173,10 +1311,59 @@ class VideoProxyServer {
         await client.flush();
         client.close();
       } catch (_) {}
-    } catch (e) {
+
+      // v2.1.40: 成功完成时记一笔 (含耗时/字节/IP/状态码)
+      final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
+      final respBytes = isM3u8
+          ? rewrittenSize
+          : contentLength; // .ts/.mp4 走流式, 拿 Content-Length 估算
+      VideoProxyStatus.snapshot.recordFetch(
+        target: target,
+        usedIp: usedActualIp,
+        preferIp: preferIp != null,
+        status: statusCode,
+        bytes: respBytes,
+        ms: fetchMs,
+        isM3u8: isM3u8,
+      );
+      // 错误状态码 (4xx/5xx) 单独标红日志
+      if (statusCode >= 400) {
+        DiaryService.add(
+            '[VideoProxy] fetch FAIL: status=$statusCode, IP=$usedActualIp, m3u8=$isM3u8, ${fetchMs}ms, bytes=$respBytes, target=$target');
+      } else {
+        DiaryService.add(
+            '[VideoProxy] fetch OK: status=$statusCode, IP=$usedActualIp, m3u8=$isM3u8, ${fetchMs}ms, bytes=$respBytes, target=$target');
+      }
+    } catch (e, st) {
       try {
         upstream?.destroy();
       } catch (_) {}
+      // v2.1.40: 详细错误日志 — 区分超时/拒连/TLS 失败
+      final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
+      String errKind = 'unknown';
+      final es = e.toString();
+      if (es.contains('TimeoutException') || es.contains('timeout')) {
+        errKind = 'timeout';
+      } else if (es.contains('SocketException') || es.contains('Connection refused')) {
+        errKind = 'connection_refused';
+      } else if (es.contains('HandshakeException') || es.contains('TLS') || es.contains('certificate')) {
+        errKind = 'tls_fail';
+      } else if (es.contains('点不允许的 IP') || es.contains('local or disallowed')) {
+        errKind = 'cf_disallowed_ip';
+      } else if (es.contains('Bad state') || es.contains('Stream')) {
+        errKind = 'stream_broken';
+      }
+      VideoProxyStatus.snapshot.recordFetch(
+        target: target,
+        usedIp: usedActualIp,
+        preferIp: preferIp != null,
+        status: 502,
+        ms: fetchMs,
+        error: '$errKind: $e',
+        isM3u8: isM3u8,
+      );
+      DiaryService.add(
+          '[VideoProxy] fetch FAIL: kind=$errKind, IP=$usedActualIp, m3u8=$isM3u8, ${fetchMs}ms, target=$target, err=$e');
       _sendHttpError(client, 502, 'Local proxy error: $e', closeAll);
     }
   }

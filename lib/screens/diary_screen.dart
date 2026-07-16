@@ -175,7 +175,8 @@ class _DiaryScreenState extends State<DiaryScreen> {
         tag.startsWith('ad_reset') ||
         tag.startsWith('history') ||
         tag.startsWith('douban') ||
-        tag.startsWith('video')) {
+        tag.startsWith('video') ||
+        tag.startsWith('videoproxy')) {
       return '视频';
     }
     return '其它';
