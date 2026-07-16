@@ -1069,14 +1069,30 @@ class UserDataService {
   /// v2.1.43 改: 加详细 DiaryService 日记, 跟 buildBangumiDataUrl 平行.
   ///   image URL 是热路径 (一个详情页 / 轮播可能调几十次), 跟数据源
   ///   一样用一次性 hint flag 避免日记爆.
+  /// v2.1.43.1 改: 同时支持 `http://lain.bgm.tv` 和 `https://lain.bgm.tv`
+  ///   开头. BGM API 返的 `cover` / `image` 字段经常是 `http://` (老 BGM
+  ///   习惯, 没迁移 https), v2.1.43 之前只 startsWith `https://` → wrap
+  ///   走不到, passthrough 走直连 http. Worker 端反正都走 https, 这里
+  ///   把 http://lain.bgm.tv 跟 https://lain.bgm.tv 一样处理. 用户反馈
+  ///   「TMDB 可用 Bangumi 不行」的真因之一.
   static String buildBangumiImageUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
     final source = getBangumiImageSourceKeySync();
     if (source == 'bangumi_proxy') {
       final proxy = getTmdbProxyDomainSync();
-      if (proxy.isNotEmpty && originalUrl.startsWith('https://lain.bgm.tv')) {
+      // v2.1.43.1: 兼容 http:// 和 https:// 两种 lain.bgm.tv 开头.
+      //   BGM API 返的 cover/image 经常是 http://, 不只是 https://.
+      //   检查 startsWith 跟 replaceFirst 用同一组 prefix, 保证 wrap
+      //   真的发生. 优先精确匹配 https://, 兜底匹配 http://.
+      final isHttps = originalUrl.startsWith('https://lain.bgm.tv');
+      final isHttp = !isHttps && originalUrl.startsWith('http://lain.bgm.tv');
+      if (proxy.isNotEmpty && (isHttps || isHttp)) {
+        // v2.1.43.1: 永远 wrap 成 https:// worker URL (worker 端走 https
+        //   forward), 即使原 URL 是 http:// 也用 https://worker/bgm-img/...
+        //   替换, 跟 TMDB 行为一致 (worker 强制 https).
+        final fromPrefix = isHttps ? 'https://lain.bgm.tv' : 'http://lain.bgm.tv';
         final wrapped = originalUrl.replaceFirst(
-          'https://lain.bgm.tv',
+          fromPrefix,
           '$proxy/bgm-img',
         );
         DiaryService.add(
