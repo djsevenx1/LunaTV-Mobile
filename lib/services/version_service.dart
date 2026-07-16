@@ -3,22 +3,39 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:luna_tv/services/user_data_service.dart';
+
 class VersionService {
+  // v2.1.46: 不再 static const — 改成在 [checkForUpdate] 里动态读
+  //   UserDataService.getGithubProxyDomainSync(), 配了 worker URL
+  //   就走 worker (国内 GFW 可达), 没配走直连 api.github.com (用户
+  //   自己负责 VPN / GFW). 保留 const 写法给 [getReleaseUrl] 当
+  //   fallback URL 用 (release 详情页 URL 跟 API URL 是不同的,
+  //   release 页国内也 GFW 但用户可以浏览器开 VPN 看).
   static const String githubRepoUrl = 'https://github.com/djsevenx1/LunaTV-Mobile';
   static const String githubApiUrl = 'https://api.github.com/repos/djsevenx1/LunaTV-Mobile/releases/latest';
   static const String _lastCheckKey = 'last_version_check';
   static const String _dismissedVersionKey = 'dismissed_version';
   
   /// 检查是否有新版本
+  ///
+  /// v2.1.46 改: 走 [UserDataService.buildGithubApiUrl] 拼 URL —
+  ///   配了 GitHub 代理 URL 走 worker 的 /github/repos/.../releases/latest
+  ///   (国内 GFW 可达), 没配走直连 (跟 v2.1.45 之前行为一致).
+  ///   拿到的 APK 直链用 [UserDataService.buildGithubReleaseAssetUrl]
+  ///   改写成 worker 路径, app 内建下载器 (UpdateDialog) 直接拿来下.
   static Future<VersionInfo?> checkForUpdate() async {
     try {
       // 获取当前版本
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
       
+      // v2.1.46: GitHub API URL 走 worker 代理 (配了的话)
+      final apiUrl = UserDataService.buildGithubApiUrl(githubApiUrl);
+
       // 从 GitHub API 获取最新 Release 信息
       final response = await http.get(
-        Uri.parse(githubApiUrl),
+        Uri.parse(apiUrl),
         headers: {
           'Accept': 'application/vnd.github.v3+json',
         },
@@ -39,13 +56,18 @@ class VersionService {
               final name = (asset['name'] as String?) ?? '';
               final url = (asset['browser_download_url'] as String?) ?? '';
               if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
-                apkDownloadUrl = url;
+                // v2.1.46: APK 直链也走 worker 代理 (配了的话)
+                apkDownloadUrl =
+                    UserDataService.buildGithubReleaseAssetUrl(url);
                 break;
               }
             }
           }
         }
         // release 详情页 URL(html_url),作为兜底
+        // v2.1.46: html_url 指向 github.com 详情页, 不走 worker
+        //   (worker 路由不代理这个 — 用户点开用浏览器访问, 让用户
+        //    自己决定是否走 VPN). buildGithubApiUrl 不会改这个 URL.
         final releasePageUrl = data['html_url'] as String?;
 
         // 比较版本号

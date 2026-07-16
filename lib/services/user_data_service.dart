@@ -50,6 +50,17 @@ class UserDataService {
   //   在 [djsevenx1/tmdb-proxy]). 不共用, 互不影响.
   static const String _tmdbProxyDomainKey = 'tmdb_proxy_domain';
 
+  // v2.1.46: GitHub 代理 URL — 用户自部署的 CF Worker (e.g.
+  //   https://tmdb-8d1.pages.dev/), 用于加速 GitHub Releases API +
+  //   release assets 下载, 解决国内 GFW 拉不到 api.github.com /
+  //   objects.githubusercontent.com 的问题. 跟 [_tmdbProxyDomainKey]
+  //   不强制共用 — 可以指向同一个 worker (推荐, 部署 [djsevenx1/
+  //   tmdb-proxy] 仓库已经把 /github/... 路由加进去了), 也可以指向
+  //   不同的 worker. 配了之后 [VersionService.checkForUpdate] 走
+  //   worker 的 /github/repos/.../releases/latest, app 内建下载器
+  //   走 worker 的 /github/asset/.../releases/download/... .
+  static const String _githubProxyDomainKey = 'github_proxy_domain';
+
   // 内存缓存
   static bool? _isLocalModeCache;
   // v2.0.76: 字段重命名 — 原本 "CF Worker 加速总开关", 现在是 "优选 IP 启用"
@@ -68,6 +79,8 @@ class UserDataService {
   static String? _tmdbDataSourceCache;
   // v2.1.41
   static String? _tmdbProxyDomainCache;
+  // v2.1.46
+  static String? _githubProxyDomainCache;
 
   // 保存用户登录信息
   static Future<void> saveUserData({
@@ -680,6 +693,53 @@ class UserDataService {
     final u = Uri.tryParse(withScheme);
     if (u == null || u.host.isEmpty) return null;
     return '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}';
+  }
+
+  // ===== v2.1.46: GitHub 代理 URL (用户自部署 CF Worker 加速 GitHub Releases API + assets 下载) =====
+  //
+  // 用户场景: 部署 [djsevenx1/tmdb-proxy] (fork HuntzzZ/tmdb-proxy 加
+  //   Bangumi 路由, v2.1.46 又加了 /github/... 路由) 到 Cloudflare Pages,
+  //   拿到 https://xxx.pages.dev 粘到这. App 检查更新时:
+  //   - GET ${proxy}/github/repos/{owner}/{repo}/releases/latest
+  //     → 走 worker → api.github.com/repos/{owner}/{repo}/releases/latest
+  //   - 下 APK: GET ${proxy}/github/asset/{owner}/{repo}/{tag}/{asset}
+  //     → 走 worker → github.com/{owner}/{repo}/releases/download/... → 302
+  //       → objects.githubusercontent.com/... (流式转发)
+  //   解决国内 GFW 完全拉不到 api.github.com / objects.githubusercontent.com
+  //   的问题. 跟 [_tmdbProxyDomainKey] 不强制共用 (可以指向同一个 worker,
+  //   也可以指向不同 worker).
+
+  /// 保存 GitHub 代理 URL. 空串 = 清空. 返回清理后的字符串, null 表示输入无效.
+  /// 复用 [_cleanWorkerBaseUrl] — 跟 TMDB 代理 URL 同样的清理规则.
+  static Future<String?> saveGithubProxyDomain(String input) async {
+    final cleaned = _cleanWorkerBaseUrl(input);
+    final prefs = await SharedPreferences.getInstance();
+    if (cleaned == null) {
+      await prefs.remove(_githubProxyDomainKey);
+      _githubProxyDomainCache = '';
+    } else {
+      await prefs.setString(_githubProxyDomainKey, cleaned);
+      _githubProxyDomainCache = cleaned;
+    }
+    // v2.1.46: URL 变了 → 清 buildGithubApiUrl / buildGithubReleaseAssetUrl
+    //   的 memoize 缓存, 避免切了 URL 还用旧 worker URL 拼出来的 URL.
+    _githubApiUrlCache.clear();
+    _githubAssetUrlCache.clear();
+    return cleaned;
+  }
+
+  /// 同步读 GitHub 代理 URL. 空串 = 没配.
+  static String getGithubProxyDomainSync() {
+    return _githubProxyDomainCache ?? '';
+  }
+
+  /// 异步读 GitHub 代理 URL. 空串 = 没配.
+  static Future<String> getGithubProxyDomain() async {
+    if (_githubProxyDomainCache != null) return _githubProxyDomainCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_githubProxyDomainKey) ?? '';
+    _githubProxyDomainCache = v;
+    return v;
   }
 
   /// 同步读 (启动 warmup 后用)
@@ -1322,6 +1382,120 @@ class UserDataService {
   static final Map<String, String> _tmdbImageUrlCache = {};
   static String _tmdbImageCacheConfigKey = '';
 
+  // ===== v2.1.46: GitHub Releases API URL 构造 (api.github.com) =====
+  //
+  // 走跟 buildBangumiDataUrl 一样的 path-based pattern:
+  //   https://api.github.com/repos/{owner}/{repo}/releases/latest
+  //   → https://<worker>/github/repos/{owner}/{repo}/releases/latest
+  //   (worker 端 /github/ 路由剥前缀, 转给 api.github.com)
+  // 没配 worker URL → 1:1 返原 URL (用户自己负责 GFW / VPN).
+  //
+  // 日记跟 buildBangumiDataUrl / buildTmdbImageUrl 平行, 方便排查.
+  // 加 memoize (v2.1.43.2 同 pattern), URL 不变就 cache hit 跳过 wrap
+  // + 跳过日记.
+  static String buildGithubApiUrl(String originalUrl) {
+    if (originalUrl.isEmpty) return originalUrl;
+    final proxy = getGithubProxyDomainSync();
+    // v2.1.46: configKey 跟 (proxy) 绑定, 变就 clear cache
+    final configKey = 'github_api|$proxy';
+    if (_githubApiCacheConfigKey != configKey) {
+      _githubApiUrlCache.clear();
+      _githubApiCacheConfigKey = configKey;
+    }
+    // cache hit 直接返
+    final cached = _githubApiUrlCache[originalUrl];
+    if (cached != null) return cached;
+
+    if (proxy.isNotEmpty && originalUrl.startsWith('https://api.github.com')) {
+      final wrapped = originalUrl.replaceFirst(
+        'https://api.github.com',
+        '$proxy/github',
+      );
+      DiaryService.add(
+          '[GitHub] buildApiUrl: source=github_proxy, worker=$proxy');
+      DiaryService.add(
+          '[GitHub] buildApiUrl wrap: in=$originalUrl out=$wrapped');
+      _githubApiUrlCache[originalUrl] = wrapped;
+      return wrapped;
+    } else {
+      // 没配 worker 或 URL 不是 api.github.com 开头, 1:1 返 + 日记告知
+      final reason = proxy.isEmpty
+          ? 'worker URL 未配 (在「设置 → GitHub 代理 URL」填)'
+          : 'URL 不是 api.github.com 开头 (不起作用)';
+      DiaryService.add(
+          '[GitHub] buildApiUrl: passthrough, reason="$reason", in=$originalUrl');
+      _githubApiUrlCache[originalUrl] = originalUrl;
+      return originalUrl;
+    }
+  }
+
+  // v2.1.46: (proxy) memoize 缓存, 跟 buildBangumiImageUrl / buildTmdbImageUrl 平行
+  static final Map<String, String> _githubApiUrlCache = {};
+  static String _githubApiCacheConfigKey = '';
+
+  /// v2.1.46: GitHub release asset URL 构造 (app 内建下载器拿 APK 用)
+  ///
+  /// 输入是 GitHub release page 里 assets[].browser_download_url, 形如:
+  ///   https://github.com/{owner}/{repo}/releases/download/{tag}/{asset_name}
+  /// 走 worker:
+  ///   https://<worker>/github/asset/{owner}/{repo}/{tag}/{asset_name}
+  /// worker 端 /github/asset/ 路由把 owner/repo/tag/asset 抽出来, 重新
+  ///   拼成 github.com/.../releases/download/... 跟 302 跳到
+  ///   objects.githubusercontent.com 流式转发.
+  ///
+  /// path-based 比 query-string 干净 (GitHub download URL 不需要 encode,
+  ///   日志 / 日记 / Cache-Control 都干净).
+  static String buildGithubReleaseAssetUrl(String originalUrl) {
+    if (originalUrl.isEmpty) return originalUrl;
+    final proxy = getGithubProxyDomainSync();
+    final configKey = 'github_asset|$proxy';
+    if (_githubAssetCacheConfigKey != configKey) {
+      _githubAssetUrlCache.clear();
+      _githubAssetCacheConfigKey = configKey;
+    }
+    final cached = _githubAssetUrlCache[originalUrl];
+    if (cached != null) return cached;
+
+    // 匹配 https://github.com/{owner}/{repo}/releases/download/{tag}/{asset...}
+    // asset 名可能含 . / - 等 (e.g. app-arm64-v8a-release.apk), 用非贪婪 + [^?#]
+    // 排除 query string / fragment. tag 可能含 . 但 v*.*.* 常见, [^/]+ 就够.
+    final re = RegExp(
+      r'^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^?#]+)$',
+    );
+    final m = re.firstMatch(originalUrl);
+    if (m != null) {
+      final owner = m.group(1);
+      final repo = m.group(2);
+      final tag = m.group(3);
+      final asset = m.group(4);
+      if (proxy.isNotEmpty) {
+        final wrapped = '$proxy/github/asset/$owner/$repo/$tag/$asset';
+        DiaryService.add(
+            '[GitHub] buildAssetUrl: source=github_proxy, worker=$proxy');
+        DiaryService.add(
+            '[GitHub] buildAssetUrl wrap: in=$originalUrl out=$wrapped');
+        _githubAssetUrlCache[originalUrl] = wrapped;
+        return wrapped;
+      } else {
+        // 没配 worker — 1:1 返 (用户走原 URL, 国内 100% 拉不到, 但不报错)
+        DiaryService.add(
+            '[GitHub] buildAssetUrl: passthrough, reason="worker URL 未配 (国内 GFW 拉不到, 在「设置 → GitHub 代理 URL」填)", in=$originalUrl');
+        _githubAssetUrlCache[originalUrl] = originalUrl;
+        return originalUrl;
+      }
+    } else {
+      // URL 不是 GitHub release download 格式 (罕见, fallback 透传)
+      DiaryService.add(
+          '[GitHub] buildAssetUrl: passthrough, reason="URL 不是 github.com/{owner}/{repo}/releases/download/... 格式", in=$originalUrl');
+      _githubAssetUrlCache[originalUrl] = originalUrl;
+      return originalUrl;
+    }
+  }
+
+  // v2.1.46: (proxy) memoize 缓存
+  static final Map<String, String> _githubAssetUrlCache = {};
+  static String _githubAssetCacheConfigKey = '';
+
   // Bangumi 数据源 key 同步初始化（main.dart 启动时调用）
   //
   // v2.1.42 改: 跟 v2.1.41 TMDB warmup 一样, 读 prefs 后按 worker URL
@@ -1384,6 +1558,12 @@ class UserDataService {
     if (_tmdbProxyDomainCache == null) {
       final prefs = await SharedPreferences.getInstance();
       _tmdbProxyDomainCache = prefs.getString(_tmdbProxyDomainKey) ?? '';
+    }
+    // v2.1.46: 缓存 GitHub 代理 URL, 给 VersionService.checkForUpdate /
+    //   buildGithubApiUrl / buildGithubReleaseAssetUrl 同步读
+    if (_githubProxyDomainCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _githubProxyDomainCache = prefs.getString(_githubProxyDomainKey) ?? '';
     }
   }
 }

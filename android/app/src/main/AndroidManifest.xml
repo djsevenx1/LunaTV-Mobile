@@ -71,4 +71,19 @@
             <data android:scheme="http" />
         </intent>
     </queries>
+    <!-- v2.1.46: FileProvider for ApkInstallChannel — app 内建下载器
+         下完 APK 后, FileProvider.getUriForFile 把 file:// 转 content://
+         给系统 APK 安装器. 避开 Android 7+ 严格模式 file:// 暴露
+         (FileUriExposedException). authorities 跟 ApkInstallChannel.kt
+         里 "${packageName}.fileprovider" 对应, 路径白名单在
+         res/xml/file_paths.xml. -->
+    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+    </provider>
 </manifest>

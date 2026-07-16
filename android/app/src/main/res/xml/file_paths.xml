@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  v2.1.46: FileProvider 路径白名单 — ApkInstallChannel 用, 给 app
+    内建下载器下载完的 APK 转 content:// URI 给系统安装器 (避开
+    Android 7+ 严格模式 file:// 暴露).
+
+  跟 AndroidManifest.xml <provider> 段对应:
+    android:authorities="${applicationId}.fileprovider"
+    android:resource="@xml/file_paths"
+
+  路径说明:
+    - cache-path: 对应 context.cacheDir = /data/data/<pkg>/cache/
+      path_provider.getTemporaryDirectory() 返回的就是这个
+    - files-path: 对应 context.filesDir = /data/data/<pkg>/files/
+      备用, 留扩展用 (e.g. 日后想下到持久目录)
+    - root-path: 不用, 排除掉 (避免暴露根目录)
+-->
+<paths>
+    <cache-path name="cache" path="." />
+    <files-path name="files" path="." />
+</paths>

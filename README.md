@@ -64,10 +64,13 @@ LunaTV-Mobile 用 **2 个独立 CF Worker** 解决不同问题,互不干扰:
 - `/image/{size}/{file}` → `image.tmdb.org/t/p/{size}/{file}` (1 天 CDN cache)
 - `/bangumi/{path}` → `api.bgm.tv/{path}` (Authorization 透传)
 - `/bgm-img/{path}` → `lain.bgm.tv/{path}` (自动加 `Referer: https://bgm.tv/` 绕过反盗链)
+- `/github/repos/{owner}/{repo}/releases/latest` (v2.1.46+) → `api.github.com/repos/{owner}/{repo}/releases/latest` (app 检查更新用, `User-Agent` + `Accept: application/vnd.github.v3+json` 强制加)
+- `/github/asset/{owner}/{repo}/{tag}/{asset_name}` (v2.1.46+) → `github.com/{owner}/{repo}/releases/download/{tag}/{asset_name}` 跟 302 跳到 `objects.githubusercontent.com` 流式转发 (app 内建下载器拿 APK 用)
 
-`api_key` 从 App 「TMDB API Key」读,worker 透传,不用去 CF Dashboard 配 env。
+`api_key` 从 App 「TMDB API Key」读,worker 透传,不用去 CF Dashboard 配 env。`GITHUB_TOKEN` (可选 env) 配了拉高 60→5000 req/hr,不配匿名 60/hr (检查更新 1 次够用)。
 
 > **v2.1.40 变更**: 删了 ciao-cors 公共代理 fallback + CORSAPI 套娃的 Bangumi 加速。原因: ciao-cors 对 `lain.bgm.tv` 反盗链图片 403 已知,失败率太高,留公共代理反而坑人。v2.1.41+ 改走自部署 tmdb-proxy,完全可控。
+> **v2.1.46 变更**: tmdb-proxy 加 `/github/...` 路由 (handleGithubApi + handleGithubAsset),解决国内 GFW 拉不到 `api.github.com` / `objects.githubusercontent.com` 的问题。检查更新 + APK 下载 (流式 body 不 buffer) 都走 worker。App 端只多了一个「GitHub 代理 URL」配置项,跟「TMDB / Bangumi 代理 URL」可填同一个地址。
 
 #### 图片源
 
@@ -83,10 +86,11 @@ LunaTV-Mobile 用 **2 个独立 CF Worker** 解决不同问题,互不干扰:
 - 豆瓣小图自动升级为 `l_ratio_poster` 大图 (首页轮播等大图场景)
 - 图片内存缓存按 `devicePixelRatio × 显示尺寸` 精确解码,避免模糊与内存浪费
 
-#### 软件更新
+#### 软件更新 (v2.1.46+)
 - 检查更新从 GitHub API `assets` 抽 `.apk` 直链
-- 「下载并安装 vX.X.X」按钮直接走系统下载管理器,不用跳浏览器
-- 拿不到 apk 链接才 fallback 到 release 详情页
+- **App 内建下载器 (v2.1.46+)** — 弹窗点「下载并安装」直接走 `dio.download` 把 APK 下到 app 临时目录, Dialog 内嵌 LinearProgressIndicator 实时显示百分比 + 已下载/总大小, 支持「取消下载 / 重试」. 下完自动调 Android 系统 APK 安装器 (Android 7+ 走 androidx `FileProvider` 转 content:// URI, 避开严格模式 `FileUriExposedException`), 用户在安装器里点「安装」即生效. **不跳浏览器、不用第三方 pub package, 自己写 `ApkInstallChannel.kt` MethodChannel 跟 `ImageHttpChannel` 平行**
+- **GitHub 代理 (v2.1.46+)** — 配了「GitHub 代理 URL」(自部署 [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy)) 后, ① 检查更新走 worker 的 `/github/repos/.../releases/latest`, ② app 内建下载器下 APK 走 worker 的 `/github/asset/{owner}/{repo}/{tag}/{asset}` (跟 302 跳到 `objects.githubusercontent.com` 流式转发). 解决国内 GFW 完全拉不到 `api.github.com` / `objects.githubusercontent.com` 的问题
+- 拿不到 apk 链接 fallback 到 release 详情页 (用 `url_launcher` 跳浏览器)
 
 ## 快速开始
 
@@ -145,6 +149,7 @@ GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
 | **Bangumi 数据源** (v2.1.42+) | `Bangumi Worker 加速` / `直连`,2 选 1 |
 | **Bangumi 图片源** (v2.1.42+) | `Bangumi Worker 加速` / `直连`,2 选 1,跟数据源独立 |
 | **TMDB / Bangumi 代理 URL** (v2.1.41+, 改名 v2.1.42) | 自部署 [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) 拿到的 https://xxx.pages.dev,空 = 全部走直连. 共用同一个 URL,TMDB 和 Bangumi 都用它 |
+| **GitHub 代理 URL** (v2.1.46+) | 自部署 [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) 拿到的 https://xxx.pages.dev,空 = 检查更新 / APK 下载走直连 (国内 GFW). 推荐跟「TMDB / Bangumi 代理 URL」填同一个 (同一个 worker 同时服务 `/github/...` 路由) |
 | M3U8 代理 URL | 留空则不用,填了则 m3u8 走 worker |
 | **CF Worker 加速** | 开关,只控制源测速 / m3u8 (走 CORSAPI) |
 | **CF Worker 加速源域名** | CORSAPI worker 域名 (如 `xxx.workers.dev`),配了之后视频 / m3u8 走 worker |
