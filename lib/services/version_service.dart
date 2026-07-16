@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 
 class VersionService {
@@ -31,6 +32,16 @@ class VersionService {
   ///   直接返回 null, 不弹 dialog. 下次 latest 升到 > dismissed 时再弹.
   ///   之前 [_dismissedVersionKey] 只在 user_menu.dart 主动调
   ///   [dismissVersion] 时写, 关掉 dialog 不算, 导致每次开 app 都弹.
+  ///
+  /// v2.1.50 改: 修复 v2.1.47 改过头导致的死锁 — 之前 dismissed 写入后
+  ///   永远不重置, 但用户可能 dismiss 完没装 (装失败 / 取消 / 没流量
+  ///   等), currentVersion 还是老版本, 下次启动 dismissed == latest
+  ///   仍 return null → 永远看不到新版本 dialog, 除非 user 主动去
+  ///   user_menu 重置 (没有这个按钮, 等于没救).
+  ///   修: dismissed == latest 但 currentVersion < latest 时
+  ///   (说明用户没装上), 自动清除 dismissed, 继续弹 dialog. dismissed
+  ///   == latest 且 current == latest 时才真正 return null (用户
+  ///   装了或 user 真的就是这个版本).
   static Future<VersionInfo?> checkForUpdate() async {
     try {
       // 获取当前版本
@@ -77,17 +88,32 @@ class VersionService {
         //    自己决定是否走 VPN). buildGithubApiUrl 不会改这个 URL.
         final releasePageUrl = data['html_url'] as String?;
 
-        // v2.1.47: dismissed == latest 时不弹 (用户已知的版本不再骚扰)
-        //   - 之前 dismissed 只在 [UpdateDialog] 的"忽略"按钮写, 但
-        //     用户关掉 dialog / 稍后 / 按 back 都不写, 导致重复弹.
-        //   - 修: 统一在 [UpdateDialog] 的所有关闭路径都调
-        //     [dismissVersion], 本函数拿 latest 后对比 dismissed,
-        //     一致就 return null.
-        //   - dismissed < latest (有新版本出) → 正常 return VersionInfo
+        // v2.1.47 + v2.1.50 改: dismissed == latest 时不弹 (用户
+        //   已知的版本不再骚扰). 之前 dismissed 只在 [UpdateDialog]
+        //   的"忽略"按钮写, 但用户关掉 dialog / 稍后 / 按 back 都
+        //   不写, 导致每次开 app 都弹. 修: 统一在 [UpdateDialog] 的
+        //   所有关闭路径都调 [dismissVersion], 本函数拿 latest 后
+        //   对比 dismissed, 一致就 return null.
+        //   dismissed < latest (有新版本出) → 正常 return VersionInfo.
+        // v2.1.50 改: 上面逻辑导致 dismissed 写后永远不重置, 但
+        //   user 可能 dismiss 后没装 (装失败 / 取消), current < latest
+        //   时不应该继续静默 — 自动清 dismissed, 让 dialog 重弹.
         final prefs = await SharedPreferences.getInstance();
         final dismissedVersion = prefs.getString(_dismissedVersionKey);
         if (dismissedVersion != null && dismissedVersion == latestVersion) {
-          return null;
+          if (_isNewerVersion(currentVersion, latestVersion)) {
+            // v2.1.50: dismissed 但 current < latest → user 没装上,
+            //   清 dismissed, 让 dialog 重弹 (v2.1.47 改过头踩坑:
+            //   "v2.1.47 装后填加速地址拿不到新版本" — 实际 worker
+            //   路由 v2.1.46 漏了 if 块, 但即使 worker 修好, user
+            //   dismiss 一次后也会卡在 dismissed == latest 死循环).
+            await prefs.remove(_dismissedVersionKey);
+            DiaryService.add(
+                '[Version] dismissed=$dismissedVersion == latest=$latestVersion 但 current=$currentVersion < latest, 重置 dismissed 重弹');
+          } else {
+            // current == latest, user 已装或就是这个版本, 静默不弹
+            return null;
+          }
         }
 
         // 比较版本号
