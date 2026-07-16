@@ -169,3 +169,6 @@ corsapi_README.md
 # ===== v2.1.26: 真实地址过滤规则 (本地用, 不入库) =====
 # 包含用户真实 API/Worker 域名, 只在本地构建时使用, 防止地址泄露到仓库
 .filter-replace.bak
+# v2.1.46: 临时克隆 [djsevenx1/tmdb-proxy] 仓库用, 发完 release 后删.
+# 跟 .git 目录下的 .tmdb-proxy-tmp 不一样 (那个是 git 内部临时目录, 不需要 ignore)
+.tmdb-proxy-tmp/
