@@ -837,7 +837,7 @@ class _UserMenuState extends State<UserMenu> {
             widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
         title: Row(
           children: [
-            const Icon(LucideIcons.github, size: 20, color: Color(0xFF22C55E)),
+            const Icon(LucideIcons.code, size: 20, color: Color(0xFF22C55E)),
             const SizedBox(width: 8),
             Text(
               'GitHub 代理 URL',
@@ -2033,8 +2033,8 @@ class _UserMenuState extends State<UserMenu> {
                     : _githubProxyDomain,
                 onTap: _openGithubProxyDomainDialog,
                 icon: _githubProxyDomain.isEmpty
-                    ? LucideIcons.github
-                    : LucideIcons.github,
+                    ? LucideIcons.code
+                    : LucideIcons.code,
                 iconColor: _githubProxyDomain.isEmpty
                     ? const Color(0xFF9ca3af)
                     : const Color(0xFF22C55E),

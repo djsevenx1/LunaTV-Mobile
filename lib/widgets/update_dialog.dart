@@ -22,6 +22,16 @@ class UpdateDialog extends StatefulWidget {
 
   @override
   State<UpdateDialog> createState() => _UpdateDialogState();
+
+  /// 显示更新对话框
+  static Future<void> show(
+      BuildContext context, VersionInfo versionInfo) async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => UpdateDialog(versionInfo: versionInfo),
+    );
+  }
 }
 
 class _UpdateDialogState extends State<UpdateDialog> {
@@ -218,6 +228,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
+      case DioExceptionType.transformTimeout:
         return '网络超时, 检查网络后重试';
       case DioExceptionType.badResponse:
         final code = e.response?.statusCode;
