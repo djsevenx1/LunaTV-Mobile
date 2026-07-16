@@ -68,19 +68,20 @@ class _UserMenuState extends State<UserMenu> {
   //   反馈「这个关闭不要」). 默认值看 _tmdbProxyDomain 配没配:
   //   配了默认 'tmdb_proxy', 没配默认 'direct'.
   String _tmdbDataSource = 'direct';
-  // v2.1.41: TMDB 代理 URL — 用户自部署 [djsevenx1/tmdb-proxy] 部署
-  //   到 Cloudflare Pages 拿到的 https://xxx.pages.dev, 走 path-based
-  //   TMDB API + 图片加速. UI 在「数据源」section TMDB 数据源 selector
-  //   下面一行单独输入, 默认空, 跟 [TMDB API Key] 输入框同 UX.
+  // v2.1.41: 代理 URL — 用户自部署 [djsevenx1/tmdb-proxy] 部署到
+  //   Cloudflare Pages 拿到的 https://xxx.pages.dev, 一个 worker 同时
+  //   服务三套路由:
+  //     - TMDB:   /movie/...   /image/...   (v2.1.41)
+  //     - Bangumi:/bangumi/... /bgm-img/... (v2.1.42)
+  //     - GitHub: /github/repos/.../releases/latest
+  //               /github/asset/{owner}/{repo}/{tag}/{asset}  (v2.1.46)
+  //   UI 在「数据源」section TMDB 数据源 selector 下面一行单独输入,
+  //   默认空, 跟 [TMDB API Key] 输入框同 UX.
+  // v2.1.49 改: 合并 — 99% 用户填同一个 worker, 之前 v2.1.46 独立开
+  //   "GitHub 代理 URL" 输入框是冗余 (用户反馈 "重复了吧"). GitHub
+  //   路由直接复用这个字段, buildGithubApiUrl / buildGithubReleaseAssetUrl
+  //   内部用 UserDataService.getTmdbProxyDomainSync() 读.
   String _tmdbProxyDomain = '';
-  // v2.1.46: GitHub 代理 URL — 用户自部署 CF Worker (通常跟
-  //   _tmdbProxyDomain 同一个 worker, 也可以分开). 用于加速:
-  //   - 检查更新: GET ${proxy}/github/repos/.../releases/latest
-  //   - 内建下载 APK: GET ${proxy}/github/asset/{owner}/{repo}/{tag}/{asset}
-  //   解决国内 GFW 拉不到 api.github.com / objects.githubusercontent.com
-  //   的问题. UI 在「数据源」section TMDB/Bangumi 代理 URL 行下面
-  //   一行, 同样 UX.
-  String _githubProxyDomain = '';
 
   // v2.1.22: 日记 section 配置 (跟 DiaryService 同步)
   bool _diaryClearOnExit = true;
@@ -131,12 +132,9 @@ class _UserMenuState extends State<UserMenu> {
     // v2.1.41 改: 加 'tmdb_proxy' (用户自部署 CF Worker 加速, 跟视频
     //   加速是 2 个独立 worker). 删 'off' (用户反馈「这个关闭不要」).
     final tmdbDataSource = await UserDataService.getTmdbDataSourceKey();
-    // v2.1.41: TMDB 代理 URL — 用户在 UI 输入的自部署 worker 地址
+    // v2.1.41: 代理 URL — 用户在 UI 输入的自部署 worker 地址, 同时
+    //   服务 TMDB / Bangumi / GitHub 三套路由 (v2.1.49 合并 GitHub 字段)
     final tmdbProxyDomain = await UserDataService.getTmdbProxyDomain();
-    // v2.1.46: GitHub 代理 URL — 跟 TMDB 代理 URL 同样 UX, 可以
-    //   指向同一个 worker (推荐, [djsevenx1/tmdb-proxy] 仓库已加
-    //   /github/... 路由) 也可以指向另一个.
-    final githubProxyDomain = await UserDataService.getGithubProxyDomain();
 
     // v2.1.22: 日记 section 配置
     final diaryClearOnExit = DiaryService.clearOnExit;
@@ -168,7 +166,6 @@ class _UserMenuState extends State<UserMenu> {
         _tmdbConfigured = tmdbConfigured;
         _tmdbDataSource = tmdbDataSource;
         _tmdbProxyDomain = tmdbProxyDomain;
-        _githubProxyDomain = githubProxyDomain;
         _diaryClearOnExit = diaryClearOnExit;
         _diaryMaxEntries = diaryMaxEntries;
         _diaryPersist = diaryPersist;
@@ -819,188 +816,11 @@ class _UserMenuState extends State<UserMenu> {
     controller.dispose();
   }
 
-  // v2.1.46: GitHub 代理 URL 输入对话框 — 跟 _openTmdbProxyDomainDialog
-  //   平行, 同样 UX (单行 TextField + 保存/清除/取消/查看步骤). 用于
-  //   加速 GitHub Releases API + release assets 下载, 解决国内 GFW.
-  //   实际可以跟 [TMDB / Bangumi 代理 URL] 指向同一个 worker, 也可以
-  //   分开 (走不同 worker). 两个 URL 字段独立, 用户自己决定.
-  Future<void> _openGithubProxyDomainDialog() async {
-    final current = await UserDataService.getGithubProxyDomain();
-    final controller = TextEditingController(text: current);
-    controller.selection =
-        TextSelection(baseOffset: 0, extentOffset: current.length);
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor:
-            widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
-        title: Row(
-          children: [
-            const Icon(LucideIcons.code, size: 20, color: Color(0xFF22C55E)),
-            const SizedBox(width: 8),
-            Text(
-              'GitHub 代理 URL',
-              style: FontUtils.poppins(
-                ctx,
-                fontSize: 18,
-                color: widget.isDarkMode
-                    ? const Color(0xFFffffff)
-                    : const Color(0xFF1f2937),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '部署 [djsevenx1/tmdb-proxy] 到 Cloudflare Pages 拿到 https://xxx.pages.dev 粘到这里. 配了之后: ① 检查更新走 worker 的 /github/repos/.../releases/latest, ② app 内建下载器下 APK 走 worker 的 /github/asset/.../releases/download/... . 解决国内 GFW 拉不到 api.github.com / objects.githubusercontent.com.',
-              style: FontUtils.poppins(
-                ctx,
-                fontSize: 12,
-                color: widget.isDarkMode
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF6b7280),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '不填 = 走「直连」 (国内 GFW, 配 VPN 才通). 跟「TMDB / Bangumi 代理 URL」可以填同一个地址 (推荐). 自动强转 https://, 去尾斜杠.',
-              style: FontUtils.poppins(
-                ctx,
-                fontSize: 12,
-                color: widget.isDarkMode
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF6b7280),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              maxLines: 1,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              style: FontUtils.sourceCodePro(
-                ctx,
-                fontSize: 13,
-                color: widget.isDarkMode
-                    ? const Color(0xFFffffff)
-                    : const Color(0xFF1f2937),
-              ),
-              decoration: InputDecoration(
-                hintText: 'https://tmdb-8d1.pages.dev',
-                hintStyle: FontUtils.sourceCodePro(
-                  ctx,
-                  fontSize: 12,
-                  color: widget.isDarkMode
-                      ? const Color(0xFF6b7280)
-                      : const Color(0xFF9ca3af),
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                isDense: true,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          if (current.isNotEmpty)
-            TextButton(
-              onPressed: () async {
-                await UserDataService.saveGithubProxyDomain('');
-                if (!ctx.mounted) return;
-                Navigator.of(ctx).pop();
-                if (!mounted) return;
-                setState(() {
-                  _githubProxyDomain = '';
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已清除 GitHub 代理 URL')),
-                );
-              },
-              child: Text(
-                '清除',
-                style: FontUtils.poppins(
-                  ctx,
-                  fontSize: 14,
-                  color: const Color(0xFFef4444),
-                ),
-              ),
-            ),
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(
-                text:
-                    '1. 打开 https://github.com/djsevenx1/tmdb-proxy\n2. Fork 或 Clone 仓库到本地\n3. 在 Cloudflare Dashboard 选 Workers & Pages → Create application → Pages → Upload assets, 把仓库根目录 (含 _worker.js) 上传\n4. 部署完拿到 https://<project>.pages.dev, 粘到这 (跟「TMDB / Bangumi 代理 URL」填同一个即可)',
-              ));
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(
-                    content: Text('已复制部署步骤 (Fork djsevenx1/tmdb-proxy 上 CF Pages)')),
-              );
-            },
-            child: Text(
-              '查看步骤',
-              style: FontUtils.poppins(
-                ctx,
-                fontSize: 14,
-                color: widget.isDarkMode
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF6b7280),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              '取消',
-              style: FontUtils.poppins(
-                ctx,
-                fontSize: 14,
-                color: widget.isDarkMode
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF6b7280),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              final input = controller.text.trim();
-              final cleaned =
-                  await UserDataService.saveGithubProxyDomain(input);
-              if (!ctx.mounted) return;
-              Navigator.of(ctx).pop();
-              if (!mounted) return;
-              setState(() {
-                _githubProxyDomain = cleaned ?? '';
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(input.isEmpty
-                      ? '已清除 GitHub 代理 URL'
-                      : '已保存 GitHub 代理 URL, 重新打开 app 后检查更新会走 worker'),
-                ),
-              );
-            },
-            child: Text(
-              '保存',
-              style: FontUtils.poppins(
-                ctx,
-                fontSize: 14,
-                color: const Color(0xFF22C55E),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    controller.dispose();
-  }
+  // v2.1.49: 删了 v2.1.46 的 _openGithubProxyDomainDialog 独立方法
+  //   (跟 _openTmdbProxyDomainDialog 完全平行, 共享 _tmdbProxyDomain
+  //   字段). GitHub 路由在 buildGithubApiUrl /
+  //   buildGithubReleaseAssetUrl 内部用 getTmdbProxyDomainSync() 读,
+  //   不需要单独 dialog. 用户反馈 "重复了吧".
 
   String _parseRoleFromCookies(String? cookies) {
     if (cookies == null || cookies.isEmpty) {
@@ -1996,7 +1816,7 @@ class _UserMenuState extends State<UserMenu> {
                     : const Color(0xFF22C55E),
               ),
               _buildDivider(),
-              // v2.1.41: TMDB 代理 URL 输入行 — 用户自部署 [djsevenx1/tmdb-proxy]
+              // v2.1.41: 代理 URL 输入行 — 用户自部署 [djsevenx1/tmdb-proxy]
               //   到 Cloudflare Pages 拿到的 https://xxx.pages.dev. 配了
               //   「TMDB 数据源」选 'TMDB Worker 加速' 才会用上, 没配选
               //   '直连' 也允许配 (先存着, 切的时候不用再输一次).
@@ -2005,8 +1825,11 @@ class _UserMenuState extends State<UserMenu> {
               // v2.1.42 改: label 改成 "TMDB / Bangumi 代理 URL" — 同一个
               //   worker 同时服务 TMDB (/movie/...) 和 Bangumi (/bangumi/...
               //   /bgm-img/...), 共用 _tmdbProxyDomain 字段.
+              // v2.1.49 改: label 改成 "代理 URL" — 同一个 worker 同时
+              //   服务三套路由 (TMDB / Bangumi / GitHub), 不再单开
+              //   "GitHub 代理 URL" 独立项 (用户反馈 "重复了吧").
               _buildInputOption(
-                title: 'TMDB / Bangumi 代理 URL',
+                title: '代理 URL (TMDB / Bangumi / GitHub)',
                 currentValue: _tmdbProxyDomain.isEmpty
                     ? '未配置'
                     : _tmdbProxyDomain,
@@ -2015,27 +1838,6 @@ class _UserMenuState extends State<UserMenu> {
                     ? LucideIcons.cloudOff
                     : LucideIcons.cloud,
                 iconColor: _tmdbProxyDomain.isEmpty
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF22C55E),
-              ),
-              _buildDivider(),
-              // v2.1.46: GitHub 代理 URL — 跟 TMDB/Bangumi 代理 URL
-              //   同样 UX, 但字段独立 (_githubProxyDomain). 用于加速
-              //   GitHub Releases API + release assets 下载, 解决国内
-              //   GFW 拉不到 api.github.com / objects.githubusercontent.com
-              //   的问题. 推荐跟「TMDB / Bangumi 代理 URL」填同一个
-              //   worker 地址 ([djsevenx1/tmdb-proxy] 仓库已加
-              //   /github/... 路由).
-              _buildInputOption(
-                title: 'GitHub 代理 URL',
-                currentValue: _githubProxyDomain.isEmpty
-                    ? '未配置'
-                    : _githubProxyDomain,
-                onTap: _openGithubProxyDomainDialog,
-                icon: _githubProxyDomain.isEmpty
-                    ? LucideIcons.code
-                    : LucideIcons.code,
-                iconColor: _githubProxyDomain.isEmpty
                     ? const Color(0xFF9ca3af)
                     : const Color(0xFF22C55E),
               ),

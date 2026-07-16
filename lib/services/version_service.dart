@@ -7,11 +7,13 @@ import 'package:luna_tv/services/user_data_service.dart';
 
 class VersionService {
   // v2.1.46: 不再 static const — 改成在 [checkForUpdate] 里动态读
-  //   UserDataService.getGithubProxyDomainSync(), 配了 worker URL
-  //   就走 worker (国内 GFW 可达), 没配走直连 api.github.com (用户
-  //   自己负责 VPN / GFW). 保留 const 写法给 [getReleaseUrl] 当
-  //   fallback URL 用 (release 详情页 URL 跟 API URL 是不同的,
-  //   release 页国内也 GFW 但用户可以浏览器开 VPN 看).
+  //   UserDataService.getTmdbProxyDomainSync() (v2.1.49 改: 复用
+  //   TMDB 代理 URL 字段, 删了 v2.1.46 的独立 github_proxy_domain
+  //   字段), 配了 worker URL 就走 worker (国内 GFW 可达), 没配走
+  //   直连 api.github.com (用户自己负责 VPN / GFW). 保留 const
+  //   写法给 [getReleaseUrl] 当 fallback URL 用 (release 详情页
+  //   URL 跟 API URL 是不同的, release 页国内也 GFW 但用户可以
+  //   浏览器开 VPN 看).
   static const String githubRepoUrl = 'https://github.com/djsevenx1/LunaTV-Mobile';
   static const String githubApiUrl = 'https://api.github.com/repos/djsevenx1/LunaTV-Mobile/releases/latest';
   static const String _lastCheckKey = 'last_version_check';
