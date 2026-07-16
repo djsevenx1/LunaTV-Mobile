@@ -1918,7 +1918,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _speedSampleTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       try {
-        final cur = VideoProxyStatus.instance.totalFetchedBytes;
+        final cur = VideoProxyStatus.snapshot.totalFetchedBytes;
         final now = DateTime.now().millisecondsSinceEpoch;
         if (_lastSampleMs == 0 || cur < _lastDemuxerBytes) {
           _lastDemuxerBytes = cur;

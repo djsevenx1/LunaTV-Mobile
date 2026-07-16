@@ -101,8 +101,14 @@ abstract class FullscreenController {
 /// 播放器跟 Flutter 视图桥接的 widget — 之前是 `Video(controller: VideoController(player))`,
 ///   后端不同 widget 也不同 (ExoPlayer 用 ExoPlayerWidget / media3 包给的,
 ///   mpv 用 Video), 所以抽一个工厂.
+///
+/// v2.2.0 修复: build() 跟 [StatelessWidget.build] 签名冲突 (后者只接
+///   BuildContext), Dart 报 "more required arguments than those of overridden
+///   method 'StatelessWidget.build'". 抽象方法改名 buildView() 避开
+///   framework 的同名方法. 现在并没有子类 extends 它, 留着只是为了
+///   给未来 mpv 后端留扩展位, 因此 extends StatelessWidget 也暂时不删.
 abstract class PlayerView extends StatelessWidget {
   const PlayerView({super.key});
   /// 拿到跟 PlayerBackend 绑定的实际播放器 View, widget 透传 controls builder.
-  Widget build(BuildContext context, FullscreenController fullscreenCtl);
+  Widget buildView(BuildContext context, FullscreenController fullscreenCtl);
 }
