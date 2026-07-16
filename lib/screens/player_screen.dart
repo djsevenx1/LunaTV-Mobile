@@ -26,6 +26,8 @@ import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/luna_cache_manager.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/douban_detail_header.dart';
+import 'package:luna_tv/widgets/dlna_device_dialog.dart';
+import 'package:dlna_dart/dlna.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -90,6 +92,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   不依赖 doubanId, 主页/历史/收藏页都能拉到. null = 没配 key / 拉不到.
   List<TmdbCast>? _cast;
   bool _summaryExpanded = false; // 用户点击"展开"切换
+
+  // v2.1.45: DLNA 投屏状态. PlayerScreen 之前用 _buildLunaTopBar /
+  //   _buildLunaBottomBar 自定义 LunaTV Web 风格 UI, 没用 MobilePlayerControls /
+  //   PCPlayerControls / VideoPlayerWidget (那 3 个 widget 在 lib 里其实没人用,
+  //   所有播放入口 — show / anime / history / movie / tv / favorites / search /
+  //   short_drama / home_screen 都是直接跳 PlayerScreen). DLNA 代码
+  //   (dlna_device_dialog.dart + dlna_dart) 一直在 lib/widgets/ 里, 但只被
+  //   死代码 MobilePlayerControls / PCPlayerControls import, 实际播放 UI
+  //   看不到投屏按钮. v2.1.45 把它接进 PlayerScreen 实际 UI:
+  //   - _isCasting: 投屏成功后 true, 顶部栏 cast 按钮变 cast_connected 绿色
+  //   - _currentCastDevice: 当前投屏设备引用, 停止投屏时调 device.stop()
+  //   - 投屏成功后停本地 player, 切回 detail 视图, 提示 "已投屏到 XXX, 回到本地播放"
+  bool _isCasting = false;
+  DLNADevice? _currentCastDevice;
 
   // 状态
   String _phase = 'detail'; // detail | playing
@@ -3769,6 +3785,21 @@ class _PlayerScreenState extends State<PlayerScreen>
               //   颜色编码: 绿=都启用 / 黄=只 CF Worker / 灰=都没开
               //   点击弹出 dialog 显示详细状态 (是否走优选 IP / CF 加速)
               _buildAccelStatusIcon(),
+              // v2.1.45: DLNA 投屏按钮 (跟 MobilePlayerControls / PCPlayerControls
+              //   的 _buildCastButton 行为一致, 但接到 PlayerScreen 自定义 UI).
+              //   - 投屏中 (_isCasting=true): 绿色 cast_connected 图标, 点击弹
+              //     dialog 问 "停止投屏?" → _stopDLNACast
+              //   - 未投屏: 白色 cast 图标, 点击 → _showDLNADialog 扫设备
+              //   位置: 加速状态之后, 设置之前. 跟其他播放器 (VLC / PotPlayer
+              //   / 系统视频) 习惯一致 — 投屏按钮在右上角控制栏.
+              //   onTap 是 sync (VoidCallback = void Function()), 但内部调
+              //   async _showDLNACastAction, 用 unawaited 跑, 跟 _showSpeedDialog
+              //   / _enterPipMode 等 UI 入口同模板.
+              _iconBtn(
+                icon: _isCasting ? Icons.cast_connected : Icons.cast,
+                iconColor: _isCasting ? const Color(0xFF22C55E) : Colors.white,
+                onTap: () => _showDLNACastAction(),
+              ),
               // 设置
               _iconBtn(
                 icon: Icons.settings_outlined,
@@ -4516,6 +4547,198 @@ class _PlayerScreenState extends State<PlayerScreen>
       return '${(bps / 1024).toStringAsFixed(1)} KB/s';
     }
     return '${(bps / 1024 / 1024).toStringAsFixed(2)} MB/s';
+  }
+
+  /// v2.1.45: 投屏按钮入口 (sync VoidCallback 包装, 因为 _iconBtn 期望 sync
+  ///   onTap). 内部根据 _isCasting 走「停止投屏」或「扫设备」分支.
+  void _showDLNACastAction() {
+    if (_isCasting) {
+      // 已投屏: 弹确认 dialog
+      showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('停止投屏'),
+          content: Text(
+              '确定停止投屏到 ${_currentCastDevice?.info.friendlyName ?? "设备"}, 回到本地播放?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('停止投屏',
+                  style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      ).then((stop) {
+        if (stop == true) {
+          _stopDLNACast();
+        }
+      });
+    } else {
+      // 未投屏: 扫设备
+      _showDLNADialog();
+    }
+  }
+
+  /// v2.1.45: 打开 DLNA 投屏设备列表 (跟 MobilePlayerControls._showDLNADialog
+  ///   / PCPlayerControls._showDLNADialogInternal 行为对齐, 但接进 PlayerScreen
+  ///   自定义 LunaTV Web 风格 UI — 那 2 个 widget 没人用).
+  ///
+  /// 流程:
+  /// 1. pause 本地 player (如果正在播)
+  /// 2. 如果在全屏, 退全屏 (投屏不需要全屏)
+  /// 3. showDialog DLNADeviceDialog
+  /// 4. dialog 内部扫设备, 用户选设备 → 调 device.setUrl + device.play
+  /// 5. dialog 投屏成功后回调 widget.onCastStarted(device) → 这里接
+  ///    _onDLNACastStarted: 停本地 player, 切回 detail 视图, 显示投屏态
+  ///
+  /// 关键: 传 _currentPlayUrl (已经在 v2.1.43 wrap 过的) 跟 _selectedSource
+  ///   的元数据给 dialog. _currentPlayUrl 可能是:
+  ///   - http://127.0.0.1:PORT/m3u8?url=... (代理起成功)
+  ///   - https://<worker>/m3u8?url=... (worker 加速)
+  ///   - 原源 URL (都没配)
+  ///   上面 3 种 URL 都是公网可拉, TV 跟手机不在同一 wifi 也能投 — 但手机
+  ///   跟 TV 必须在同一 wifi 段才能被 SSDP 扫到 (UPnP 基础要求). 投屏后
+  ///   TV 拉 m3u8 + segment 都是公网, 跟手机播放一样的链路.
+  ///
+  /// 跟 MobilePlayerControls / PCPlayerControls 区别: 那 2 个 widget 是在
+  /// `Video(controls: ...)` 里, hide 控件后 dialog 也跟着消失, 但 PlayerScreen
+  /// 自定义 UI 是普通 Stack, 即使 hide 控件 dialog 还在. 这里 _showDLNADialog
+  /// 跟 pause + exit fullscreen 后, 切 detail 视图也不影响 dialog 弹出来.
+  Future<void> _showDLNADialog() async {
+    // v2.1.45: 跟 _showSpeedDialog / _enterPipMode 同模板, 先 try/catch
+    //   包住 — DLNA 扫不到设备 / network 多播被禁 / SSDP 异常等常见, 失败
+    //   不能让 player UI 卡死.
+    try {
+      // 1. pause (如果正在播)
+      if (_player.state.playing) {
+        await _player.pause();
+        if (!mounted) return;
+      }
+      // 2. 退全屏
+      if (_isFullscreen) {
+        await _onExitFullscreen();
+        if (!mounted) return;
+        // 等动画
+        await Future.delayed(const Duration(milliseconds: 250));
+        if (!mounted) return;
+      }
+      // 3. 拿当前 URL + 元数据
+      final playUrl = _currentPlayUrl;
+      if (playUrl.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('投屏失败: 当前没有可投屏的视频 URL (还没开始播放)'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+      // 4. showDialog
+      if (!mounted) return;
+      final resumePos = _player.state.position;
+      await showDialog(
+        context: context,
+        builder: (dialogContext) => DLNADeviceDialog(
+          currentUrl: playUrl,
+          resumePosition: resumePos,
+          videoTitle: widget.videoInfo.title,
+          currentEpisodeIndex: _currentEpisodeIndex,
+          totalEpisodes: _selectedSource?.episodes.length ?? 0,
+          sourceName: _selectedSource?.sourceName,
+          onCastStarted: (device) => _onDLNACastStarted(device),
+        ),
+      );
+    } catch (e) {
+      // v2.1.45: DLNA 扫设备 / setUrl / play 任何一步挂都走这里
+      DiaryService.add('[DLNA] _showDLNADialog except: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('投屏失败: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  /// v2.1.45: 投屏成功回调 (DLNADeviceDialog 在 device.setUrl + play 后调).
+  ///   跟 MobilePlayerControls / PCPlayerControls 不同, 这俩 widget
+  ///   投屏成功时只 _isCasting 状态切换, 还在播放视图 (控件 cast_connected
+  ///   图标). PlayerScreen 投屏后直接停本地 player + 切回 detail 视图,
+  ///   顶部栏显示「已投屏到 XXX」+ cast_connected 绿色按钮 + 「停止投屏」
+  ///   选项. 用户可以切回本地播放 (调 device.stop() + 重启 _player.open()).
+  Future<void> _onDLNACastStarted(dynamic device) async {
+    try {
+      DiaryService.add(
+          '[DLNA] cast started: device=${(device.info?.friendlyName) ?? device.toString()}, currentUrl=${_currentPlayUrl}');
+      setState(() {
+        _isCasting = true;
+        _currentCastDevice = device as DLNADevice;
+      });
+      // 停本地 player (TV 已经在播, 避免双声道 / 浪费流量)
+      try {
+        await _player.stop();
+      } catch (e) {
+        DiaryService.add('[DLNA] stop local player err: $e');
+      }
+      if (!mounted) return;
+      // 切回 detail 视图 (播放视图会黑屏, 不好看)
+      setState(() {
+        _phase = 'detail';
+        _isControlsVisible = false;
+      });
+      // 提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已投屏到 ${device.info.friendlyName}, 本地播放已停止'),
+          backgroundColor: const Color(0xFF22C55E),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: '停止投屏',
+            textColor: Colors.white,
+            onPressed: () => _stopDLNACast(),
+          ),
+        ),
+      );
+    } catch (e) {
+      DiaryService.add('[DLNA] _onDLNACastStarted except: $e');
+    }
+  }
+
+  /// v2.1.45: 停止投屏, 回到本地播放.
+  Future<void> _stopDLNACast() async {
+    final device = _currentCastDevice;
+    if (device != null) {
+      try {
+        device.stop();
+      } catch (e) {
+        DiaryService.add('[DLNA] stop device err: $e');
+      }
+    }
+    setState(() {
+      _isCasting = false;
+      _currentCastDevice = null;
+    });
+    // 重启本地 player (从 currentPlayUrl 续播, 跟 _onPlayPressed 路径一致)
+    final playUrl = _currentPlayUrl;
+    if (playUrl.isNotEmpty && mounted) {
+      try {
+        await _player.open(Media(playUrl));
+        DiaryService.add(
+            '[DLNA] stop cast: resume local play, url=$playUrl');
+      } catch (e) {
+        DiaryService.add('[DLNA] resume local play err: $e');
+      }
+    }
   }
 
   /// 打开设置底部面板(齿轮菜单: 倍速 / 跳过片头片尾 / 比例 等)
