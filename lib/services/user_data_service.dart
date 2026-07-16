@@ -1168,11 +1168,27 @@ class UserDataService {
   ///   走不到, passthrough 走直连 http. Worker 端反正都走 https, 这里
   ///   把 http://lain.bgm.tv 跟 https://lain.bgm.tv 一样处理. 用户反馈
   ///   「TMDB 可用 Bangumi 不行」的真因之一.
+  /// v2.1.43.2 改: 加 _bangumiImageUrlCache memoize. 详情页 / 轮播里
+  ///   同一张图会被 build 几十次 (FutureBuilder rebuild / 列表滑动),
+  ///   v2.1.43 不 memoize 时每次都重 wrap + 写 2 行日记, 一页爆
+  ///   上百行 wrap 日志. configKey 跟 (source, proxy) 绑定, 任意
+  ///   一变 (用户切图片源 / 改 worker URL) 就 clear. cache hit 跳过
+  ///   wrap + 跳过日记.
   static String buildBangumiImageUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
     final source = getBangumiImageSourceKeySync();
     if (source == 'bangumi_proxy') {
       final proxy = getTmdbProxyDomainSync();
+      // v2.1.43.2: 配置变了 → 清缓存
+      final configKey = 'bangumi_proxy|$proxy';
+      if (_bangumiImageCacheConfigKey != configKey) {
+        _bangumiImageUrlCache.clear();
+        _bangumiImageCacheConfigKey = configKey;
+      }
+      // v2.1.43.2: cache hit 直接返, 跳过 wrap + 跳过日记
+      final cached = _bangumiImageUrlCache[originalUrl];
+      if (cached != null) return cached;
+
       // v2.1.43.1: 兼容 http:// 和 https:// 两种 lain.bgm.tv 开头.
       //   BGM API 返的 cover/image 经常是 http://, 不只是 https://.
       //   检查 startsWith 跟 replaceFirst 用同一组 prefix, 保证 wrap
@@ -1192,6 +1208,8 @@ class UserDataService {
             '[Bangumi] buildImageUrl: source=bangumi_proxy, worker=$proxy');
         DiaryService.add(
             '[Bangumi] buildImageUrl wrap: in=$originalUrl out=$wrapped');
+        // v2.1.43.2: 存进 cache, 后续同 URL 直接命中
+        _bangumiImageUrlCache[originalUrl] = wrapped;
         return wrapped;
       } else {
         final reason = proxy.isEmpty
@@ -1201,6 +1219,11 @@ class UserDataService {
             '[Bangumi] buildImageUrl: source=bangumi_proxy 但 passthrough, reason="$reason", in=$originalUrl');
       }
     } else {
+      // v2.1.43.2: 切回 direct → 清 cacheKey, 下次切 proxy 时 cacheKey
+      //   变化会触发清缓存
+      if (_bangumiImageCacheConfigKey.isNotEmpty) {
+        _bangumiImageCacheConfigKey = '';
+      }
       // v2.1.43: 配了 worker URL 但图片源选 direct, 一次性 hint
       final proxy = getTmdbProxyDomainSync();
       if (proxy.isNotEmpty) {
@@ -1216,6 +1239,10 @@ class UserDataService {
 
   // v2.1.43: 一次性 hint flag (跟 data source hint 平行)
   static bool _bangumiImageSourceNoProxyHinted = false;
+
+  // v2.1.43.2: (source, proxy) memoize 缓存, 避免热路径重复 wrap + 日记爆
+  static final Map<String, String> _bangumiImageUrlCache = {};
+  static String _bangumiImageCacheConfigKey = '';
 
   /// 构造 TMDB 图片请求 URL
   ///
@@ -1233,11 +1260,24 @@ class UserDataService {
   /// v2.1.41: 仍然 1:1 返 (老用户 + 未配 worker URL 的). 新分支
   ///   只在 source='tmdb_proxy' 且 worker URL 已配时触发.
   /// v2.1.43 改: 加详细 DiaryService 日记, 跟 Bangumi 平行.
+  /// v2.1.43.2 改: 加 _tmdbImageUrlCache memoize, 跟 buildBangumiImageUrl
+  ///   一样, 详情页同一张图被 build 几十次时只 wrap 一次, cache hit
+  ///   跳过日记. configKey 跟 (source, proxy) 绑定, 变就 clear.
   static String buildTmdbImageUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
     final source = getTmdbDataSourceSync();
     if (source == 'tmdb_proxy') {
       final proxy = getTmdbProxyDomainSync();
+      // v2.1.43.2: 配置变了 → 清缓存
+      final configKey = 'tmdb_proxy|$proxy';
+      if (_tmdbImageCacheConfigKey != configKey) {
+        _tmdbImageUrlCache.clear();
+        _tmdbImageCacheConfigKey = configKey;
+      }
+      // v2.1.43.2: cache hit 直接返
+      final cached = _tmdbImageUrlCache[originalUrl];
+      if (cached != null) return cached;
+
       if (proxy.isNotEmpty && originalUrl.startsWith('https://image.tmdb.org')) {
         final wrapped = originalUrl.replaceFirst(
           'https://image.tmdb.org',
@@ -1247,6 +1287,8 @@ class UserDataService {
             '[TMDB] buildImageUrl: source=tmdb_proxy, worker=$proxy');
         DiaryService.add(
             '[TMDB] buildImageUrl wrap: in=$originalUrl out=$wrapped');
+        // v2.1.43.2: 存进 cache
+        _tmdbImageUrlCache[originalUrl] = wrapped;
         return wrapped;
       } else {
         final reason = proxy.isEmpty
@@ -1256,6 +1298,10 @@ class UserDataService {
             '[TMDB] buildImageUrl: source=tmdb_proxy 但 passthrough, reason="$reason", in=$originalUrl');
       }
     } else {
+      // v2.1.43.2: 切回 direct → 清 cacheKey
+      if (_tmdbImageCacheConfigKey.isNotEmpty) {
+        _tmdbImageCacheConfigKey = '';
+      }
       // v2.1.43: 配了 worker URL 但 TMDB 数据源选 direct, 一次性 hint
       final proxy = getTmdbProxyDomainSync();
       if (proxy.isNotEmpty) {
@@ -1271,6 +1317,10 @@ class UserDataService {
 
   // v2.1.43: 一次性 hint flag
   static bool _tmdbDataSourceNoProxyHinted = false;
+
+  // v2.1.43.2: (source, proxy) memoize 缓存
+  static final Map<String, String> _tmdbImageUrlCache = {};
+  static String _tmdbImageCacheConfigKey = '';
 
   // Bangumi 数据源 key 同步初始化（main.dart 启动时调用）
   //
