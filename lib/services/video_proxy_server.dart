@@ -946,10 +946,25 @@ class VideoProxyServer {
   ///
   /// baseUrl 优先用 target 反解出的原始 m3u8 URL, 解不出 fallback 用 m3u8
   /// 内容的第一个非注释行. 还不行就跳过 base 解析, 相对 URL 保持原样.
-  static String _rewriteM3u8ProxiedUrls(
+  ///
+  /// v2.2.0+58: workerDomain 用于解 wrap — CF worker /m3u8 端点返回的 m3u8
+  ///   里的段 URL 已经被 worker 改成 `https://<worker>/?url=<encoded>` 形式
+  ///   (worker 内部 m3u8 改写逻辑), 我们再 wrap 会变成双层嵌套
+  ///   `local(?url=cf_worker(?url=...))`, ExoPlayer 解析这种 3 层 URL 大概率
+  ///   出问题, 而且本地代理 fetch cf_worker 又要解一次, 浪费一跳. 修法:
+  ///   检测到已经是 worker URL 时, 先 parse 出内层 `url` 参数 (再做一次
+  ///   decodeComponent), 然后只 wrap 这一层.
+  ///
+  ///   返 ({body, unwrapped, wrapped}) record:
+  ///   - body: 重写后的 m3u8 文本
+  ///   - unwrapped: 被解 worker wrap 的段数 (v2.2.0+58 新增统计)
+  ///   - wrapped: 成功 wrap 成 local 的段数
+  ///   计数给日记看实际改了多少段, 验证修复生效.
+  static ({String body, int unwrapped, int wrapped}) _rewriteM3u8ProxiedUrls(
     String body, {
     required String? baseUrl,
     required String localBase,
+    String? workerDomain,
   }) {
     Uri? baseUri;
     if (baseUrl != null && baseUrl.isNotEmpty) {
@@ -975,11 +990,46 @@ class VideoProxyServer {
       }
     }
 
+    // v2.2.0+58: 检测 URL 是不是 worker 包过的, 是的话解出内层原始 URL.
+    //   注意 queryParameters 自带一次 URL-decode, 所以 queryParameters['url']
+    //   已经把 `%3A` 解成 `:`, 再 `Uri.decodeComponent` 解一次拿到原始 URL
+    //   (worker 自己 wrap 时通常只 encode 一次, queryParameters 解一次刚好
+    //   拿到 worker wrap 前的原始; 但 worker 也可能二次 encode, 所以再解
+    //   一次保险 — 反正最多 2 次, 不会破坏已经 plain 的 URL).
+    String? unwrapCfWorker(String url) {
+      if (workerDomain == null || workerDomain.isEmpty) return null;
+      final cleanWorker = workerDomain.trim();
+      if (cleanWorker.isEmpty) return null;
+      final https1 = 'https://$cleanWorker/?url=';
+      final http1 = 'http://$cleanWorker/?url=';
+      if (!url.startsWith(https1) && !url.startsWith(http1)) return null;
+      try {
+        final u = Uri.parse(url);
+        final inner = u.queryParameters['url'];
+        if (inner == null || inner.isEmpty) return null;
+        // queryParameters 已经 decode 一次, 这里是二次保险
+        return Uri.decodeComponent(inner);
+      } catch (_) {
+        return null;
+      }
+    }
+
     final lines = body.split('\n');
     final out = <String>[];
+    // v2.2.0+58: 统计被解 wrap 的段数, 日记里能看到 worker m3u8 改写层数
+    var unwrappedCount = 0;
+    var wrappedCount = 0;
 
     String? wrap(String url) {
       if (url.isEmpty) return url;
+
+      // v2.2.0+58: 如果是 worker URL, 先解一层
+      final unwrapped = unwrapCfWorker(url);
+      if (unwrapped != null) {
+        url = unwrapped;
+        unwrappedCount++;
+      }
+
       Uri u;
       try {
         if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -994,6 +1044,12 @@ class VideoProxyServer {
       }
       // 已经是本地代理的 (避免递归) → 跳过
       if (u.host == '127.0.0.1' || u.host == 'localhost') return null;
+      // v2.2.0+58: worker URL 在解 wrap 之后理论上不该再出现, 但保险判一下
+      if (workerDomain != null && workerDomain.isNotEmpty &&
+          (u.host == workerDomain.trim())) {
+        return null;
+      }
+      wrappedCount++;
       return '$localBase/?url=${Uri.encodeComponent(u.toString())}';
     }
 
@@ -1060,7 +1116,7 @@ class VideoProxyServer {
       out.add(wrapped ?? raw);
     }
 
-    return out.join('\n');
+    return (body: out.join('\n'), unwrapped: unwrappedCount, wrapped: wrappedCount);
   }
 
   /// v2.2.0: 从 m3u8 playlist 里删 ad 段 + 删孤儿 discontinuity.
@@ -1433,19 +1489,25 @@ class VideoProxyServer {
         //   只匹配 worker 域的 URL — 实际 m3u8 里的 .ts 段都是原 CDN 域, 一条都不
         //   匹配, 等于没重写. 这次按 RFC 8216 严格走: 所有 URI 行 / URI= 属性
         //   全部按 baseUrl 解析成绝对地址, 包成 `localBase/?url=<encoded>`.
+        // v2.2.0+58: 把 workerDomain 也传进去, 让重写函数能识别 worker 自带
+        //   wrap (m3u8 端点把 .ts 改成 `https://<worker>/?url=...`), 解一层
+        //   再 wrap, 避免双层嵌套. 顺便拿回 unwrapped/wrapped 计数, 日记验证.
         final m3u8BaseUrl = _extractOriginalUrlFromTarget(target);
-        final rewritten = _rewriteM3u8ProxiedUrls(
+        final rewriteResult = _rewriteM3u8ProxiedUrls(
           filtered,
           baseUrl: m3u8BaseUrl,
           localBase: localBase,
+          workerDomain: workerDomain,
         );
+        final rewritten = rewriteResult.body;
         // v2.2.1: 把 wrap 后的 m3u8 头 500 字 dump 进日记, 方便诊断 ExoPlayer
         //   是不是因为段 URL 没重写 / 重写错 / 格式坏而无法解析
+        // v2.2.0+58: 同时记录 unwrap 计数 (worker 改写过几段) + wrap 计数
         final dumpSample = rewritten.length > 500
             ? '${rewritten.substring(0, 500)}\n... [+${rewritten.length - 500} chars]'
             : rewritten;
         DiaryService.add(
-            '[VideoProxy] m3u8 wrap OK: baseUrl=$m3u8BaseUrl, size=${rewritten.length}B\n$dumpSample');
+            '[VideoProxy] m3u8 wrap OK: baseUrl=$m3u8BaseUrl, size=${rewritten.length}B, unwrapped=${rewriteResult.unwrapped}, wrapped=${rewriteResult.wrapped}\n$dumpSample');
         final rewrittenBytes = utf8.encode(rewritten);
         rewrittenSize = rewrittenBytes.length; // v2.1.40: 记录到状态
 
@@ -1457,12 +1519,16 @@ class VideoProxyServer {
         final bodyMs = DateTime.now().difference(headerSentAt).inMilliseconds;
       } else {
         // 非 m3u8 (.ts / .mp4): 流式转发
-        // v2.2.1: 写一段日记, 方便看段 URL 拉没拉 (之前的诊断统计只显示 m3u8 数,
-        //   段拉成功与否静默, 视频播不了看不到原因). 一次播放会刷几十条, 后续
-        //   UI 可以 filter "seg fetch" 段行.
+        // v2.2.0+58: 修 v2.2.0+57 的占位符 bug — 之前 target 写死 "target=/?url=..." 完全没用,
+        //   现在记完整 target, 日记里 grep "seg fetch" 能直接看到段请求的 URL 编码形式.
+        //   一次播放刷几十条, UI 可以 filter.
         final tsUrl = _extractOriginalUrlFromTarget(target);
+        // target 可能很长 (嵌套 URL), 截到 200 字符防日记爆
+        final targetForLog = target.length > 200
+            ? '${target.substring(0, 200)}... [+${target.length - 200} chars]'
+            : target;
         DiaryService.add(
-            '[VideoProxy] seg fetch BEGIN: target=/?url=..., segUrl=$tsUrl');
+            '[VideoProxy] seg fetch BEGIN: target=$targetForLog, segUrl=$tsUrl');
         final respBuf = StringBuffer();
         respBuf.write('HTTP/1.1 $statusCode OK\r\n');
         if (contentLength != null) {
