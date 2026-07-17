@@ -70,12 +70,14 @@ jobs:
       # build.gradle.kts 直接读取, 每次 CI 构建签名一致
       # 镜像 502 时 Flutter 会自动重试 1 次, 但 Aliyun/Huawei/Tencent 同步挂的时候
       # 重试不够, 这里用 nick-fields/retry 兜底网络瞬时故障
+      # v2.2.0+53 aliyun 持续 502, retry 3 次/30s 不够 → 提到 5 次/60s, 给镜像
+      # 恢复时间. Gradle 失败重跑会复用已下载的 artifact, 重试成本不高.
       - name: Build Android APK (release)
         uses: nick-fields/retry@v3
         with:
-          max_attempts: 3
+          max_attempts: 5
           retry_on: error
-          retry_wait_seconds: 30
+          retry_wait_seconds: 60
           timeout_minutes: 60
           command: flutter build apk --release
 
