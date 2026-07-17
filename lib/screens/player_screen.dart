@@ -2159,25 +2159,27 @@ class _PlayerScreenState extends State<PlayerScreen>
       _episodesPageController.jumpToPage(newPage);
     }
 
-    // v2.2.6: playUrl 退化到 worker 直连 (buildProxiedUrlAsync).
-    //   之前 v2.2.4/v2.2.5 都试图修本地代理层让 ExoPlayer 能用, 但用户实测
-    //   "所有格式直连能播, 开本地代理不能播" — ExoPlayer HLS source 拿到本地
-    //   代理返回的 m3u8 后不拉任何段 (req IN 永远只有 1 条 m3u8, 段请求=0).
-    //   根因在 ExoPlayer 对代理 chunked/CORS/Connection:close 响应的兼容性,
-    //   跟代理内部 m3u8 wrap 逻辑无关 (Python 端到端测试 100% 通过).
-    //   临时方案: playUrl 一律走 https://<worker>/m3u8?url=... 直连 worker
-    //     (跟用户测试通过的 "直连" 路径完全一致), 牺牲手动优选 IP 优化.
-    //   _ensureVideoProxy 仍保留 (加速链路 UI 状态指示 + 后台测速用).
-    //   后续 v2.2.7+ 计划: 写 Kotlin ExoPlayer wrapper 显式配 ExtractorsFactory
-    //     + 适配 chunked 响应, 再切回本地代理路径.
+    // v2.2.7: playUrl 退化到原源直连 CDN (不 wrap, 不经本地代理, 不经 worker).
+    //   v2.2.6 我理解错了 — 用户测的「关视频代理能播」是 playUrl 走
+    //   `https://play.ly166.com:65/...index.m3u8` **原源 CDN 直连**, 不是
+    //   worker 直连. v2.2.6 把 playUrl wrap 到 `https://api.fn0.qzz.io/m3u8?url=...`
+    //   worker 直连, 跟用户测试通过的「直连」不是同一条路径, 所以 v2.2.6 装上还是转圈.
+    //   真·直连 = 不 wrap, playUrl = url (原源 https://... 域名).
+    //   ExoPlayer 1.4.1 对原源 CDN HTTPS 直连支持正常 (用户测试能播),
+    //   走 worker 反而被 CF 中转 + m3u8 改写 + CORS 头影响 ExoPlayer 解析.
+    //   临时方案: playUrl 一律 = url 原源直连. _ensureVideoProxy 仍保留
+    //     (加速链路 UI 状态指示 + 后台测速用, 不再影响 playUrl).
+    //   代价: 完全失去 worker 加速 + 手动优选 IP 优化.
+    //   后续 v2.2.8+ 计划:
+    //     1. worker / 本地代理 不参与 playUrl 路径, 仅保留「加速链路」测速 + UI
+    //     2. 排查为什么 worker 直连也不能播 (CF 中转 / m3u8 改写 / CORS 头
+    //        跟 ExoPlayer 兼容性), 找到原因后再决定要不要接回 worker
+    //     3. 同时调研 video_player 包是否可换 fijkplayer / 自写 Kotlin wrapper
+    //        替代, 拿到更细的 ExoPlayer 错误日志 + 显式配 ExtractorsFactory
     await _ensureVideoProxy();
-    final playUrl = await UserDataService.buildProxiedUrlAsync(url, forceM3u8: true);
-    final isProxied = playUrl != url;
+    final playUrl = url;
     DiaryService.add(
-        '[Video] playUrl build: path=${isProxied ? 'cf_worker' : 'direct'} (v2.2.6 local_proxy bypassed), originalUrl=$url');
-    if (isProxied) {
-      DiaryService.add('[Video] playUrl wrap: in=$url out=$playUrl');
-    }
+        '[Video] playUrl build: path=direct_cdn (v2.2.7 worker+local_proxy both bypassed), originalUrl=$url');
 
     // v2.0.34: 保存最终播放 URL 给「加速链路」弹层用
     _currentPlayUrl = playUrl;
