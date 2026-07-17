@@ -2159,34 +2159,24 @@ class _PlayerScreenState extends State<PlayerScreen>
       _episodesPageController.jumpToPage(newPage);
     }
 
-    // v2.0.65: 先 await _ensureVideoProxy (以前是 unawaited), 拿到代理端口
-    //   再构造播放 URL. 代理起成功 → 播放 URL 走 http://127.0.0.1:PORT/m3u8?url=...
-    //   代理没起 → 播放 URL 走原来的 buildProxiedUrl (https://worker/m3u8?url=...)
+    // v2.2.6: playUrl 退化到 worker 直连 (buildProxiedUrlAsync).
+    //   之前 v2.2.4/v2.2.5 都试图修本地代理层让 ExoPlayer 能用, 但用户实测
+    //   "所有格式直连能播, 开本地代理不能播" — ExoPlayer HLS source 拿到本地
+    //   代理返回的 m3u8 后不拉任何段 (req IN 永远只有 1 条 m3u8, 段请求=0).
+    //   根因在 ExoPlayer 对代理 chunked/CORS/Connection:close 响应的兼容性,
+    //   跟代理内部 m3u8 wrap 逻辑无关 (Python 端到端测试 100% 通过).
+    //   临时方案: playUrl 一律走 https://<worker>/m3u8?url=... 直连 worker
+    //     (跟用户测试通过的 "直连" 路径完全一致), 牺牲手动优选 IP 优化.
+    //   _ensureVideoProxy 仍保留 (加速链路 UI 状态指示 + 后台测速用).
+    //   后续 v2.2.7+ 计划: 写 Kotlin ExoPlayer wrapper 显式配 ExtractorsFactory
+    //     + 适配 chunked 响应, 再切回本地代理路径.
     await _ensureVideoProxy();
-    final proxyOn = _videoProxy?.isRunning == true;
-    final proxyPort = _videoProxy?.port ?? 0;
-
-    // v2.0.65: 代理起成功时, 播放 URL 走本地 HTTP 代理 (不走 CONNECT 隧道).
-    //   代理没起时, 走原来的 buildProxiedUrl (libmpv 直连 worker).
-    // v2.1.43.2: 加 DiaryService 日记, 记录最终 playUrl + 代理起没起 +
-    //   走的哪条路径 (本地代理 / worker 直连 / 原源直连). 之前 v2.1.43
-    //   之前没日记, 反馈「加速不行」时只能看 libmpv 错误码猜.
-    final String playUrl;
-    if (proxyOn && proxyPort > 0) {
-      // 播放 URL = http://127.0.0.1:PORT/m3u8?url=原URL
-      // 代理收到 GET /m3u8?url=原URL 后, fetch https://worker/m3u8?url=原URL 返回
-      playUrl = 'http://127.0.0.1:$proxyPort/m3u8?url=${Uri.encodeComponent(url)}';
-      DiaryService.add(
-          '[Video] playUrl build: path=local_proxy, port=$proxyPort, originalUrl=$url');
-    } else {
-      playUrl = await UserDataService.buildProxiedUrlAsync(url, forceM3u8: true);
-      final isProxied = playUrl != url;
-      DiaryService.add(
-          '[Video] playUrl build: path=${isProxied ? 'cf_worker' : 'direct'}, originalUrl=$url');
-      if (isProxied) {
-        DiaryService.add(
-            '[Video] playUrl wrap: in=$url out=$playUrl');
-      }
+    final playUrl = await UserDataService.buildProxiedUrlAsync(url, forceM3u8: true);
+    final isProxied = playUrl != url;
+    DiaryService.add(
+        '[Video] playUrl build: path=${isProxied ? 'cf_worker' : 'direct'} (v2.2.6 local_proxy bypassed), originalUrl=$url');
+    if (isProxied) {
+      DiaryService.add('[Video] playUrl wrap: in=$url out=$playUrl');
     }
 
     // v2.0.34: 保存最终播放 URL 给「加速链路」弹层用
