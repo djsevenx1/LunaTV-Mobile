@@ -125,6 +125,6 @@
   "_v2.2.0+57_order": 10,
   "v2.2.0+58": "## v2.2.0+58 — m3u8 重写去 worker 双层嵌套 (ExoPlayer 不拉分片修复)\n\n### 修复\n\n- **CF worker /m3u8 端点把段 URL 改成 `https://<worker>/?url=...`**, 本地代理 `_rewriteM3u8ProxiedUrls` 之前没识别, 又 wrap 一层变成 `local(?url=cf_worker(?url=original))` 三层嵌套. ExoPlayer 拿到这种 URL 解析失败 / 请求没发出, 表现就是 m3u8 能拿到但 `[VideoProxy] seg fetch BEGIN` 一条都没有, 视频就废了\n- **修法**: `_rewriteM3u8ProxiedUrls` 加 `workerDomain` 参数, wrap 前先检测段 URL 是不是 `https://<worker>/?url=` 形式, 是的话 parse 出内层 url 参数, 再用本地代理包这一层. 返 record `({body, unwrapped, wrapped})` 给日记统计\n- **v2.2.0+57 的 seg fetch 占位符 bug 一并修**: 改成记真实 target (截到 200 字符)\n",
   "_v2.2.0+58_order": 11,
-  "v2.2.0+59": "## v2.2.0+59 — 播放期屏幕常亮 (修屏保问题)\n\n### 修复\n\n- **播放一会系统屏保**: ExoPlayer (AndroidX Media3) 默认**不会**阻止系统屏幕休眠, 播放超过系统超时时间 (默认 30 秒 ~ 1 分钟) 屏幕就熄, 用户反馈「播放一会会屏保」就是这个\n- **修法**: 新增 `KeepScreenOnChannel` (Android `MethodChannel` + `WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON`). 播放页进入播放阶段 (phase='playing') 调 `setKeepScreenOn(true)`, 退出播放 / dispose 调 `setKeepScreenOn(false)`. Activity 不可见 (切后台 / 锁屏) OS 自动失效, 不用管 lifecycle. iOS 没注册这个 channel, 调会静默吞掉\n",
-  "_v2.2.0+59_order": 12
+  "v2.2.1": "## v2.2.1 — 播放期屏幕常亮 (修屏保问题)\n\n### 修复\n\n- **播放一会系统屏保**: ExoPlayer (AndroidX Media3) 默认**不会**阻止系统屏幕休眠, 播放超过系统超时时间 (默认 30 秒 ~ 1 分钟) 屏幕就熄, 用户反馈「播放一会会屏保」就是这个\n- **修法**: 新增 `KeepScreenOnChannel` (Android `MethodChannel` + `WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON`). 播放页进入播放阶段 (phase='playing') 调 `setKeepScreenOn(true)`, 退出播放 / dispose 调 `setKeepScreenOn(false)`. Activity 不可见 (切后台 / 锁屏) OS 自动失效, 不用管 lifecycle. iOS 没注册这个 channel, 调会静默吞掉\n",
+  "_v2.2.1_order": 12
 }
