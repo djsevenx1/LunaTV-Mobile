@@ -739,6 +739,26 @@ class UserDataService {
     return s;
   }
 
+  /// v2.2.1: 判断 [targetUrl] 是不是已经被 buildProxiedUrl 包过的 worker URL.
+  ///   形式: `https://<worker>/m3u8?url=...` 或 `https://<worker>/?url=...`.
+  ///   命中 → 不重包, 直接返原值 (调用方拿到 `url == targetUrl` 知道没动).
+  ///
+  ///   触发场景: m3u8_service 测段速 urlWrapper 对每个段 URL 调
+  ///   buildProxiedUrl, 但段 URL 可能是 worker 自己重写过 m3u8 内容后的
+  ///   worker 域 URL; 不去重会变成 worker URL 套 worker URL, 后端 fetch
+  ///   自己 → 死循环/卡死.
+  static bool _isAlreadyCfWorkerUrl(String targetUrl) {
+    final worker = _cfWorkerDomainCache?.trim() ?? '';
+    if (worker.isEmpty) return false;
+    // 形式 1: https://<worker>/m3u8?url=...
+    if (targetUrl.startsWith('https://$worker/m3u8?')) return true;
+    if (targetUrl.startsWith('http://$worker/m3u8?')) return true;
+    // 形式 2: https://<worker>/?url=...
+    if (targetUrl.startsWith('https://$worker/?')) return true;
+    if (targetUrl.startsWith('http://$worker/?')) return true;
+    return false;
+  }
+
   /// 通用代理 URL 构造器
   ///
   /// 在以下任一情况下返回原 URL：
@@ -769,6 +789,15 @@ class UserDataService {
   ///   你把日记加速详细点」一脉相承)
   static String buildProxiedUrl(String targetUrl, {bool forceM3u8 = false}) {
     if (targetUrl.isEmpty) return targetUrl;
+    // v2.2.1: 已经是 worker URL 的不重包, 避免 double-wrap.
+    //   触发场景: m3u8_service 测段速时 urlWrapper 对每个段 URL 调 buildProxiedUrl,
+    //   但段 URL 可能是 worker 自身重写过的 (worker 内部把 .ts URL 改成了 worker 域),
+    //   不去重就会变成 worker URL 套 worker URL, 后端 fetch 自己 → 死循环/卡死.
+    //   同时也保护"已经走过 buildProxiedUrl" 的二次调用, 返回原值, 调用方拿到
+    //   `url == targetUrl` 时知道没变.
+    if (_isAlreadyCfWorkerUrl(targetUrl)) {
+      return targetUrl;
+    }
     if (!_isCfWorkerUsableSync()) {
       // v2.1.43.2: 视频代理关 / worker URL 没配 → 一次性 hint, 不每次都记
       //   (m3u8 解析时一个播放会话调几十次, 每次都记会爆日记)
