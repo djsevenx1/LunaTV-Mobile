@@ -1000,13 +1000,26 @@ class VideoProxyServer {
       if (workerDomain == null || workerDomain.isEmpty) return null;
       final cleanWorker = workerDomain.trim();
       if (cleanWorker.isEmpty) return null;
-      final https1 = 'https://$cleanWorker/?url=';
-      final http1 = 'http://$cleanWorker/?url=';
-      if (!url.startsWith(https1) && !url.startsWith(http1)) return null;
+      // v2.2.5 修: 同时识别 /?url= 和 /m3u8?url= 两种 worker URL 形式.
+      //   /m3u8?url= 是 master playlist 的 variant URL, worker 的 /m3u8
+      //   端点会重写段为 /?url= 形式. 不识别这形式 → master playlist
+      //   variant 不被改写 → ExoPlayer 跳过本地代理直打 worker → 国内
+      //   网络环境到不了 api.fn0.qzz.io 就废.
+      final patterns = <String>[
+        'https://$cleanWorker/?url=',
+        'http://$cleanWorker/?url=',
+        'https://$cleanWorker/m3u8?url=',
+        'http://$cleanWorker/m3u8?url=',
+      ];
+      String? inner;
+      for (final p in patterns) {
+        if (url.startsWith(p)) {
+          inner = url.substring(p.length);
+          break;
+        }
+      }
+      if (inner == null) return null;
       try {
-        final u = Uri.parse(url);
-        final inner = u.queryParameters['url'];
-        if (inner == null || inner.isEmpty) return null;
         // queryParameters 已经 decode 一次, 这里是二次保险
         return Uri.decodeComponent(inner);
       } catch (_) {
@@ -1049,8 +1062,18 @@ class VideoProxyServer {
           (u.host == workerDomain.trim())) {
         return null;
       }
+      // v2.2.5 修: 选 worker 端点 — m3u8 文件用 /m3u8?url= (worker 会重写段,
+      // 再下到本地代理时 m3u8 跟段都走代理), 段/其他资源用 /?url= (worker
+      // 透传). 之前写死 /?url=, master playlist 的 variant 是 m3u8 也会被
+      // 包成 /?url=, local proxy 当成通用代理 fetch, worker 返回原始 m3u8
+      // (段是原 CDN URL), ExoPlayer 拉段直打 CDN, 绕过本地代理.
+      final pathLower = u.path.toLowerCase();
+      final isM3u8Url = pathLower.endsWith('.m3u8') ||
+          pathLower.endsWith('.m3u') ||
+          pathLower.contains('/m3u8');
+      final endpoint = isM3u8Url ? '/m3u8' : '/';
       wrappedCount++;
-      return '$localBase/?url=${Uri.encodeComponent(u.toString())}';
+      return '$localBase$endpoint?url=${Uri.encodeComponent(u.toString())}';
     }
 
     String rewriteUriAttr(String line) {
