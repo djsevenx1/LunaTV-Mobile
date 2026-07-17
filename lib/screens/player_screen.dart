@@ -221,6 +221,15 @@ class _PlayerScreenState extends State<PlayerScreen>
   static const Color kLunaLoadingColor = Color(0xFF009688);
   static const Color kLunaFloatBtnBg = Color(0x26FFFFFF);
 
+  // v2.2.0+59: 屏幕常亮 MethodChannel (Android 端 KeepScreenOnChannel.kt 配对).
+  //   ExoPlayer 默认不会阻止系统屏保, 播放超过系统超时时间 (默认 30s-1min)
+  //   屏幕就熄, 用户反馈「播放一会会屏保」就是这个问题. 调用 enable=true 给
+  //   Activity 加 FLAG_KEEP_SCREEN_ON, 离开播放页 / dispose 时 enable=false
+  //   清除, 恢复系统默认. Activity 不可见 (切后台 / 锁屏) OS 自动失效, 不用
+  //   手动管 lifecycle.
+  static const MethodChannel _keepScreenOnChannel =
+      MethodChannel('org.moontechlab.lunatv/keep_screen_on');
+
   @override
   void initState() {
     super.initState();
@@ -242,7 +251,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     // mobile_player_controls.dart:110 同模板, 但 player_screen 是另一个 widget
     // 自己的 _onVolumeSwipeUpdate → setVolume 路径没人设过这个字段, 所以会弹
     VolumeController().showSystemUI = false;
-    // v1.0.41: 读系统初始亮度/音量, 进入播放器时同步到 UI
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
       try {
@@ -376,7 +384,32 @@ class _PlayerScreenState extends State<PlayerScreen>
     _videoProxyActive = false;
     _speedSampleTimer?.cancel();
     _speedSampleTimer = null;
+    // v2.2.0+59: dispose 时关掉屏幕常亮. 即便 _phase 已经切到 'detail'
+    //   (前面有 setState), 保险起见 dispose 路径也清一次, 防止 widget
+    //   异常销毁时漏掉 (e.g. build 阶段抛错走不到上层清理).
+    _setKeepScreenOn(false);
     super.dispose();
+  }
+
+  /// v2.2.0+59: 控制屏幕常亮.
+  ///   进入播放阶段调 enable=true 阻止屏保, 离开/销毁调 enable=false 还原.
+  ///   走 Android MethodChannel → Activity.window.addFlags(FLAG_KEEP_SCREEN_ON),
+  ///   调用失败 / iOS 上也吞掉 (iOS 默认行为不一样, 不需要 keep screen on).
+  void _setKeepScreenOn(bool enable) {
+    // fire-and-forget: 不 await, 即便 native 端崩了也不影响播放器.
+    // catch 住 PlatformException 避免未捕获异常破坏 widget tree.
+    _keepScreenOnChannel.invokeMethod(
+      'setKeepScreenOn',
+      <String, dynamic>{'enable': enable},
+    ).catchError((Object e) {
+      // iOS 上没注册这个 channel, 调会抛 MissingPluginException, 静默吞.
+      // 其他错误打条日记便于排查.
+      if (e is! PlatformException ||
+          !e.code.contains('NOT_IMPLEMENTED')) {
+        DiaryService.add(
+            '[KeepScreenOn] $enable failed: $e');
+      }
+    });
   }
 
   /// 退出时串行: save → stop → dispose
@@ -2115,6 +2148,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _isBuffering = true;
       _phase = 'playing';
     });
+    // v2.2.0+59: 进入播放阶段, 屏幕常亮 (ExoPlayer 默认不阻止屏保).
+    //   离开播放页 (detail) 时会 clearFlags. 切集的话 _phase 还是 'playing',
+    //   这里 enable=true 多次调无副作用 (addFlags 重复设置是幂等的).
+    _setKeepScreenOn(true);
     // v2.0.51: 切集后 PageView 跳到当前 episode 所在页 (用 jumpToPage, 静默切)
     final newPage = (index ~/ _episodesPerPage).clamp(0, 999);
     if (_episodesPageController.hasClients &&
@@ -2359,6 +2396,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                 setState(() {
                   _phase = 'detail';
                 });
+                // v2.2.0+59: 退出播放视图, 解除屏幕常亮, 允许系统屏保
+                _setKeepScreenOn(false);
               }
             } else if (didPop && _phase == 'detail') {
               // v1.0.50: 真正退出页面时不再 save.
@@ -3669,7 +3708,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                     if (!mounted) return;
                     await _onExitFullscreen();
                     if (!mounted) return;
-                    setState(() => _phase = 'detail');
+                    setState(() {
+                      _phase = 'detail';
+                      // v2.2.0+59: 返回箭头退出播放, 解除屏幕常亮
+                      _setKeepScreenOn(false);
+                    });
                   }();
                 },
               ),
@@ -4609,6 +4652,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       setState(() {
         _phase = 'detail';
         _isControlsVisible = false;
+        // v2.2.0+59: DLNA 接管, 关屏幕常亮 (本地不播了, 屏幕可以省电)
+        _setKeepScreenOn(false);
       });
       // 提示
       ScaffoldMessenger.of(context).showSnackBar(

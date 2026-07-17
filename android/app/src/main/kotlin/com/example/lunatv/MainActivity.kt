@@ -14,5 +14,10 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         ImageHttpChannel(flutterEngine.dartExecutor.binaryMessenger)
         ApkInstallChannel(flutterEngine.dartExecutor.binaryMessenger, this)
+        // v2.2.0+59: 屏幕常亮 channel — 播放视频时 Flutter 端调
+        //   setKeepScreenOn(true) 阻止系统屏保, 离开播放页时
+        //   setKeepScreenOn(false) 还原. 走 Activity.window FLAG_KEEP_SCREEN_ON,
+        //   Activity 不可见时 (切后台) OS 自动失效, 不用管 lifecycle.
+        KeepScreenOnChannel(flutterEngine.dartExecutor.binaryMessenger, this)
     }
 }
