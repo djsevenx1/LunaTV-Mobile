@@ -913,7 +913,157 @@ class VideoProxyServer {
     return out;
   }
 
-  /// v2.0.92: 从 m3u8 playlist 里删 ad 段 + 删孤儿 discontinuity.
+  /// v2.2.1: 从本地代理的 target path 还原原始 m3u8 URL, 给 m3u8 重写做 base.
+  ///   target 形如 `/m3u8?url=<encoded>` 或 `/?url=<encoded>`, 走 Uri 反解拿原始
+  ///   m3u8 URL, 失败返 null (rewrite 内部 fallback 用 m3u8 里 # 注释前的第一行).
+  static String? _extractOriginalUrlFromTarget(String target) {
+    try {
+      final u = Uri.parse(target);
+      final orig = u.queryParameters['url'];
+      if (orig == null || orig.isEmpty) return null;
+      return Uri.decodeComponent(orig);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// v2.2.1: 把 m3u8 里所有段 URL 全部重写到本地代理.
+  ///
+  /// 背景: libmpv 时代靠 `--http-proxy=http://127.0.0.1:PORT` 把所有 HTTP
+  ///   流量 (含 m3u8 段) 走本地代理. ExoPlayer (video_player / Media3) 没有
+  ///   这个 hook, 只能靠 m3u8 重写. 之前的 `replaceAll(workerBase, localBase)`
+  ///   只匹配 `https://<worker>` 域的 URL, 但 m3u8 段 URL 都是原 CDN 域, 一条
+  ///   都不匹配, 等于没重写 — ExoPlayer 拿到 m3u8 后直接去拉原 CDN 段, 国内
+  ///   慢 / 403 / 不通, 视频就废了.
+  ///
+  /// 修法: 按 RFC 8216 严格解析 m3u8, 把所有 URI (不管在哪个 tag / 行) 全部
+  ///   按 baseUrl 解析成绝对地址, 包成 `localBase/?url=<encoded>`. 这样:
+  ///   - .ts 段: `http://127.0.0.1:PORT/?url=https%3A%2F%2Fcdn.x.com%2Fseg-001.ts`
+  ///   - sub-m3u8: `http://127.0.0.1:PORT/?url=https%3A%2F%2Fcdn.x.com%2Fsub.m3u8`
+  ///   - EXT-X-KEY URI: 同样包
+  ///   - EXT-X-MAP URI: 同样包
+  ///   都走本地代理 → CF worker → 原 CDN, 跟 libmpv 时代等价.
+  ///
+  /// baseUrl 优先用 target 反解出的原始 m3u8 URL, 解不出 fallback 用 m3u8
+  /// 内容的第一个非注释行. 还不行就跳过 base 解析, 相对 URL 保持原样.
+  static String _rewriteM3u8ProxiedUrls(
+    String body, {
+    required String? baseUrl,
+    required String localBase,
+  }) {
+    Uri? baseUri;
+    if (baseUrl != null && baseUrl.isNotEmpty) {
+      try {
+        baseUri = Uri.parse(baseUrl);
+      } catch (_) {
+        baseUri = null;
+      }
+    }
+    // fallback: m3u8 第一行非注释 URI 作 base (常见 master playlist 内嵌
+    //   绝对地址时用得上)
+    if (baseUri == null) {
+      for (final raw in body.split('\n')) {
+        final l = raw.trimRight();
+        if (l.isEmpty || l.startsWith('#')) continue;
+        try {
+          final u = Uri.parse(l);
+          if (u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) {
+            baseUri = u;
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+
+    final lines = body.split('\n');
+    final out = <String>[];
+
+    String? wrap(String url) {
+      if (url.isEmpty) return url;
+      Uri u;
+      try {
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          u = Uri.parse(url);
+        } else if (baseUri != null) {
+          u = baseUri.resolve(url);
+        } else {
+          return null; // 没法解析成绝对地址, 跳过
+        }
+      } catch (_) {
+        return null;
+      }
+      // 已经是本地代理的 (避免递归) → 跳过
+      if (u.host == '127.0.0.1' || u.host == 'localhost') return null;
+      return '$localBase/?url=${Uri.encodeComponent(u.toString())}';
+    }
+
+    String rewriteUriAttr(String line) {
+      // URI="..." 属性, 在 m3u8 里 URI 都用双引号包 (RFC 8216 强制)
+      final regex = RegExp(r'URI="([^"]*)"');
+      return line.replaceAllMapped(regex, (m) {
+        final orig = m.group(1) ?? '';
+        final wrapped = wrap(orig);
+        if (wrapped == null) return m.group(0)!;
+        return 'URI="$wrapped"';
+      });
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      final raw = lines[i];
+      final line = raw.trimRight();
+
+      // 空行 / EXTM3U: 保留
+      if (line.isEmpty || line == '#EXTM3U') {
+        out.add(raw);
+        continue;
+      }
+
+      // URI 属性类 tag: 重写 URI="..."
+      if (line.startsWith('#EXT-X-KEY:') ||
+          line.startsWith('#EXT-X-MAP:') ||
+          line.startsWith('#EXT-X-MEDIA:') ||
+          line.startsWith('#EXT-X-I-FRAME-STREAM-INF:') ||
+          line.startsWith('#EXT-X-SESSION-DATA:') ||
+          line.startsWith('#EXT-X-CONTENT-STEERING:')) {
+        out.add(rewriteUriAttr(line));
+        continue;
+      }
+
+      // URI 在**下一行**的 tag: 保留 tag 行, 重写下一行的 URI
+      if (line.startsWith('#EXTINF:') ||
+          line.startsWith('#EXT-X-STREAM-INF:') ||
+          line.startsWith('#EXT-X-PART:') ||
+          line.startsWith('#EXT-X-PART-INF:') ||
+          line.startsWith('#EXT-X-PRELOAD-HINT:') ||
+          line.startsWith('#EXT-X-DATERANGE:')) {
+        out.add(raw);
+        if (i + 1 < lines.length) {
+          final nextRaw = lines[i + 1];
+          final next = nextRaw.trimRight();
+          if (next.isNotEmpty && !next.startsWith('#')) {
+            final wrapped = wrap(next);
+            out.add(wrapped ?? nextRaw);
+            i++;
+          }
+        }
+        continue;
+      }
+
+      // 其他注释: 原样保留
+      if (line.startsWith('#')) {
+        out.add(raw);
+        continue;
+      }
+
+      // 段 URL 行 (罕见 — 孤立段, 不带 EXTINF, 兜底重写)
+      final wrapped = wrap(line);
+      out.add(wrapped ?? raw);
+    }
+
+    return out.join('\n');
+  }
+
+  /// v2.2.0: 从 m3u8 playlist 里删 ad 段 + 删孤儿 discontinuity.
   /// v2.1.4: 加日记记录删了多少段 + 列出 ad host (用户排查"卡住几秒
   ///   然后回到 N 分钟前").
   ///
@@ -1264,12 +1414,11 @@ class VideoProxyServer {
         client.add(utf8.encode(respBuf.toString()));
         await client.flush();
 
-        // 读完整 body, 重写 https://worker/ → http://127.0.0.1:PORT/
+        // 读完整 body, 把 m3u8 里所有段 URL 全部重写到本地代理
         final bodyBytes = await reader.readBody(contentLength, isChunked);
         final body = utf8.decode(bodyBytes);
         final port = _port;
         final localBase = 'http://127.0.0.1:$port';
-        final workerBase = 'https://$workerDomain';
         // v2.0.92: 改写 URL 前先在 worker 域 m3u8 上做 ad 段过滤 (基于原 host)
         //   原因: 用户反馈"播放到广告位卡住几秒再跳过" — 之前的方案是
         //   libmpv 已经加载了 ad 段, duration 跳变触发 seek 回去, 中间有几秒
@@ -1278,7 +1427,18 @@ class VideoProxyServer {
         //   关键词 (/ad/, /ads/, doubleclick, googlevideo 等) 或 host 跟
         //   m3u8 的 base host 跨域.
         final filtered = _stripAdsFromM3u8(body, workerDomain);
-        final rewritten = filtered.replaceAll(workerBase, localBase);
+        // v2.2.1: ExoPlayer 没有 libmpv --http-proxy, m3u8 里 .ts 段 / sub-m3u8 /
+        //   key / map URI 全部要重写到本地代理, 否则 ExoPlayer 直接打原 CDN, 国内
+        //   慢 / 403 / 不通, 视频就废了. 之前只用 `replaceAll(workerBase, localBase)`
+        //   只匹配 worker 域的 URL — 实际 m3u8 里的 .ts 段都是原 CDN 域, 一条都不
+        //   匹配, 等于没重写. 这次按 RFC 8216 严格走: 所有 URI 行 / URI= 属性
+        //   全部按 baseUrl 解析成绝对地址, 包成 `localBase/?url=<encoded>`.
+        final m3u8BaseUrl = _extractOriginalUrlFromTarget(target);
+        final rewritten = _rewriteM3u8ProxiedUrls(
+          filtered,
+          baseUrl: m3u8BaseUrl,
+          localBase: localBase,
+        );
         final rewrittenBytes = utf8.encode(rewritten);
         rewrittenSize = rewrittenBytes.length; // v2.1.40: 记录到状态
 
