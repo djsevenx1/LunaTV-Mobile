@@ -79,15 +79,34 @@ jobs:
           timeout_minutes: 60
           command: flutter build apk --release
 
+      # 之前用 softprops/action-gh-release@v2, 同一个 runner (East US) 调
+      # api.github.com/release 端点连续 502/503 — 软错误, 没 retry. v2.2.0+52
+      # 三次重跑都卡在这步. 改用 gh CLI + 显式 retry, 命中率高得多.
       - name: Create GitHub Release (APK)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "::group::attempt $i"
+            if gh release create "${{ github.ref_name }}" \
+              build/app/outputs/flutter-apk/app-release.apk \
+              --title "${{ github.ref_name }}" \
+              --generate-notes \
+              --target "${{ github.sha }}"; then
+              echo "release created on attempt $i"
+              break
+            fi
+            echo "::endgroup::"
+            if [ "$i" -eq 5 ]; then
+              echo "::error::gh release create failed after 5 attempts"
+              exit 1
+            fi
+            sleep 20
+          done
 
-      # softprops 在已存在 release 上也会调 updateRelease 并把 body 传成 undefined,
-      # 把 body 清空; 必须在它之后再用 github-script 把当前 tag 的 changelog 写回去
+      # gh release create 用 --generate-notes 自动生成 body, 但跟 .github/changelogs.json
+      # 里维护的版本说明不一致, 所以再走一次 github-script 把当前 tag 的 changelog 写回去
       - name: Set release body
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/github-script@v6
