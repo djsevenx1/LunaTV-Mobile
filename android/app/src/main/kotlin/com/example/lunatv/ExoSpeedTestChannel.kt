@@ -13,10 +13,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.LoadEventInfo
-import androidx.media3.exoplayer.source.MediaLoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -137,7 +138,7 @@ class ExoSpeedTestChannel(
                 override fun onLoadStarted(
                     eventTime: AnalyticsListener.EventTime,
                     loadEventInfo: LoadEventInfo,
-                    mediaLoadEventInfo: MediaLoadEventInfo,
+                    mediaLoadData: MediaLoadData,
                 ) {
                     if (firstLoadStart.get() == 0L) {
                         firstLoadStart.set(System.currentTimeMillis())
@@ -148,7 +149,7 @@ class ExoSpeedTestChannel(
                 override fun onLoadCompleted(
                     eventTime: AnalyticsListener.EventTime,
                     loadEventInfo: LoadEventInfo,
-                    mediaLoadEventInfo: MediaLoadEventInfo,
+                    mediaLoadData: MediaLoadData,
                 ) {
                     val bytes = loadEventInfo.bytesLoaded
                     // 阈值 32KB: m3u8 manifest 本身只有几 KB, 第一个
@@ -165,8 +166,9 @@ class ExoSpeedTestChannel(
                 override fun onLoadError(
                     eventTime: AnalyticsListener.EventTime,
                     loadEventInfo: LoadEventInfo,
-                    mediaLoadEventInfo: MediaLoadEventInfo,
-                    error: PlaybackException,
+                    mediaLoadData: MediaLoadData,
+                    error: IOException,
+                    wasCanceled: Boolean,
                 ) {
                     errored.set(true)
                 }
