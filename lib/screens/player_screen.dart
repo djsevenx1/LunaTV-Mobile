@@ -1832,11 +1832,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<double> _fallbackMeasureDownloadSpeed(http.Client client, String url) async {
     try {
-      // v2.3.3: fallback 不能直接对 m3u8 playlist 文本测速。
-      //   playlist 常常只有几 KB, Range 0-65535 会把这几 KB 文本下载完,
-      //   算出来就是 1KB/s / 5KB/s, 但实际播放下载的是后续 ts/m4s 分片,
-      //   速度能到 1-2MB/s。主测速失败时这里只保留延迟, 不再展示假速度。
-      if (_looksLikeM3u8Url(url)) return 0.0;
+      // v2.3.7: fallback 也要对 m3u8 测真实分片速度，不再直接返回 0
+      //   当 URL 是 m3u8 时，解析 playlist 并下载真实分片测速
+      if (_looksLikeM3u8Url(url)) {
+        return await _fallbackMeasureM3u8Speed(client, url);
+      }
       final stopwatch = Stopwatch()..start();
       final req = http.Request('GET', Uri.parse(url))
         ..followRedirects = true
@@ -1859,6 +1859,85 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {
       return 0.0;
     }
+  }
+
+  /// v2.3.7: fallback m3u8 测速 - 解析 playlist 并下载真实分片
+  ///   跟 m3u8_service 的 _measureSegmentSpeeds 思路一致，但用 http.Client
+  ///   避免创建新的 Dio 实例。解析 m3u8 获取分片 URL，下载前几个分片测速。
+  Future<double> _fallbackMeasureM3u8Speed(http.Client client, String m3u8Url) async {
+    try {
+      // 1. 下载 m3u8 playlist
+      final playlistReq = http.Request('GET', Uri.parse(m3u8Url))
+        ..followRedirects = true
+        ..maxRedirects = 2;
+      final playlistResp = await client.send(playlistReq).timeout(const Duration(milliseconds: 2000));
+      final playlistContent = await playlistResp.stream.bytesToString();
+      
+      // 2. 解析分片 URL
+      final segments = _parseM3u8Segments(playlistContent, m3u8Url);
+      if (segments.isEmpty) return 0.0;
+      
+      // 3. 下载前 2 个分片测速（跳过可能的 init 段）
+      final testSegments = segments.length > 2 ? segments.skip(1).take(2) : segments.take(2);
+      final stopwatch = Stopwatch()..start();
+      int totalBytes = 0;
+      
+      for (final segmentUrl in testSegments) {
+        try {
+          final segReq = http.Request('GET', Uri.parse(segmentUrl))
+            ..followRedirects = true
+            ..maxRedirects = 2;
+          final segResp = await client.send(segReq).timeout(const Duration(milliseconds: 1500));
+          await for (final chunk in segResp.stream) {
+            totalBytes += chunk.length;
+            if (totalBytes >= 512 * 1024) break; // 最多 512KB
+            if (stopwatch.elapsedMilliseconds > 2000) break; // 最多 2s
+          }
+        } catch (_) {
+          // 单个分片失败不影响整体
+        }
+        if (stopwatch.elapsedMilliseconds > 2000) break;
+      }
+      
+      stopwatch.stop();
+      if (totalBytes < 64 * 1024) return 0.0; // 样本太小
+      final sec = stopwatch.elapsedMilliseconds / 1000.0;
+      if (sec <= 0) return 0.0;
+      return (totalBytes / 1024) / sec; // KB/s
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  /// 解析 m3u8 playlist 获取分片 URL 列表
+  List<String> _parseM3u8Segments(String content, String baseUrl) {
+    final segments = <String>[];
+    final lines = content.split('\n');
+    
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+      
+      // 跳过子 playlist（master playlist 中的 variant）
+      if (trimmed.endsWith('.m3u8') || trimmed.endsWith('.m3u')) continue;
+      
+      // 解析相对/绝对 URL
+      String segmentUrl;
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        segmentUrl = trimmed;
+      } else if (trimmed.startsWith('/')) {
+        final uri = Uri.parse(baseUrl);
+        segmentUrl = '${uri.scheme}://${uri.host}$trimmed';
+      } else {
+        final uri = Uri.parse(baseUrl);
+        final basePath = uri.path.substring(0, uri.path.lastIndexOf('/') + 1);
+        segmentUrl = '${uri.scheme}://${uri.host}$basePath$trimmed';
+      }
+      
+      segments.add(segmentUrl);
+    }
+    
+    return segments;
   }
 
   bool _looksLikeM3u8Url(String url) {
