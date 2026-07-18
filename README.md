@@ -16,14 +16,14 @@
 
 ### 内容浏览
 - **首页轮播 + 多分区** — 继续播放、热门电影、热门剧集、新番放送(Bangumi)、热门综艺、热门短剧
-- **TMDB 海报墙 (v2.0.38+, v2.1.41+ 走 tmdb-proxy)** — 配 TMDB API Key 后,首页「热门电影」「热门剧集」section 自动替换为 TMDB 横滚海报墙 (w185 海报 + 标题 + 评分);详情页头部从 110x150 小海报升级为 16:9 大背景 + 简介。**v2.1.41+**: 配了「代理 URL」(自部署 [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy)) 后,TMDB API + 图片走 worker 加速,解决国内 GFW。**不填 key = 行为完全不变**, 跟「优选 IP」字段一个 UX
+- **TMDB 海报墙 (v2.0.38+, v2.1.41+ 走 tmdb-proxy)** — 配 TMDB API Key 后,首页「热门电影」「热门剧集」section 自动替换为 TMDB 横滚海报墙 (w185 海报 + 标题 + 评分);详情页头部从 110x150 小海报升级为 16:9 大背景 + 简介。**v2.1.41+**: 配了「代理 URL」(自部署 [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy)) 后,TMDB API + 图片走 worker 加速,解决国内 GFW。**不填 key = 行为完全不变**
 - **分类筛选** — 电视剧 / 电影 / 综艺 / 动漫 多种筛选维度(类型、地区、年代、平台、排序)
 - **短剧专区** — 独立分类聚合,横滑切换
 - **搜索** — 全局搜索,跨源聚合结果
 - **排行榜** — 豆瓣热门内容
 
 ### 播放能力
-- 基于 [media_kit](https://github.com/media-kit/media-kit) 的高性能播放器
+- 基于 AndroidX Media3 ExoPlayer 的高性能播放器
 - 自动判断视频横竖屏比例(`AspectRatio` + `SystemChrome`)
 - 全屏沉浸式 + 系统 UI 自动隐藏/恢复
 - 多源搜索播放(短剧点击直接进 PlayerScreen 走多源聚合)
@@ -148,6 +148,22 @@ GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
 ## 更新日志
 
 按版本倒序, 每条都列了用户能感知到的行为 + 内部修复。
+
+### v2.3.1 (2026-07-18) — 修复 TMDB 幻灯片与图片 HTTP 通道
+
+- **修复首页幻灯片 TMDB backdrop 不生效**: 恢复启动时 `UserDataService.warmupUserDataConfig()`, 让 `getTmdbApiKeySync()` / `getTmdbProxyDomainSync()` 在 Hero Banner 首次加载前拿到已保存的 TMDB API Key 和代理 URL。
+- **修复 CI 编译失败**: 恢复 `lib/services/luna_image_http.dart`, 解决 `luna_cache_manager.dart` import 文件不存在的问题。
+- **不恢复视频加速**: `LunaImageHttp` 只保留图片加载的 Android OkHttp TLS 兼容路径, 已移除其中的 `cf_optimizer.dart` / 优选 IP override 逻辑。
+- **保留 TMDB / Bangumi / GitHub 加速**: `tmdb-proxy` 的 TMDB API、TMDB 图片、Bangumi 数据 / 图片、GitHub Releases API / asset 路由继续有效。
+- pubspec: `2.3.0 → 2.3.1`
+
+### v2.3.0 (2026-07-18) — 移除视频加速链路
+
+- **移除视频加速链路**: 删除 CF Worker 视频代理、本地视频代理、优选 IP、加速设置页和相关 SharedPreferences 配置。视频播放恢复为 ExoPlayer 直连源站 CDN。
+- **保留元数据加速**: TMDB / Bangumi / GitHub 的 `tmdb-proxy` 路由保留, 只负责元数据、图片、GitHub 更新检查和 APK 下载, 不参与视频播放。
+- **保留图片 HTTP 通道**: `ImageHttpChannel.kt` / `LunaImageHttp` 用于 TMDB / Bangumi 图片加载的 Android OkHttp TLS 兼容路径, 不属于视频加速链路。
+- **设置页变化**: 「加速」section 消失, 用户不再看到 CF Worker 视频代理、视频代理开关、优选 IP 等配置项。
+- pubspec: `2.2.7 → 2.3.0`
 
 ### v2.1.52 (2026-07-16) — 修 APK 安装器弹不出来
 
