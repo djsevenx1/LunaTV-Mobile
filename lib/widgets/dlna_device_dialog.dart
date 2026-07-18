@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:dlna_dart/dlna.dart';
+import 'package:luna_tv/services/diary_service.dart';
 
 class DLNADeviceDialog extends StatefulWidget {
   final String currentUrl;
@@ -36,6 +37,13 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
   Timer? _scanTimer;
   StreamSubscription? _devicesSubscription;
   int _scanGeneration = 0;
+
+  Future<void> _runDlnaCommand(FutureOr<dynamic> Function() command) async {
+    final result = command();
+    if (result is Future) {
+      await result.timeout(const Duration(seconds: 8));
+    }
+  }
 
   @override
   void initState() {
@@ -367,12 +375,24 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
         }
       }
       
-      // 设置设备URL并播放
+      // 设置设备 URL 并播放.
+      // v2.3.1: 这里必须等待 DLNA 命令完成。之前直接调用 setUrl/play 后
+      // 立刻关闭弹窗并回调成功, 电视端拒绝 URL 或 SOAP 请求失败时 UI 仍会
+      // 显示"已投屏", 用户看到的就是"电视没反应".
       debugPrint('widget.currentUrl: ${widget.currentUrl}');
       debugPrint('formattedTitle: $formattedTitle');
       debugPrint('widget.resumePosition: ${widget.resumePosition?.inSeconds ?? 0}秒');
-      device.setUrl(widget.currentUrl, title: formattedTitle);
-      device.play();
+      DiaryService.add(
+          '[DLNA] cast request: device=${device.info.friendlyName}, url=${widget.currentUrl}, title=$formattedTitle, resume=${widget.resumePosition?.inSeconds ?? 0}s');
+      final dynamic dlnaDevice = device;
+      await _runDlnaCommand(() {
+        return dlnaDevice.setUrl(widget.currentUrl, title: formattedTitle);
+      });
+      await _runDlnaCommand(() {
+        return dlnaDevice.play();
+      });
+      DiaryService.add(
+          '[DLNA] cast command sent: device=${device.info.friendlyName}, url=${widget.currentUrl}');
 
       if (mounted) {
         Navigator.of(context).pop(); // 关闭连接对话框
@@ -382,6 +402,8 @@ class _DLNADeviceDialogState extends State<DLNADeviceDialog> {
         widget.onCastStarted?.call(device);
       }
     } catch (e) {
+      DiaryService.add(
+          '[DLNA] cast failed: device=${device.info.friendlyName}, url=${widget.currentUrl}, err=$e');
       if (mounted) {
         Navigator.of(context).pop(); // 关闭连接对话框
 

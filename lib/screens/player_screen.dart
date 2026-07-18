@@ -3888,15 +3888,15 @@ class _PlayerScreenState extends State<PlayerScreen>
         if (!mounted) return;
       }
       // 3. 拿当前 URL + 元数据
-      //   v2.3.0: 视频加速删了, _currentPlayUrl 字段没了, 用
-      //   _selectedSource.episodes[_currentEpisodeIndex] 拿原源 URL.
-      //   DLNA 投屏对 URL 跟本地播放没区别, 之前传 _currentPlayUrl
-      //   (worker / 本地代理 URL) 现在传原源, TV 端直连拉 m3u8 / 段.
-      final playUrl =
+      //   v2.3.0: 视频加速删了, _currentPlayUrl 字段没了, 但 DLNA 不能直接
+      //   用 episodes 里的原始地址: 有些源返回的是 /share/xxx HTML 分享页,
+      //   本地播放会先经 _resolveSharePageUrl() 提取真实 m3u8, 投屏也必须
+      //   走同一段解析逻辑, 否则电视拿到 HTML 页面会完全没反应.
+      final originalUrl =
           (_selectedSource != null && _currentEpisodeIndex < _selectedSource!.episodes.length)
               ? _selectedSource!.episodes[_currentEpisodeIndex]
               : '';
-      if (playUrl.isEmpty) {
+      if (originalUrl.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -3908,6 +3908,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         return;
       }
+      final playUrl = await _resolveSharePageUrl(originalUrl);
+      DiaryService.add(
+          '[DLNA] cast url build: originalUrl=$originalUrl, resolvedUrl=$playUrl');
       // 4. showDialog
       if (!mounted) return;
       final resumePos = _player!.position;
@@ -3920,7 +3923,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           currentEpisodeIndex: _currentEpisodeIndex,
           totalEpisodes: _selectedSource?.episodes.length ?? 0,
           sourceName: _selectedSource?.sourceName,
-          onCastStarted: (device) => _onDLNACastStarted(device),
+          onCastStarted: (device) => _onDLNACastStarted(device, playUrl),
         ),
       );
     } catch (e) {
@@ -3944,13 +3947,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///   图标). PlayerScreen 投屏后直接停本地 player + 切回 detail 视图,
   ///   顶部栏显示「已投屏到 XXX」+ cast_connected 绿色按钮 + 「停止投屏」
   ///   选项. 用户可以切回本地播放 (调 device.stop() + 重启 _player!.open()).
-  Future<void> _onDLNACastStarted(dynamic device) async {
+  Future<void> _onDLNACastStarted(dynamic device, String castUrl) async {
     try {
-      // v2.3.0: _currentPlayUrl 字段删了, 日记改用 _selectedSource.episodes[_currentEpisodeIndex].
-      final castUrl = (_selectedSource != null &&
-              _currentEpisodeIndex < _selectedSource!.episodes.length)
-          ? _selectedSource!.episodes[_currentEpisodeIndex]
-          : '';
       DiaryService.add(
           '[DLNA] cast started: device=${(device.info?.friendlyName) ?? device.toString()}, currentUrl=$castUrl');
       setState(() {

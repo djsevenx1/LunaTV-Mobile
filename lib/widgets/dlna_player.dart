@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:dlna_dart/xmlParser.dart';
+import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/widgets/dlna_player_controls.dart';
 
 /// DLNAPlayer 的控制器，用于外部控制播放器
@@ -63,6 +64,13 @@ class _DLNAPlayerState extends State<DLNAPlayer> {
   bool _isPlaying = false;
   bool _isLoading = true;
   Duration _resumePosition = Duration.zero;
+
+  Future<void> _runDlnaCommand(FutureOr<dynamic> Function() command) async {
+    final result = command();
+    if (result is Future) {
+      await result.timeout(const Duration(seconds: 8));
+    }
+  }
 
   @override
   void initState() {
@@ -145,7 +153,10 @@ class _DLNAPlayerState extends State<DLNAPlayer> {
             _position.inSeconds >= _duration.inSeconds - 1 &&
             _isPlaying) {
           debugPrint('DLNA视频播放完成');
-          widget.device.pause();
+          final dynamic dlnaDevice = widget.device;
+          await _runDlnaCommand(() {
+            return dlnaDevice.pause();
+          });
           widget.onVideoCompleted?.call();
         }
       }
@@ -158,18 +169,27 @@ class _DLNAPlayerState extends State<DLNAPlayer> {
     }
   }
 
-  void _togglePlayPause() {
-    if (_isPlaying) {
-      widget.device.pause();
-      _isPlaying = false;
-      // 暂停时保存进度
-      widget.onPause?.call();
-    } else {
-      widget.device.play();
-      _isPlaying = true;
-    }
-    if (mounted) {
-      setState(() {});
+  Future<void> _togglePlayPause() async {
+    try {
+      final dynamic dlnaDevice = widget.device;
+      if (_isPlaying) {
+        await _runDlnaCommand(() {
+          return dlnaDevice.pause();
+        });
+        _isPlaying = false;
+        // 暂停时保存进度
+        widget.onPause?.call();
+      } else {
+        await _runDlnaCommand(() {
+          return dlnaDevice.play();
+        });
+        _isPlaying = true;
+      }
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      DiaryService.add('[DLNA] toggle play/pause failed: $e');
     }
   }
 
@@ -178,27 +198,48 @@ class _DLNAPlayerState extends State<DLNAPlayer> {
     widget.onStopCasting?.call(_position);
   }
 
-  void _seekTo(Duration position) {
+  Future<void> _seekTo(Duration position) async {
     final hours = position.inHours;
     final minutes = position.inMinutes.remainder(60);
     final seconds = position.inSeconds.remainder(60);
     final timeStr =
         '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    widget.device.seek(timeStr);
+    try {
+      final dynamic dlnaDevice = widget.device;
+      await _runDlnaCommand(() {
+        return dlnaDevice.seek(timeStr);
+      });
+    } catch (e) {
+      DiaryService.add('[DLNA] seek failed: position=$timeStr, err=$e');
+    }
   }
 
-  void _setVolume(double volume) {
+  Future<void> _setVolume(double volume) async {
     final volumeInt = (volume * 100).round();
-    widget.device.volume(volumeInt);
+    try {
+      final dynamic dlnaDevice = widget.device;
+      await _runDlnaCommand(() {
+        return dlnaDevice.volume(volumeInt);
+      });
+    } catch (e) {
+      DiaryService.add('[DLNA] volume failed: volume=$volumeInt, err=$e');
+    }
   }
 
   /// 更新视频 URL
-  void updateVideoUrl(String url, String title, {Duration? startAt}) {
+  Future<void> updateVideoUrl(String url, String title, {Duration? startAt}) async {
     if (!mounted) return;
 
     debugPrint('DLNA 更新视频 URL: $url, startAt: ${startAt?.inSeconds ?? 0}秒');
 
-    widget.device.pause();
+    try {
+      final dynamic dlnaDevice = widget.device;
+      await _runDlnaCommand(() {
+        return dlnaDevice.pause();
+      });
+    } catch (e) {
+      DiaryService.add('[DLNA] pause before update url failed: $e');
+    }
     _isPlaying = false;
 
     // 关闭状态轮询
@@ -209,14 +250,21 @@ class _DLNAPlayerState extends State<DLNAPlayer> {
       _resumePosition = startAt ?? Duration.zero;
     });
 
-    // 设置新的 URL
-    widget.device.setUrl(url, title: title);
-
-    // 开始播放
-    widget.device.play();
-
-    // 重新启动状态轮询
-    _startStatusPolling();
+    try {
+      final dynamic dlnaDevice = widget.device;
+      // 设置新的 URL 并开始播放.
+      await _runDlnaCommand(() {
+        return dlnaDevice.setUrl(url, title: title);
+      });
+      await _runDlnaCommand(() {
+        return dlnaDevice.play();
+      });
+      DiaryService.add('[DLNA] update url command sent: url=$url, title=$title');
+      // 重新启动状态轮询
+      _startStatusPolling();
+    } catch (e) {
+      DiaryService.add('[DLNA] update url failed: url=$url, err=$e');
+    }
   }
 
   @override
@@ -239,10 +287,16 @@ class _DLNAPlayerState extends State<DLNAPlayer> {
         onBackPressed: widget.onBackPressed,
         onNextEpisode: widget.onNextEpisode,
         isLastEpisode: widget.isLastEpisode,
-        onPlayPause: _togglePlayPause,
+        onPlayPause: () {
+          _togglePlayPause();
+        },
         onStop: _stop,
-        onSeek: _seekTo,
-        onVolumeChange: _setVolume,
+        onSeek: (position) {
+          _seekTo(position);
+        },
+        onVolumeChange: (volume) {
+          _setVolume(volume);
+        },
         onChangeDevice: widget.onChangeDevice,
       ),
     );
