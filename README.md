@@ -3,8 +3,7 @@
 > 一款基于 Flutter 的 LunaTV Android 客户端。
 
 主打开箱即用的多源聚合搜索 + 高质量本地播放,搭配:
-- **[CORSAPI](https://github.com/djsevenx1/CORSAPI)** — CF Worker,负责 m3u8 加速 / .ts 重写 / 源测速
-- **[djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy)** — CF Worker,负责 TMDB API / 图片 / Bangumi 数据 / 图片 加速 (v2.1.41+ 用户自部署)
+- **[djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy)** — CF Worker,负责 TMDB API / 图片 / Bangumi 数据 / 图片 / GitHub 更新加速 (用户自部署)
 
 ## 平台支持
 
@@ -35,12 +34,7 @@
 - **返回时主动 stop player** — 从播放视图返回详情视图时 player.stop() + 退全屏,后台不再继续播
 - **广告自动跳过** — 双层检测:① `streams.duration` 突然变小 > 60s 识别 m3u8 切流(v1.0.77) ② `streams.position` 突然倒退 > 5s 且回到 0 附近识别内嵌广告(v2.0.33,兜底部分源);自动 seek 回主片位置,用户无感
 - **播控「下一集」按钮**(v2.0.33) — 中途可手动切下一集,跟自动播下一集走同一逻辑,最后一集按钮自动隐藏
-- **手动优选 IP**(v2.0.31) — 设置页填一个 CF anycast IP,App 内所有 HTTP 请求强制走这个 IP,跳过 DNS 解析,解决 DNS 污染 / 某 CF POP 慢的问题
-- **优选 IP 支持优选域名**(v2.0.32) — 填 `cf.877774.xyz` / `cloudflare.182682.xyz` 等智能调度域名,App 启动 + 每 5 分钟自动 DNS 解析拿当前最优 IP,无需手动更新
-- **视频流走优选 IP**(v2.0.34 + v2.0.37 + v2.0.39) — 配「手动优选 IP / 域名」+ 打开「视频代理加速」开关后,libmpv 走本地 HTTP 代理 → 手动优选 IP → CF edge → 视频源,跳过系统 DNS
-  - **v2.0.34**: 把 v2.0.30 砍掉优选测速后 `VideoProxyServer.tryStart` 永远返 null 的 bug 修了 (门从 4 个砍到 3 个) + 把「视频代理加速」UI 开关加回 CF 加速页
-  - **v2.0.37**: 修 IP 模式启动时 `_resolvedManualIp` 永远 null 的双重 bug (v2.0.32 warmup 清空 + main.dart 漏调 resolve),让 IP 模式启动链路图节点 3 (优选 IP) 真的能亮
-  - **v2.0.39**: 修 v2.0.34 埋下的「`_ensureVideoProxy` 函数定义了但**没有任何地方调用**」挂死 bug + `tryStart` 静默 catch 改 print 详细错误 + 冷启动 3s 内 3 次重试。**装 v2.0.39 后视频段 (.ts) 真正走本地代理 → 优选 IP,测速比 v2.0.38 快 30~60%**
+- **直连播放** — v2.3.0 起视频播放链路恢复为播放器直连源站 CDN,不再走 CF Worker 视频代理 / 优选 IP / 本地代理
 
 ### 账号与同步
 - 自定义后端 API 地址(支持官方 / 自部署)
@@ -50,14 +44,13 @@
 
 ### 高级特性
 
-#### CF Worker 加速 (双 worker 架构)
+#### TMDB / Bangumi / GitHub 加速
 
-LunaTV-Mobile 用 **2 个独立 CF Worker** 解决不同问题,互不干扰:
+LunaTV-Mobile 保留用户自部署的 **tmdb-proxy** Worker,只负责元数据、图片和更新下载加速,不再参与视频播放链路:
 
 | Worker | 仓库 | 负责 | 触发条件 |
 |---|---|---|---|
-| **CORSAPI** | [djsevenx1/CORSAPI](https://github.com/djsevenx1/CORSAPI) | m3u8 加速 / .ts 重写 / 源测速 / 视频流代理 | 设「CF Worker 加速源域名」(如 `xxx.workers.dev`),开关打开 |
-| **tmdb-proxy** (v2.1.41+) | [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) | TMDB API / TMDB 图片 / Bangumi 数据 / Bangumi 图片 / GitHub Releases API + assets (v2.1.46+) | 设「代理 URL」(如 `https://your-worker.example.com`),TMDB + Bangumi 3 个数据源默认自动选 Worker 加速,GitHub 检查更新 / APK 下载走 worker |
+| **tmdb-proxy** | [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) | TMDB API / TMDB 图片 / Bangumi 数据 / Bangumi 图片 / GitHub Releases API + assets | 设「代理 URL」(如 `https://your-worker.example.com`),TMDB / Bangumi 数据源选 Worker 加速,GitHub 检查更新 / APK 下载走 worker |
 
 **tmdb-proxy** 路由 (path-based,比老 `?url=` 套娃干净):
 - `/movie/{id}` `/tv/{id}` `/search/...` `/movie/{id}/images` 等 → `api.themoviedb.org/3/...`
@@ -150,11 +143,6 @@ GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
 | **Bangumi 数据源** (v2.1.42+) | `Bangumi Worker 加速` / `直连`,2 选 1 |
 | **Bangumi 图片源** (v2.1.42+) | `Bangumi Worker 加速` / `直连`,2 选 1,跟数据源独立 |
 | **代理 URL** (v2.1.41+, 改名 v2.1.42, 合并 GitHub v2.1.49) | 自部署 [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) 拿到的 https://xxx.pages.dev,空 = 全部走直连. **同一个 URL 同时服务 TMDB / Bangumi / GitHub 三套路由** (TMDB `/movie/...` + `/image/...`、Bangumi `/bangumi/...` + `/bgm-img/...`、GitHub `/github/...` + `/github/asset/...`) |
-| M3U8 代理 URL | 留空则不用,填了则 m3u8 走 worker |
-| **CF Worker 加速** | 开关,只控制源测速 / m3u8 (走 CORSAPI) |
-| **CF Worker 加速源域名** | CORSAPI worker 域名 (如 `xxx.workers.dev`),配了之后视频 / m3u8 走 worker |
-| **优选 IP (可选)** | 填 IPv4 (静态) 或优选域名 (如 `cf.877774.xyz`,启动 + 5min 自动重新解析);留空 = 用系统 DNS |
-| **视频代理加速** | 开关,打开后 libmpv 走本地代理 → 优选 IP → CF edge (v2.0.34 加回来, v2.0.39 真正生效) |
 | **TMDB API Key (可选, v2.0.35, v2.1.41+ 配合 tmdb-proxy)** | 填了自动启用首页 TMDB 海报墙 + 详情页 TMDB 大背景. v2.1.41+: 配上「代理 URL」后,worker 自动用这个 key 调 TMDB,不用去 CF Dashboard 配 env. **留空 = 首页 / 详情页保持原 Douban 海报, 行为完全不变** |
 
 ## 更新日志
@@ -237,8 +225,7 @@ GitHub Actions 在 `main` 分支 push + 打 tag `v*.*.*` 时自动构建。
 
 - [LunaTV](https://github.com/MoonTechLab/LunaTV) — 原始 Web 项目
 - [Selene](https://github.com/MoonTechLab/Selene) — Flutter 移动端/桌面端源起项目
-- [CORSAPI](https://github.com/djsevenx1/CORSAPI) — 配套 CF Worker 后端,处理 m3u8 加速 / .ts 重写 / 源测速 / 视频流代理
-- [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) — 配套 CF Worker 后端,处理 TMDB API / 图片 + Bangumi 数据 / 图片 加速 (v2.1.41+, fork 自 [HuntzzZ/tmdb-proxy](https://github.com/HuntzzZ/tmdb-proxy))
+- [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) — 配套 CF Worker 后端,处理 TMDB API / 图片 + Bangumi 数据 / 图片 + GitHub 更新加速 (fork 自 [HuntzzZ/tmdb-proxy](https://github.com/HuntzzZ/tmdb-proxy))
 - [HuntzzZ/tmdb-proxy](https://github.com/HuntzzZ/tmdb-proxy) — tmdb-proxy 上游项目
 - [media_kit](https://github.com/media-kit/media-kit) — Flutter 媒体播放
 - [dlna_dart](https://github.com/dlna-dart/dlna_dart) — DLNA 投屏
