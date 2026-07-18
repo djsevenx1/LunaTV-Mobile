@@ -3,10 +3,13 @@
 // 走 Flutter 官方 video_player 包 (^2.11.1) — Android 端底层就是 Media3
 // ExoPlayer 1.4.x, 跟 build.gradle.kts 里的 androidx.media3 1.4.1 是同一份.
 // Dart 端 video_player 不直接暴露 ExoPlayer 实例, 只暴露 VideoPlayerController
-// 抽象 API. 优选 IP 走代理 URL (跟 libmpv 时代一样):
-//   http://127.0.0.1:PORT/m3u8?url=<原URL>
-// ExoPlayer 直接拉这个 URL, 代理服务转发到 CF Worker 加速 + 优选 IP,
-// 跟 libmpv 走的是同一条链路.
+// 抽象 API.
+//
+// v2.3.0: 视频加速链路整个删了, ExoPlayer 直连 CDN 拉 m3u8 / 段:
+//   - 不走本地代理 (VideoProxyServer 删了, 不再有 _proxyBaseUri / httpProxyUri)
+//   - 不走 CF Worker 视频代理 (buildProxiedUrl 删了, 不到 wrap 这一步)
+//   - 不走优选 IP (CfOptimizerHttpOverrides / DNS override 删了)
+//   playUrl = url 原源. 跟 v2.2.7 行为一致.
 //
 // libmpv 时代 MpvFFI.applyPlaybackTuning 调 hwdec/cache/framedrop 等 mpv
 // 配置, ExoPlayer (Media3) 默认就是:
@@ -14,9 +17,9 @@
 //   - 自适应 buffer (DefaultLoadControl, 不需要 cache=yes)
 //   - 丢帧策略 (Media3 默认就是 frame-accurate + adaptive, 不需要 framedrop=vo)
 //
-// 带宽流: Dart 端 video_player 不暴露 ExoPlayer Listener.onBandwidthSample,
-// 带宽走 1s 轮询代理服务 (VideoProxyStatus.fetchedBytes 已经记录). 后端这
-// 里带宽流先推空 (UI 不直接消费, cf_acceleration_page 那边自己 poll 代理).
+// 带宽流: Dart 端 video_player 不暴露 ExoPlayer Listener.onBandwidthSample.
+// v2.3.0 视频加速删了, 也没代理服务 fetchedBytes 推流. _bandwidthCtl 保留
+// 字段但内部推空 (PlayerBackend 抽象 API 保留, 上层可能 watch 测速).
 //
 // iOS 端走 AVPlayer (video_player 内部), 跟 libmpv 时代一样用, 保持兼容.
 
@@ -31,7 +34,9 @@ import 'package:luna_tv/services/player_backend.dart';
 class ExoPlayerBackend implements PlayerBackend {
   // ── 内部 video_player controller ────────────────────────
   VideoPlayerController? _controller;
-  Uri? _proxyBaseUri; // 视频代理基址 (http://127.0.0.1:PORT)
+  // v2.3.0: 视频加速删了, 不再需要 _proxyBaseUri (http://127.0.0.1:PORT)
+  //   字段删了, 工厂方法的 httpProxyUri 参数删了, defaultHeaders 保留
+  //   (用户可手动设 Referer / User-Agent 等).
 
   // ── 缓存的状态 (从 controller.value 同步读) ────────────
   bool _isPlaying = false;
@@ -60,14 +65,13 @@ class ExoPlayerBackend implements PlayerBackend {
 
   /// v2.2.0: 工厂 — 装配 video_player controller.
   ///   必须在 initState 里 await 调用, 不能在构造同步跑.
+  /// v2.3.0: 视频加速删了, httpProxyUri 参数删了, ExoPlayer 直连 CDN.
   static Future<ExoPlayerBackend> create({
-    Uri? httpProxyUri,
     Map<String, String>? defaultHeaders,
   }) async {
     final backend = ExoPlayerBackend();
-    backend._proxyBaseUri = httpProxyUri;
     DiaryService.add(
-        '[ExoPlayer] init OK: proxy=${httpProxyUri ?? "none"}, headers=${defaultHeaders?.keys.join(",") ?? "none"}');
+        '[ExoPlayer] init OK: directCDN=true, headers=${defaultHeaders?.keys.join(",") ?? "none"}');
     return backend;
   }
 
@@ -206,10 +210,10 @@ class ExoPlayerBackend implements PlayerBackend {
     _isCompleted = false;
     _safeAdd(_completedCtl, false);
 
-    // v2.2.0: video_player 不直接传 headers. headers 走代理层注入 (CfOptimizer
-    //   装的 HTTP override). 视频代理 URL 优先, 没代理才走原始 URL.
-    // 旧 libmpv 时代也是这个套路: buildProxiedUrl 拿到最终 URL, 一次 open.
-    // 复用上游已经 buildProxiedUrl 处理好的 URL, 这里只接收.
+    // v2.2.0: video_player 不直接传 headers. 之前 v2.2.0~v2.2.x 注释里
+    //   提 "headers 走代理层注入 (CfOptimizer 装的 HTTP override)", 现在
+    //   v2.3.0 视频加速删了, headers 走 video_player 默认 + Dart 端 http 包.
+    //   默认 headers (Referer / User-Agent) 由调用方 (player_screen) 决定.
     await _ensureController(url, headers: headers);
 
     if (startAt != null && startAt > Duration.zero) {

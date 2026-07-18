@@ -17,15 +17,16 @@ import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/m3u8_service.dart';
-import 'package:luna_tv/services/video_proxy_server.dart';
 import 'package:luna_tv/services/player_backend.dart';
+// v2.3.0: 视频加速 (VideoProxyServer + CfOptimizer) 整个删了, 不用这两个 import
+//   - video_proxy_server.dart 已删
+//   - cf_optimizer.dart 已删
 import 'package:luna_tv/services/exo_player_backend.dart';
 import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
-import 'package:luna_tv/services/cf_optimizer.dart';
 import 'package:luna_tv/services/luna_cache_manager.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/douban_detail_header.dart';
@@ -71,17 +72,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   video_player. ExoPlayerBackend 内部持 VideoPlayerController, widget
   //   层通过 rawController getter 拿到底层 controller 渲染 VideoPlayer.
   ExoPlayerBackend? _player;
-  // v2.0.16: 视频代理 (让 ExoPlayer 走优选 IP)
-  VideoProxyServer? _videoProxy;
+  // v2.3.0: 视频加速链路整个删了, 以下字段跟着删:
+  //   - VideoProxyServer _videoProxy  (本地代理服务, 整个文件删了)
+  //   - bool _videoProxyActive        (顶部「加速状态」指示器状态, 没人 trigger 了)
+  //   - double _downloadSpeedBps      (VideoProxyStatus 流推的实时下载速度, 流也没了)
+  //   - Timer? _speedSampleTimer      (上面用的 1Hz 采样 timer, 没人调了)
+  //   - int _lastDemuxerBytes         (上面用的 last-sample demuxer bytes, 没人读了)
+  //   - int _lastSampleMs             (上面用的 last-sample 时间戳, 没人用了)
+  //   - String _currentPlayUrl        (「加速链路」弹层用, 弹层删了)
+  //   v2.2.7 行为: ExoPlayer 直连 CDN, 无任何代理层, 无下载速度采样, 无状态指示器.
   // v2.0.34: 顶部「加速状态」指示器用, 视频代理实际在跑时为 true
-  bool _videoProxyActive = false;
-  // v2.0.34: 实时下载速度 (Bytes/s), 1Hz 采样 libmpv demuxer-bytes 算 delta
-  double _downloadSpeedBps = 0;
-  Timer? _speedSampleTimer;
-  int _lastDemuxerBytes = 0;
-  int _lastSampleMs = 0;
-  // v2.0.34: 「加速链路」弹层用, 保存当前播放 URL (buildProxiedUrl 之后的最终 URL)
-  String _currentPlayUrl = '';
   // v2.0.93: TMDB 精准识别的 w1280 backdrop URL, 传给 DoubanDetailHeader
   //   替代豆瓣 coverUrl. 加载完成后 setState 触发 rebuild, 没加载完
   //   / 加载失败 / 没配 key = null, DoubanDetailHeader 走 coverUrl 兜底.
@@ -378,12 +378,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 跟 mobile_player_controls.dart:160 同模板, 否则其他场景 (detail 页面
     // 之类) 再调 setVolume 也不会弹系统 UI
     VolumeController().showSystemUI = true;
-    // v2.0.16: 关本地视频代理 (释放 127.0.0.1:PORT)
-    unawaited(_videoProxy?.stop());
-    _videoProxy = null;
-    _videoProxyActive = false;
-    _speedSampleTimer?.cancel();
-    _speedSampleTimer = null;
+    // v2.3.0: 视频加速链路整个删了, 关本地代理 / 状态指示器 / 速度采样 timer
+    //   全部删了. dispose 路径上不需要再 _videoProxy?.stop() / cancel timer.
     // v2.2.0+59: dispose 时关掉屏幕常亮. 即便 _phase 已经切到 'detail'
     //   (前面有 setState), 保险起见 dispose 路径也清一次, 防止 widget
     //   异常销毁时漏掉 (e.g. build 阶段抛错走不到上层清理).
@@ -1557,19 +1553,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _sortSourcesBySpeed();
   }
 
-  /// 测单个源: 走 M3U8Service 完整测速, 失败 fallback 到轻量测速 (HEAD + Range)
-  ///
-  /// v1.0.69: 测速 URL 跟 CF 加速开关走 (回到 v1.0.66 思路, 但 fallback 升级).
-  ///
-  /// 之前 v1.0.68 改成测原始 URL, 理由是"测速是挑源, 不该跟 CF 耦合".
-  /// 用户反馈"打开加速要通过加速地址测速不然不准":
-  ///   - 测原始 URL 看到的 ms/KB/s 是源本身的物理速度
-  ///   - 但用户实际播放走的是 worker, 体验跟直连测速不一致
-  ///   - 例: 源 A 直连 100ms 但 worker 转发卡 2000ms, 测速显示 100ms (快)
-  ///         实际播放却卡 → "不准"
-  ///   - 测 worker URL 才是用户真实播放体验
-  ///
-  /// v1.0.69 修法:
+  /// v2.3.0: 测速链路简化. 之前逻辑:
   ///   1. URL 走 `buildProxiedUrl`: 视频代理 on 拿 worker URL, 视频代理 off 拿原 URL
   ///      (buildProxiedUrl 内部 `_isCfWorkerUsableSync` 已经按「视频代理」开关处理,
   ///       开关没开就原样返回, 不需要外部 if/else)
@@ -1580,53 +1564,34 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///      现在改成 \`_fallbackLightSpeed\`: HEAD 测 ms + Range 测 KB/s 并发,
   ///      即使 getStreamInfo 全失败 fallback 也能给出完整测速结果
   ///
-  /// v1.0.74 修法: 解决 CF 测速时 segment URL 解析错位 + segment 测速不走 worker
-  ///   - 根因: v1.0.69 测 worker URL 时, [M3U8Service.getStreamInfo] 内部
-  ///     \`_resolveUrl\` 用 worker URL 作 base 解析 m3u8 里的相对 segment
-  ///     → segment 拼成 \`https://<worker>/seg.ts\` (worker 不认识) → 404
-  ///     → KB/s 永远 0, UI 只显示 "Xms" (用户 v1.0.73 反馈的现象)
-  ///   - 修法: 调用 [M3U8Service.getStreamInfo] 时
-  ///     1. 传 \`originalUrl\`: 原始 m3u8 URL, 让它用 upstream base 解析 segment
-  ///     2. 传 \`urlWrapper\`: 测速时把 segment URL 也走 worker 包装
-  ///        → segment 走 worker / 端点, 真实测 worker 加速后的段速度
+  /// 现在 buildProxiedUrl / CfOptimizer / VideoProxyServer 整个删了, 测速
+  ///   直接用 originalUrl, 不用 worker 包装, 不用 originalUrl 二次 fallback
+  ///   (因为 url == originalUrl, 测一次就够).
   Future<_SourceSpeedInfo> _testSourceSpeed(M3U8Service m3u8, SearchResult s) async {
     if (s.episodes.isEmpty) return _SourceSpeedInfo.unavailable();
-    final originalUrl = s.episodes.first;
-    // v1.0.74: 测速 URL 跟 CF 开关走 (跟 v1.0.69 一致), 但传 originalUrl 给
-    // m3u8_service 让它解析 segment 时用 upstream base, 并传 urlWrapper 让
-    // segment 测速也走 worker. 修 v1.0.69 引入的 segment 解析错位 bug.
-    // v2.1.43.2: 加 DiaryService 日记, 记录测速是走直连还是走 worker,
-    //   以及原始 URL vs wrap 后的 URL. 之前 v2.1.43 之前没日记, 反馈
-    //   「加速不行」时只能猜.
-    final url = UserDataService.buildProxiedUrl(originalUrl);
-    final isProxied = url != originalUrl;
+    // v2.3.0: 直连测速, 不走 worker. originalUrl = url, 测速链路退化成单 URL.
+    final url = s.episodes.first;
     DiaryService.add(
-        '[Video] _testSourceSpeed begin: title=${s.title}, isProxied=$isProxied, originalUrl=$originalUrl');
-    DiaryService.add(
-        '[Video] _testSourceSpeed URL: in=$originalUrl out=$url (worker=${UserDataService.getCfWorkerDomainSync()}, videoProxyOn=${UserDataService.getVideoProxyEnabledSync()})');
-    return _testOneUrl(m3u8, url, originalUrl: originalUrl);
+        '[Video] _testSourceSpeed begin: title=${s.title}, isProxied=false, originalUrl=$url (v2.3.0 direct CDN)');
+    return _testOneUrl(m3u8, url, originalUrl: url);
   }
 
-  /// 单 URL 测速, 内部走 m3u8.getStreamInfo + 轻量 fallback (HEAD+Range), 8s 超时
-  ///
-  /// v1.0.74 新增 \`originalUrl\`: 测 worker URL 时传原始 m3u8 URL,
-  /// m3u8_service 解析 segment 时用 upstream base 避免 segment URL 错位
+  /// 单 URL 测速, 内部走 m3u8.getStreamInfo + 轻量 fallback (HEAD+Range)
   Future<_SourceSpeedInfo> _testOneUrl(
     M3U8Service m3u8,
     String url, {
     String? originalUrl,
   }) async {
     try {
-      // v1.0.69: 4s → 8s. worker 代理下 getStreamInfo 要过 3~4 次转发,
-      // 直连 0.5~1.5s 够, worker 转发单次 1~3s 不等, 8s 留足余量.
-      // v1.0.74: 传 originalUrl + urlWrapper, 让 m3u8_service 解析 segment
-      // 时用 upstream base, 测速时走 worker 包装.
+      // v2.3.0: 视频加速删了, 测速只剩直连, 4s 应该够. 改回 4s, 避免 m3u8 源慢时 UI 卡 8s.
+      //   v1.0.69 之前的 4s, 跟 v1.0.69~v2.2.x 走 worker 时的 8s 不同 (worker 转发要时间).
       final result = await m3u8.getStreamInfo(
         url,
+        // v2.3.0: 视频加速删了, 不用 originalUrl 二次 fallback (url==originalUrl)
         originalUrl: originalUrl,
-        urlWrapper: (segUrl) => UserDataService.buildProxiedUrl(segUrl),
+        // v2.3.0: 视频加速删了, 不用 urlWrapper 包装段 URL
       ).timeout(
-        const Duration(seconds: 8),
+        const Duration(seconds: 4),
         onTimeout: () => <String, dynamic>{
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,
@@ -1646,16 +1611,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
     } catch (_) {}
-    // v1.0.74 fallback: 优先用 originalUrl (原始 m3u8 URL) 测, 避免 worker
-    // 配错时 fallback 也撞 worker 限制拿到 0. 跟 v1.0.66 修法精神一致:
-    // CF 配对时 fallback 不用 (getStreamInfo 已经拿到真 KB/s), CF 配错时
-    // fallback 测原始 URL 至少能给个真实数字, 不至于显示 0 让用户以为是源挂了.
-    //
-    // v2.1.34: fallback 加 altUrl (worker URL), 优先用 worker URL 测 latency
-    //   (走 CDN 加速, 国内稳), 测不到再退 originalUrl. 修 "打开 CF 加速后
-    //   测速没了 (连延迟都没有)" bug.
-    final fallbackUrl = originalUrl ?? url;
-    return await _fallbackLightSpeed(fallbackUrl, altUrl: url);
+    // v2.3.0: fallback 直接用 url, 不用 altUrl (没有 worker URL 了)
+    return await _fallbackLightSpeed(url);
   }
 
   String _formatResolution(int h) {
@@ -1879,106 +1836,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  /// v2.0.16: 启本地代理 + 给 libmpv 配 --http-proxy (如果条件满足)
-  /// v2.0.20: media_kit 1.2.6 Player 类没有 setProperty / command 方法,
-  ///   改用 dart:ffi 直接调 libmpv 的 mpv_set_property_string (MpvFFI).
-  ///
-  /// 条件 (v2.0.34):
-  ///   - 用户在设置里开了 "视频代理加速" (v2.0.27 起默认关, 避免 Dart 代理不稳定)
-  ///   - VideoProxyServer.tryStart() 内部检查 CF Worker 加速 + 域名 + 手动优选 IP
-  /// 任一不满足 → 代理不起, 播放走原 URL
-  ///
-  /// v2.0.34: tryStart 门从 4 个砍到 3 个
-  ///   之前依赖 v2.0.30 砍掉的"优选测速"开关 + bestIps 缓存, 等于视频代理
-  ///   永远起不来. 现在改用 v2.0.32 手动优选 IP / 域名 字段, 配上就能起.
-  ///
-  /// 失败 / 异常 → 代理不起, 行为跟 v2.0.14 一模一样
-  Future<void> _ensureVideoProxy() async {
-    // v2.0.76: 守门改成 getVideoProxyEnabled() — 该开关现在是「视频代理」,
-    //   关 = 视频不走代理, libmpv 直连视频源; 开 = 视频走 VideoProxyServer.
-    final videoProxyOn = await UserDataService.getVideoProxyEnabled();
-    if (!videoProxyOn) {
-      return;
-    }
-    if (_videoProxy != null && _videoProxy!.isRunning) {
-      return;
-    }
-    // v2.0.58: 记录优选 IP 状态, 帮助分析 "4s 卡顿" 跟 manual IP 的关系
-    // v2.0.76: 优选 IP 启用 开关名 → getCfWorkerEnabled()
-    final manualIp = CfOptimizerHttpOverrides.getResolvedManualIp();
-    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
-    // v2.0.67: 优选 IP 不再是必须条件, tryStart 一次就行 (不再 retry 等 _resolvedManualIp)
-    //   v2.0.76: 守门已改成「视频代理」开关, 这里 tryStart 一定成功 (除非域名没配)
-    //   - 视频代理开关开 + worker 域名配了 → tryStart 成功 (优选 IP 可选)
-    //   - 视频代理开关关 → 上面已 return, 不会到这
-    final proxy = await VideoProxyServer.tryStart();
-    if (proxy == null) {
-      return;
-    }
-    // v2.0.65: 不再设 libmpv --http-proxy!
-    //   之前设 --http-proxy 让 libmpv 走 CONNECT 隧道, 但 libmpv 的 CONNECT
-    //   实现有 bug (ffmpeg 通过同一代理能播, libmpv 不能 → "Failed to
-    //   recognize file format"). 现在 v2.0.65 改成本地 HTTP 反向代理:
-    //   播放 URL 改成 http://127.0.0.1:PORT/m3u8?url=..., 代理自己 fetch
-    //   worker 返回. libmpv 直接 HTTP 连本地代理, 不走 CONNECT 隧道.
-    //   代理服务器还是要启动 (VideoProxyServer._handleLocalHttp 处理).
-    _videoProxy = proxy;
-    // v2.0.34: 通知顶部「加速状态」指示器重算 + 启动下载速度采样
-    setState(() {
-      _videoProxyActive = true;
-    });
-    _startSpeedSampling();
-  }
-
-  /// v2.2.0: 1Hz 采样代理服务的 fetchedBytes, 算实时下载速度.
-  ///
-  /// 旧 libmpv 时代读 mpv property (demuxer-bytes / input-bitrate 等) 算
-  ///   实时下载速度, ExoPlayer (Media3) Dart 端 video_player 不暴露
-  ///   Listener.onBandwidthSample. 但 VideoProxyServer.fetchedBytes
-  ///   一直记总下载字节, 直接从这个差值算 delta 即可 — 比 libmpv
-  ///   那条 fallback 链 (5 个 property 兜底) 还准.
-  ///
-  /// 字段对照:
-  ///   - 旧 demuxer-bytes (int64)        → VideoProxyStatus.fetchedBytes (int)
-  ///   - 旧 input-bitrate (int64, bps)   → 算 delta (bytes / ms * 1000)
-  ///   - 旧 idle-active / pause          → 后端 isPlaying / isBuffering
-  void _startSpeedSampling() {
-    _speedSampleTimer?.cancel();
-    _lastDemuxerBytes = 0;
-    _lastSampleMs = 0;
-    _downloadSpeedBps = 0;
-    _playbackStateText = '';
-    _speedSampleTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      try {
-        final cur = VideoProxyStatus.snapshot.totalFetchedBytes;
-        final now = DateTime.now().millisecondsSinceEpoch;
-        if (_lastSampleMs == 0 || cur < _lastDemuxerBytes) {
-          _lastDemuxerBytes = cur;
-          _lastSampleMs = now;
-          return;
-        }
-        final deltaBytes = cur - _lastDemuxerBytes;
-        final deltaMs = now - _lastSampleMs;
-        if (deltaMs <= 0) return;
-        final bps = deltaBytes * 1000.0 / deltaMs;
-        _lastDemuxerBytes = cur;
-        _lastSampleMs = now;
-        if (mounted) {
-          setState(() {
-            _downloadSpeedBps = bps;
-            _playbackStateText = ''; // 有速度, 清掉文本
-          });
-        }
-      } catch (_) {}
-    });
-  }
-
-  /// v2.0.88: 播放状态文本 fallback (在拿不到 demuxer-bytes / bitrate 时显示)
-  ///   - "已暂停" (paused == true)
-  ///   - "未开播 / 缓冲中" (idle == true)
-  ///   - "测量中..." (player 在播但 property 都拿不到, 罕见)
-  String _playbackStateText = '';
+  /// v2.3.0: 删了 _ensureVideoProxy / _startSpeedSampling / _playbackStateText.
+  ///   视频加速链路整个删了, 不再启本地代理, 不再 1Hz 采样下载速度,
+  ///   不再维护「已暂停 / 缓冲中 / 测量中」文本状态. playUrl = url 原源直连,
+  ///   ExoPlayer 直连 CDN 拉 m3u8 / 段, 无任何代理层. 行为跟 v2.2.7 一致.
 
   /// v2.0.64: 解析分享页 HTML 提取真实视频 URL.
   ///
@@ -2159,34 +2020,21 @@ class _PlayerScreenState extends State<PlayerScreen>
       _episodesPageController.jumpToPage(newPage);
     }
 
-    // v2.2.7: playUrl 退化到原源直连 CDN (不 wrap, 不经本地代理, 不经 worker).
-    //   v2.2.6 我理解错了 — 用户测的「关视频代理能播」是 playUrl 走
-    //   `https://play.ly166.com:65/...index.m3u8` **原源 CDN 直连**, 不是
-    //   worker 直连. v2.2.6 把 playUrl wrap 到 `https://api.fn0.qzz.io/m3u8?url=...`
-    //   worker 直连, 跟用户测试通过的「直连」不是同一条路径, 所以 v2.2.6 装上还是转圈.
-    //   真·直连 = 不 wrap, playUrl = url (原源 https://... 域名).
-    //   ExoPlayer 1.4.1 对原源 CDN HTTPS 直连支持正常 (用户测试能播),
-    //   走 worker 反而被 CF 中转 + m3u8 改写 + CORS 头影响 ExoPlayer 解析.
-    //   临时方案: playUrl 一律 = url 原源直连. _ensureVideoProxy 仍保留
-    //     (加速链路 UI 状态指示 + 后台测速用, 不再影响 playUrl).
-    //   代价: 完全失去 worker 加速 + 手动优选 IP 优化.
-    //   后续 v2.2.8+ 计划:
-    //     1. worker / 本地代理 不参与 playUrl 路径, 仅保留「加速链路」测速 + UI
-    //     2. 排查为什么 worker 直连也不能播 (CF 中转 / m3u8 改写 / CORS 头
-    //        跟 ExoPlayer 兼容性), 找到原因后再决定要不要接回 worker
-    //     3. 同时调研 video_player 包是否可换 fijkplayer / 自写 Kotlin wrapper
-    //        替代, 拿到更细的 ExoPlayer 错误日志 + 显式配 ExtractorsFactory
-    await _ensureVideoProxy();
+    // v2.3.0: playUrl 退化成原源直连 CDN. 视频加速链路整个删了:
+    //   - 不 wrap (不调 buildProxiedUrl, 已删)
+    //   - 不经本地代理 (不调 _ensureVideoProxy, 已删)
+    //   - 不经 CF Worker 视频代理 (不调 videoProxy / CfOptimizer, 已删)
+    //   - playUrl = url (原源 m3u8), ExoPlayer 直连 CDN 拉 m3u8 / 段
+    //   跟 v2.2.7 行为一致.
+    //   代价: 完全失去 worker 加速 + 手动优选 IP 优化. 国内用户可能遇到
+    //     CDN 慢 / 不可达, 用户得自己判断要不要挂 VPN / 换源.
     final playUrl = url;
     DiaryService.add(
-        '[Video] playUrl build: path=direct_cdn (v2.2.7 worker+local_proxy both bypassed), originalUrl=$url');
-
-    // v2.0.34: 保存最终播放 URL 给「加速链路」弹层用
-    _currentPlayUrl = playUrl;
+        '[Video] playUrl build: path=direct_cdn (v2.3.0 worker+local_proxy+optimization all removed), originalUrl=$url');
 
     // v2.0.58: 记录实际播放 URL + 代理状态, 分析 "4s/6s 时长" bug 的关键信号.
-    //   原 URL vs playUrl (buildProxiedUrl 之后) 能看出 CF Worker 是否介入;
-    //   代理是否起能看出 .ts 段是否走优选 IP.
+    //   v2.3.0: 不再有 buildProxiedUrl (CF Worker) + _videoProxy (本地代理),
+    //   只剩原源直连 playUrl. _currentPlayUrl 字段已删, 加速链路弹层也删了.
     try {
       await _player!.stop();
       await _player!.open(playUrl);
@@ -3730,10 +3578,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                 icon: _isFavorite ? Icons.favorite : Icons.favorite_border,
                 onTap: _toggleFavorite,
               ),
-              // v2.0.34: 加速状态指示器 (CF Worker + 优选 IP)
-              //   颜色编码: 绿=都启用 / 黄=只 CF Worker / 灰=都没开
-              //   点击弹出 dialog 显示详细状态 (是否走优选 IP / CF 加速)
-              _buildAccelStatusIcon(),
+              // v2.3.0: 删 _buildAccelStatusIcon() 调用 (顶部「加速状态」指示器,
+              //   跟 _buildAccelStatusIcon 整个方法一起删了)
               // v2.1.45: DLNA 投屏按钮 (跟 MobilePlayerControls / PCPlayerControls
               //   的 _buildCastButton 行为一致, 但接到 PlayerScreen 自定义 UI).
               //   - 投屏中 (_isCasting=true): 绿色 cast_connected 图标, 点击弹
@@ -3957,547 +3803,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  /// v2.0.34: 顶部「加速状态」指示器
-  ///
-  /// 颜色编码 (用户一眼能看出当前是否真在用加速):
-  ///   - 绿色 (0xFF10b981): CF Worker + 优选 IP 都启用 + 视频流走代理 (全加速)
-  ///   - 黄色 (0xFFf59e0b): 只 CF Worker 启用 (m3u8/图片走 worker, 视频直连)
-  ///   - 灰色 (0xFF9ca3af): 都没开 (完全直连原源)
-  ///
-  /// 注意: 颜色根据「配置 + 当前代理实际状态」实时算, 不依赖 fixed state.
-  /// 配置变了 (用户开/关 CF Worker 加速、优选 IP) 下次 build 自然反映.
-  Widget _buildAccelStatusIcon() {
-    // 颜色逻辑 (不需要读 prefs, 每次 build 现算, 配置变时 build 自然刷新)
-    // 简化: 只根据 _videoProxyActive + 已知 UI 状态决定颜色
-    //   视频走代理 (绿) / 视频直连 (灰) — CF Worker 跟这个指示器
-    //   关系不大, 因为 m3u8/图片走 worker 视频不一定走 worker
-    //   重点是「当前视频流是不是真的被加速」
-    final Color dotColor = _videoProxyActive
-        ? const Color(0xFF10b981) // 绿: 视频走优选 IP 代理
-        : const Color(0xFF9ca3af); // 灰: 直连
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _showAccelStatusDialog,
-          borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(
-                  Icons.bolt,
-                  color: Colors.white.withOpacity(0.9),
-                  size: 22,
-                ),
-                // 状态点: 绿/灰
-                Positioned(
-                  right: -2,
-                  top: -2,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: const Color(0xFF1F2937),
-                        width: 1.5,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// v2.0.34: 弹「加速链路」详情 dialog
-  ///
-  /// 设计目标 (用户原话): "要体现出是怎么加速的, 让人一眼看上去就是在加速"
-  ///
-  /// 改成**链路流程图**而不是 4 行状态, 3 个节点 + 2 条箭头:
-  ///
-  ///   ┌─────────────┐    ┌──────────────┐    ┌──────────────┐    ┌────────┐
-  ///   │  📺 源播放   │ →  │  ☁️ CF Worker │ →  │  ⚡ 优选 IP   │ →  │  📱 手机│
-  ///   │  原 m3u8    │    │  worker 域名  │    │  优选 IP     │    │ libmpv │
-  ///   └─────────────┘    └──────────────┘    └──────────────┘    └────────┘
-  ///      (灰/亮)             (灰/亮)             (灰/亮)
-  ///
-  /// 哪个节点没启用 → 那个节点灰色 + 该段箭头虚线
-  /// 哪个节点启用 → 那个节点高亮 (蓝/绿) + 箭头实线
-  ///
-  /// 底部额外:
-  ///   - 当前视频流实际走的是哪条路径 (✅ 全加速 / ⚠️ 半加速 / ❌ 直连)
-  ///   - 实时下载速度
-  ///   - 任何一个值 (IP/域名/URL) 都能点击复制
-  Future<void> _showAccelStatusDialog() async {
-    // v2.0.76: getCfWorkerEnabled() 现在是「优选 IP 启用」开关
-    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
-    final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
-    final cfBestIp = (await UserDataService.getCfBestIp()) ?? '';
-    // v2.0.76: getVideoProxyEnabled() 现在是「视频代理」开关
-    final videoProxyOn = await UserDataService.getVideoProxyEnabled();
-    final hasResolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp() != null;
-    if (!mounted) return;
-
-    // 节点启用状态
-    // v2.0.76: CF Worker 代理本身不再有总开关, 域名配了就视为 worker 链路可用
-    final cfWorkerOn = cfWorkerDomain.isNotEmpty;
-    // v2.0.76: 优选 IP 启用 = 优选 IP 开关开 + IP 填了 + 已解析
-    final bestIpOn = preferIpEnabled && cfBestIp.isNotEmpty && hasResolvedIp;
-    final videoStreamViaProxy = _videoProxyActive;
-
-    // 加速等级 (v2.0.76 语义):
-    //   full: 域名配了 + 优选 IP 启用 + 视频流走代理 (理想, 走优选 IP + worker)
-    //   half: 域名配了 + 视频流走代理 但没走优选 IP (走 worker 系统 DNS)
-    //         或 优选 IP 启用 但 视频代理关 (视频直连, 其他仍走优选 IP + worker)
-    //   none: 视频直连 (视频代理关, 没有任何代理加速)
-    final accelLevel = (cfWorkerOn && bestIpOn && videoStreamViaProxy)
-        ? 'full'
-        : (cfWorkerOn && (videoStreamViaProxy || bestIpOn))
-            ? 'half'
-            : 'none';
-
-    // 解析出来的优选 IP (域名模式才有意义)
-    final resolvedIp = CfOptimizerHttpOverrides.getResolvedManualIp() ?? cfBestIp;
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: const Color(0xFF1F2937),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 标题 + 当前等级徽章
-              Row(
-                children: [
-                  const Icon(Icons.bolt, color: Color(0xFFfbbf24), size: 22),
-                  const SizedBox(width: 8),
-                  const Text(
-                    '加速链路',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  _buildAccelBadge(accelLevel),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _accelLevelDescription(accelLevel),
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.6),
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 20),
-              // 4 节点链路图 (源 / CF Worker / 优选 IP / 手机)
-              _buildLinkNode(
-                icon: Icons.video_library,
-                label: '源播放地址',
-                value: _currentPlayUrl.isEmpty
-                    ? '（无）'
-                    : _stripUrlQuery(_currentPlayUrl),
-                enabled: true, // 源永远有
-                accent: const Color(0xFF94a3b8),
-              ),
-              _buildLinkArrow(enabled: true),
-              _buildLinkNode(
-                icon: Icons.cloud_outlined,
-                label: 'CF Worker 加速域名',
-                value: cfWorkerDomain.isEmpty
-                    ? '（未配置）'
-                    : cfWorkerDomain,
-                enabled: cfWorkerOn,
-                accent: const Color(0xFF60a5fa),
-                subtitle: cfWorkerOn ? '视频源经过 CF edge' : '未启用',
-              ),
-              _buildLinkArrow(enabled: bestIpOn),
-              _buildLinkNode(
-                icon: Icons.bolt,
-                label: '优选 IP',
-                value: cfBestIp.isEmpty
-                    ? '（未配置）'
-                    : (cfBestIp.contains('.') && _isIpv4Strict(cfBestIp)
-                        ? cfBestIp
-                        : '$cfBestIp\n  →  $resolvedIp'),
-                enabled: bestIpOn,
-                accent: const Color(0xFF10b981),
-                subtitle: bestIpOn
-                    ? (videoStreamViaProxy
-                        ? '视频流强制走这个 IP'
-                        : 'HTTP 请求走这个 IP (m3u8/图片)')
-                    : '未配置',
-              ),
-              _buildLinkArrow(enabled: videoStreamViaProxy),
-              _buildLinkNode(
-                icon: Icons.smartphone,
-                label: '手机',
-                value: '本机 libmpv',
-                enabled: true,
-                accent: const Color(0xFFa78bfa),
-                subtitle: videoStreamViaProxy
-                    ? '经本地代理 → 优选 IP'
-                    : '直连上游节点',
-              ),
-              const SizedBox(height: 16),
-              const Divider(color: Color(0xFF374151), height: 1),
-              const SizedBox(height: 12),
-              // 实时下载速度
-              Row(
-                children: [
-                  const Icon(Icons.speed,
-                      color: Color(0xFF60a5fa), size: 18),
-                  const SizedBox(width: 10),
-                  const Text(
-                    '下载速度',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const Spacer(),
-                  // v2.0.88: 文本状态 fallback 优先 (拿不到 demuxer-bytes /
-                  //   bitrate 时显示「已暂停 / 未开播 / 缓冲中 / 测量中」)
-                  Text(
-                    _playbackStateText.isNotEmpty
-                        ? _playbackStateText
-                        : _formatSpeed(_downloadSpeedBps),
-                    style: TextStyle(
-                      color: _playbackStateText.isNotEmpty
-                          ? const Color(0xFF9ca3af) // 文本状态灰
-                          : const Color(0xFF60a5fa), // 速度蓝
-                      fontSize: _playbackStateText.isNotEmpty ? 13 : 16,
-                      fontWeight: _playbackStateText.isNotEmpty
-                          ? FontWeight.w400
-                          : FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-              // 提示
-              if (accelLevel != 'full')
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: _buildAccelHint(accelLevel, cfWorkerOn, bestIpOn,
-                      videoProxyOn, videoStreamViaProxy),
-                ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('关闭',
-                      style: TextStyle(color: Color(0xFF60a5fa))),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// v2.0.34: 加速等级徽章 (右上角小 chip)
-  /// full = 绿色 ✅ 全加速 / half = 黄色 ⚠️ 半加速 / none = 灰色 ❌ 未加速
-  Widget _buildAccelBadge(String level) {
-    final config = switch (level) {
-      'full' => (
-        bg: const Color(0xFF064e3b),
-        fg: const Color(0xFF10b981),
-        text: '✅ 全加速',
-      ),
-      'half' => (
-        bg: const Color(0xFF78350f),
-        fg: const Color(0xFFfbbf24),
-        text: '⚠️ 半加速',
-      ),
-      _ => (
-        bg: const Color(0xFF374151),
-        fg: const Color(0xFF9ca3af),
-        text: '❌ 未加速',
-      ),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: config.bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        config.text,
-        style: TextStyle(
-          color: config.fg,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  String _accelLevelDescription(String level) {
-    return switch (level) {
-      'full' => '视频源经 CF Worker 域名重写, libmpv 强制走优选 IP 连 CF edge',
-      'half' => '加速链路部分启用, 视频流可能未走优选 IP',
-      _ => '加速链路未启用, 视频流直连原源',
-    };
-  }
-
-  /// v2.0.34: 加速链路里的一个节点 (圆角卡片)
-  ///
-  /// enabled = true: 高亮 + 实色边框
-  /// enabled = false: 灰色 + 暗淡 (说明该节点被跳过)
-  Widget _buildLinkNode({
-    required IconData icon,
-    required String label,
-    required String value,
-    required bool enabled,
-    required Color accent,
-    String? subtitle,
-  }) {
-    final color = enabled ? accent : const Color(0xFF6b7280);
-    final borderColor =
-        enabled ? accent.withOpacity(0.6) : const Color(0xFF374151);
-    final valueColor =
-        enabled ? Colors.white : Colors.white.withOpacity(0.4);
-    final labelColor =
-        enabled ? Colors.white.withOpacity(0.85) : Colors.white.withOpacity(0.4);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF111827),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: borderColor, width: 1.2),
-      ),
-      child: InkWell(
-        onTap: value.isNotEmpty && value != '（无）' && value != '本机 libmpv'
-            ? () => _copyToClipboard(value, label)
-            : null,
-        borderRadius: BorderRadius.circular(10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 左侧图标圆
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(icon, color: color, size: 18),
-            ),
-            const SizedBox(width: 10),
-            // 右侧文字
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        label,
-                        style: TextStyle(
-                          color: labelColor,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (enabled && subtitle != null)
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: accent.withOpacity(0.85),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    value,
-                    style: TextStyle(
-                      color: valueColor,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      fontFamilyFallback: const ['Courier', 'monospace'],
-                      height: 1.3,
-                    ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            // 复制图标 (鼠标手势)
-            if (value.isNotEmpty && value != '（无）' && value != '本机 libmpv')
-              Padding(
-                padding: const EdgeInsets.only(left: 4, top: 6),
-                child: Icon(
-                  Icons.content_copy,
-                  color: Colors.white.withOpacity(0.3),
-                  size: 14,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// v2.0.34: 节点之间的箭头 (竖向)
-  ///
-  /// enabled = true: 实线 + 高亮色
-  /// enabled = false: 虚线 + 灰色 (表示该段链路被跳过)
-  Widget _buildLinkArrow({required bool enabled}) {
-    final color =
-        enabled ? const Color(0xFF10b981) : const Color(0xFF4b5563);
-    return Container(
-      width: 2,
-      height: 18,
-      margin: const EdgeInsets.only(left: 28),
-      decoration: BoxDecoration(
-        color: color.withOpacity(enabled ? 0.8 : 0.4),
-        borderRadius: BorderRadius.circular(1),
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          if (enabled)
-            Positioned(
-              bottom: -2,
-              child: Icon(
-                Icons.arrow_drop_down,
-                color: color,
-                size: 12,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// v2.0.34: 加速等级非 full 时的提示
-  Widget _buildAccelHint(String level, bool cfWorkerOn, bool bestIpOn,
-      bool videoProxyOn, bool videoStreamViaProxy) {
-    if (level == 'none') {
-      return Text(
-        '在 设置 → CF Worker 加速 里打开 视频代理 + 填域名 + 优选 IP',
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.55),
-          fontSize: 11,
-          height: 1.4,
-        ),
-      );
-    }
-    // half
-    if (cfWorkerOn && bestIpOn && !videoStreamViaProxy) {
-      // 配齐了但视频流没走代理
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'CF Worker + 优选 IP 都配了, 但视频流没走代理.',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
-              fontSize: 11,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            videoProxyOn
-                ? '「视频代理」开关开了, 但 tryStart 失败, 查 logcat [VideoProxy] 看原因.'
-                : '去 设置 → CF Worker 加速 → 视频代理 打开开关.',
-            style: TextStyle(
-              color: const Color(0xFFfbbf24).withOpacity(0.9),
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              height: 1.4,
-            ),
-          ),
-        ],
-      );
-    }
-    return Text(
-      '配置不完整, 见上方节点 (灰色 = 跳过).',
-      style: TextStyle(
-        color: Colors.white.withOpacity(0.55),
-        fontSize: 11,
-      ),
-    );
-  }
-
-  /// v2.0.34: 复制到剪贴板 + 短 SnackBar 提示
-  void _copyToClipboard(String text, String label) {
-    // 把多行值扁平化 (节点值可能含 \n)
-    final flat = text.replaceAll('\n', ' ').trim();
-    Clipboard.setData(ClipboardData(text: flat));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$label 已复制'),
-        duration: const Duration(milliseconds: 1200),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  /// v2.0.34: 把 URL 截短显示 (去 query, 防太长撑爆卡片)
-  String _stripUrlQuery(String url) {
-    final qIdx = url.indexOf('?');
-    if (qIdx < 0) return url;
-    final stripped = url.substring(0, qIdx);
-    return '$stripped?...';
-  }
-
-  /// v2.0.34: IPv4 严格校验 (比 _isIpv4 更严, 防 cf.877774.xyz 走错分支)
-  static bool _isIpv4Strict(String s) {
-    final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$')
-        .firstMatch(s);
-    if (m == null) return false;
-    for (var i = 1; i <= 4; i++) {
-      final n = int.parse(m.group(i)!);
-      if (n < 0 || n > 255) return false;
-    }
-    return true;
-  }
-
-  /// v2.0.34: 格式化下载速度 (Bytes/s → 人类可读)
-
-  /// < 1 KB/s → "0 B/s" (避免跳 0 误差)
-  /// 1-1024 B/s → "512 B/s"
-  /// 1-1024 KB/s → "256 KB/s"
-  /// >= 1 MB/s → "1.2 MB/s"
-  static String _formatSpeed(double bps) {
-    if (bps < 1) return '0 B/s';
-    if (bps < 1024) return '${bps.toStringAsFixed(0)} B/s';
-    if (bps < 1024 * 1024) {
-      return '${(bps / 1024).toStringAsFixed(1)} KB/s';
-    }
-    return '${(bps / 1024 / 1024).toStringAsFixed(2)} MB/s';
-  }
-
+  /// v2.3.0: 删了顶部「加速状态」指示器 + 「加速链路」弹层 + 一系列
+  ///   相关 UI 组件 (_buildAccelStatusIcon / _showAccelStatusDialog /
+  ///   _buildAccelBadge / _accelLevelDescription / _buildLinkNode /
+  ///   _buildLinkArrow / _buildAccelHint / _copyToClipboard /
+  ///   _stripUrlQuery / _isIpv4Strict / _formatSpeed). 视频加速链路整个删了,
+  ///   不再有加速状态, 不再有弹层, 不再有链路图, 不再有实时下载速度采样.
+  ///   行为跟 v2.2.7 一致.
   /// v2.1.45: 投屏按钮入口 (sync VoidCallback 包装, 因为 _iconBtn 期望 sync
   ///   onTap). 内部根据 _isCasting 走「停止投屏」或「扫设备」分支.
   void _showDLNACastAction() {
@@ -4576,7 +3888,14 @@ class _PlayerScreenState extends State<PlayerScreen>
         if (!mounted) return;
       }
       // 3. 拿当前 URL + 元数据
-      final playUrl = _currentPlayUrl;
+      //   v2.3.0: 视频加速删了, _currentPlayUrl 字段没了, 用
+      //   _selectedSource.episodes[_currentEpisodeIndex] 拿原源 URL.
+      //   DLNA 投屏对 URL 跟本地播放没区别, 之前传 _currentPlayUrl
+      //   (worker / 本地代理 URL) 现在传原源, TV 端直连拉 m3u8 / 段.
+      final playUrl =
+          (_selectedSource != null && _currentEpisodeIndex < _selectedSource!.episodes.length)
+              ? _selectedSource!.episodes[_currentEpisodeIndex]
+              : '';
       if (playUrl.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -4627,8 +3946,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///   选项. 用户可以切回本地播放 (调 device.stop() + 重启 _player!.open()).
   Future<void> _onDLNACastStarted(dynamic device) async {
     try {
+      // v2.3.0: _currentPlayUrl 字段删了, 日记改用 _selectedSource.episodes[_currentEpisodeIndex].
+      final castUrl = (_selectedSource != null &&
+              _currentEpisodeIndex < _selectedSource!.episodes.length)
+          ? _selectedSource!.episodes[_currentEpisodeIndex]
+          : '';
       DiaryService.add(
-          '[DLNA] cast started: device=${(device.info?.friendlyName) ?? device.toString()}, currentUrl=${_currentPlayUrl}');
+          '[DLNA] cast started: device=${(device.info?.friendlyName) ?? device.toString()}, currentUrl=$castUrl');
       setState(() {
         _isCasting = true;
         _currentCastDevice = device as DLNADevice;
@@ -4679,8 +4003,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       _isCasting = false;
       _currentCastDevice = null;
     });
-    // 重启本地 player (从 currentPlayUrl 续播, 跟 _onPlayPressed 路径一致)
-    final playUrl = _currentPlayUrl;
+    // 重启本地 player (从 _selectedSource.episodes[_currentEpisodeIndex] 续播,
+    //   跟 _onPlayPressed 路径一致. v2.3.0: _currentPlayUrl 字段删了, 用
+    //   _selectedSource.episodes[_currentEpisodeIndex] 拿原源 URL)
+    final playUrl = (_selectedSource != null &&
+            _currentEpisodeIndex < _selectedSource!.episodes.length)
+        ? _selectedSource!.episodes[_currentEpisodeIndex]
+        : '';
     if (playUrl.isNotEmpty && mounted) {
       try {
         await _player!.open(playUrl);

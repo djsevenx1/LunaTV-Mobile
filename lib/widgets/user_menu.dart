@@ -5,8 +5,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/services/user_data_service.dart';
-import 'package:luna_tv/services/cf_optimizer.dart';
-import 'package:luna_tv/screens/cf_acceleration_page.dart';
 import 'package:luna_tv/screens/login_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
@@ -45,15 +43,10 @@ class _UserMenuState extends State<UserMenu> {
   bool _preferSpeedTest = true;
   bool _localSearch = false;
   bool _isLocalMode = false;
-  // v2.0.76: 这两个字段语义已重定义
-  //   - _preferIpEnabled  对应 UserDataService.getCfWorkerEnabled() = "优选 IP 启用"
-  //   - _videoProxyEnabled 对应 UserDataService.getVideoProxyEnabled() = "视频代理"
-  // CF Worker 代理本身不再有总开关 — 域名配了就生效, 这里只展示两个状态
-  bool _preferIpEnabled = true;
-  bool _videoProxyEnabled = true;
-  String _cfWorkerDomain = '';
-  // v2.0.30: 砍掉 IP 优选, 只留 CF Worker 开关, 摘要也简化
-  String _cfSummary = '未配置';
+  // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 视频代理开关 + CF Worker 域名)
+  //   整个删了, 跟视频加速相关字段 (_preferIpEnabled / _videoProxyEnabled /
+  //   _cfWorkerDomain / _cfSummary) 跟着删. 保留 TMDB / Bangumi / GitHub
+  //   Worker 加速 (用 _tmdbProxyDomain 一个字段管).
   // v2.0.77: 豆瓣登录 cookie — 登录后给豆瓣图升到 l_ratio_poster (高清)
   bool _doubanLoggedIn = false;
   // v2.0.93: TMDB API Key (v3) — 详情页大头部走 TMDB search/multi 拿
@@ -117,11 +110,9 @@ class _UserMenuState extends State<UserMenu> {
     final bangumiImageSource = await UserDataService.getBangumiImageSourceKey();
     final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
-    // v2.0.76: 语义重命名 — 字段名跟新语义对齐
-    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
-    final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
-    final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
-    final cfBestIp = await UserDataService.getCfBestIp();
+    // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 视频代理开关 + CF Worker 域名) 整个删了
+    //   之前的 _preferIpEnabled / _videoProxyEnabled / _cfWorkerDomain / _cfSummary / _cfBestIp
+    //   字段全删, _loadUserInfo 不再读这些 SharedPreferences key.
     // v2.0.77: 豆瓣登录状态 — 决定详情页 / 轮播图走 l_ratio_poster 高清
     final doubanCookie = await UserDataService.getDoubanCookie();
     final doubanLoggedIn = doubanCookie != null && doubanCookie.isNotEmpty;
@@ -152,16 +143,7 @@ class _UserMenuState extends State<UserMenu> {
         _bangumiImageSource = bangumiImageSource;
         _preferSpeedTest = preferSpeedTest;
         _localSearch = localSearch;
-        _preferIpEnabled = preferIpEnabled;
-        _videoProxyEnabled = videoProxyEnabled;
-        _cfWorkerDomain = cfWorkerDomain;
-        _cfSummary = _computeCfSummary(
-          domain: cfWorkerDomain,
-          preferIpEnabled: preferIpEnabled,
-          videoProxyEnabled: videoProxyEnabled,
-          bestIp: cfBestIp,
-          resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
-        );
+        // v2.3.0: 视频加速 4 个字段已删, 不再 setState
         _doubanLoggedIn = doubanLoggedIn;
         _tmdbConfigured = tmdbConfigured;
         _tmdbDataSource = tmdbDataSource;
@@ -171,86 +153,6 @@ class _UserMenuState extends State<UserMenu> {
         _diaryPersist = diaryPersist;
       });
     }
-  }
-
-  /// v2.0.17: 给 user_menu 入口行用的一行状态摘要.
-  /// v2.0.30: 简化, 不再展示优选 IP 数量和测速时间.
-  /// v2.0.31: 展示手动优选 IP (如有).
-  /// v2.0.32: 支持优选域名, 展示"域名 → 解析 IP", 实时反映 DNS 解析结果.
-  /// v2.0.76: 重写 — 不再有"总开关未开"概念 (CF Worker 配了域名就生效),
-  ///   摘要反映两个独立开关: 优选 IP / 视频代理.
-  String _computeCfSummary({
-    required String domain,
-    required bool preferIpEnabled,
-    required bool videoProxyEnabled,
-    String? bestIp,
-    String? resolvedIp,
-  }) {
-    if (domain.isEmpty) return '未配置';
-    final bestIpDisplay = _formatBestIpDisplay(bestIp, resolvedIp);
-    final flags = <String>[];
-    if (videoProxyEnabled) flags.add('视频代理');
-    if (preferIpEnabled && bestIpDisplay != null) flags.add('优选 IP');
-    if (flags.isEmpty) {
-      // 都没启用, 显示"系统 DNS"标记
-      return bestIpDisplay != null
-          ? '$domain · 系统 DNS · $bestIpDisplay'
-          : '$domain · 系统 DNS';
-    }
-    if (bestIpDisplay != null) {
-      return '$domain · ${flags.join('+')} · $bestIpDisplay';
-    }
-    return '$domain · ${flags.join('+')}';
-  }
-
-  /// v2.0.32: 把"IP / 域名"格式化成"IP xxx" 或 "域名 → IP xxx" 形式
-  String? _formatBestIpDisplay(String? bestIp, String? resolvedIp) {
-    if (bestIp == null || bestIp.isEmpty) return null;
-    if (_isIpv4(bestIp)) {
-      return 'IP $bestIp';
-    }
-    // 域名模式
-    if (resolvedIp != null && resolvedIp.isNotEmpty) {
-      return '域名 $bestIp → $resolvedIp';
-    }
-    return '域名 $bestIp (解析中)';
-  }
-
-  bool _isIpv4(String s) {
-    final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$').firstMatch(s);
-    if (m == null) return false;
-    for (var i = 1; i <= 4; i++) {
-      final n = int.parse(m.group(i)!);
-      if (n < 0 || n > 255) return false;
-    }
-    return true;
-  }
-
-  /// v2.0.30: push CF Worker 加速 子页面, 返回时刷新一行摘要
-  Future<void> _openCfAccelerationPage() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CfAccelerationPage()),
-    );
-    if (!mounted) return;
-    // 从子页面返回后, 重新读 CF 状态, 刷新入口行的一行摘要
-    // v2.0.76: 两个独立开关都读 — 优选 IP + 视频代理
-    final preferIpEnabled = await UserDataService.getCfWorkerEnabled();
-    final videoProxyEnabled = await UserDataService.getVideoProxyEnabled();
-    final cfWorkerDomain = await UserDataService.getCfWorkerDomain();
-    final cfBestIp = await UserDataService.getCfBestIp();
-    if (!mounted) return;
-    setState(() {
-      _preferIpEnabled = preferIpEnabled;
-      _videoProxyEnabled = videoProxyEnabled;
-      _cfWorkerDomain = cfWorkerDomain;
-      _cfSummary = _computeCfSummary(
-        domain: cfWorkerDomain,
-        preferIpEnabled: preferIpEnabled,
-        videoProxyEnabled: videoProxyEnabled,
-        bestIp: cfBestIp,
-        resolvedIp: CfOptimizerHttpOverrides.getResolvedManualIp(),
-      );
-    });
   }
 
   // v2.0.77: 弹出豆瓣 cookie 输入对话框
@@ -691,7 +593,7 @@ class _UserMenuState extends State<UserMenu> {
                     : const Color(0xFF1f2937),
               ),
               decoration: InputDecoration(
-                hintText: 'https://tmdb-8d1.pages.dev',
+                hintText: 'https://your-worker.example.com',
                 hintStyle: FontUtils.sourceCodePro(
                   ctx,
                   fontSize: 12,
@@ -1843,20 +1745,11 @@ class _UserMenuState extends State<UserMenu> {
               ),
             ],
           ),
-          // ===== 加速 =====
-          _buildSectionHeader('加速'),
-          _buildCard(
-            children: [
-              // v2.0.30: CF Worker 加速 入口 (点击进入子页面)
-              _buildInputOption(
-                title: 'CF Worker 加速',
-                currentValue: _cfSummary,
-                onTap: _openCfAccelerationPage,
-                icon: LucideIcons.rocket,
-                iconColor: const Color(0xFFf59e0b),
-              ),
-            ],
-          ),
+          // v2.3.0: 「加速」section 整张卡删除.
+          //   之前 section 包含 "CF Worker 加速" 入口 (子页面 = CfAccelerationPage),
+          //   跳进去能配: 优选 IP / 优选域名 / 视频代理开关 / CF Worker 域名 /
+          //   优选 IP 测速 / 实时状态卡. 现在视频加速链路整个砍了, 入口跟子页面
+          //   都不需要. TMDB Worker 加速在 "数据源" section 里已经有, 不重复.
           // ===== 海报墙 (v2.0.77) =====
           //   v2.0.35~v2.0.76: TMDB 海报墙 (配 API key 启用首页海报墙)
           //   v2.0.77: 改用豆瓣登录 — 登录后自动给豆瓣图升到 l_ratio_poster (高清),

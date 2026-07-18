@@ -14,11 +14,15 @@ class UserDataService {
   static const String _preferSpeedTestKey = 'prefer_speed_test';
   static const String _localSearchKey = 'local_search';
   static const String _isLocalModeKey = 'is_local_mode';
-  static const String _cfWorkerEnabledKey = 'cf_worker_enabled';
-  static const String _cfWorkerDomainKey = 'cf_worker_domain';
-  static const String _videoProxyEnabledKey = 'video_proxy_enabled';
-  // v2.0.31: 用户手动填的优选 IP, 优先级高于测速结果
-  static const String _cfBestIpKey = 'cf_best_ip';
+  // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 视频代理开关) 整个删了
+  //   - _cfWorkerEnabledKey (cf_worker_enabled) — 优选 IP 开关
+  //   - _cfWorkerDomainKey  (cf_worker_domain)  — 视频代理 worker 域名
+  //   - _videoProxyEnabledKey (video_proxy_enabled) — 视频代理开关
+  //   - _cfBestIpKey (cf_best_ip) — 手动优选 IP / 域名
+  //   旧 SharedPreferences 值升级后留在 prefs 里没人读, 相当于自动清空.
+  //   跟视频加速独立: _tmdbProxyDomainKey (TMDB / Bangumi / GitHub 加速
+  //   共享 worker URL) 保留, _cfWorkerDomainKey 跟它无关系 (视频加速
+  //   删了, TMDB 加速活着).
   // v2.0.77: 豆瓣登录 cookie — 登录后给豆瓣图升到 l_ratio_poster (高清),
   //   没登录 = 现有图片不变化.
   //   用户从浏览器 DevTools 复制 cookie 字符串粘进来, 存这里.
@@ -32,7 +36,7 @@ class UserDataService {
   static const String _tmdbApiKeyKey = 'tmdb_api_key';
   // v2.0.97: TMDB 数据源 — 跟 Bangumi 数据源一样 UX, 2 选 1.
   //   - 'tmdb_proxy' (v2.1.41 新): 走用户自部署 CF Worker 加速 (如
-  //     https://tmdb-8d1.pages.dev/), path-based API + 图片代理. 用户
+  //     https://your-worker.example.com/), path-based API + 图片代理. 用户
   //     在「数据源」section 配 worker URL, App 调 TMDB 时拼成
   //     `${workerUrl}/movie/xxx?api_key=...` (api_key 透传, Worker 不需要
   //     配 env). 配了 worker URL 但没配 API key → 跟 v2.1.40 一样 skip.
@@ -44,7 +48,7 @@ class UserDataService {
   //   自动 migrate.
   static const String _tmdbDataSourceKey = 'tmdb_data_source';
   // v2.1.41: TMDB 代理 URL — 用户自部署的 CF Worker (e.g.
-  //   https://tmdb-8d1.pages.dev/), 走 path-based 加速. 跟 v2.0.77
+  //   https://your-worker.example.com/), 走 path-based 加速. 跟 v2.0.77
   //   _cfWorkerDomainKey 区分: _cfWorkerDomainKey 是视频加速 (CORSAPI
   //   套娃), _tmdbProxyDomainKey 是 TMDB API + 图片 (独立 worker, 部署
   //   在 [djsevenx1/tmdb-proxy]). 不共用, 互不影响.
@@ -59,14 +63,14 @@ class UserDataService {
 
   // 内存缓存
   static bool? _isLocalModeCache;
-  // v2.0.76: 字段重命名 — 原本 "CF Worker 加速总开关", 现在是 "优选 IP 启用"
-  static bool? _cfWorkerEnabledCache;
-  static String? _cfWorkerDomainCache;
-  // v2.0.76: 新加 — "视频代理" 开关
-  static bool? _videoProxyEnabledCache;
+  // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 视频代理开关) 整个删了
+  //   - _cfWorkerEnabledCache  (优选 IP 开关缓存)
+  //   - _cfWorkerDomainCache   (视频代理 worker 域名缓存)
+  //   - _videoProxyEnabledCache (视频代理开关缓存)
+  //   - _cfBestIpCache         (手动优选 IP 缓存)
+  //   全删. 旧值留在 prefs 里没人读. _tmdbProxyDomainCache 保留.
   static String? _bangumiDataSourceCache;
   static String? _bangumiImageSourceCache;
-  static String? _cfBestIpCache;
   // v2.0.77
   static String? _doubanCookieCache;
   // v2.0.93
@@ -345,109 +349,6 @@ class UserDataService {
     await savePreferSpeedTest(enabled);
   }
 
-  // ===== CF Worker 加速配置 =====
-
-  // v2.0.76: CF Worker 加速开关 语义重定义
-  //   旧 (v2.0.70~v2.0.75): "代理总开关" — 控制是否启代理 (CF Worker)
-  //   新 (v2.0.76+):        "优选 IP 启用" — 控制所有资源 (视频 / 图片 / Bangumi 等)
-  //                          是否走优选 IP. CF Worker 代理本身不再有总开关,
-  //                          只要域名配了默认就生效.
-  // 保存
-  static Future<void> saveCfWorkerEnabled(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_cfWorkerEnabledKey, enabled);
-    _cfWorkerEnabledCache = enabled;
-  }
-
-  // 获取 (默认 true — 用户期望默认走优选 IP, 跟 v2.0.34 反过来)
-  static Future<bool> getCfWorkerEnabled() async {
-    if (_cfWorkerEnabledCache != null) return _cfWorkerEnabledCache!;
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getBool(_cfWorkerEnabledKey) ?? true;
-    _cfWorkerEnabledCache = v;
-    return v;
-  }
-
-  // 同步获取
-  static bool getCfWorkerEnabledSync() {
-    return _cfWorkerEnabledCache ?? true;
-  }
-
-  // v2.0.76: 视频代理开关 语义重定义
-  //   旧 (v2.0.70~v2.0.75): "优选 IP 启用（视频流）" — 只控制视频是否走优选 IP
-  //   新 (v2.0.76+):        "视频代理" — 控制视频是否走 CF Worker 代理
-  //                          (关 = 视频直连原源, 开 = 视频走 VideoProxyServer)
-  static Future<void> saveVideoProxyEnabled(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_videoProxyEnabledKey, enabled);
-    _videoProxyEnabledCache = enabled;
-  }
-
-  static Future<bool> getVideoProxyEnabled() async {
-    if (_videoProxyEnabledCache != null) return _videoProxyEnabledCache!;
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getBool(_videoProxyEnabledKey) ?? true;
-    _videoProxyEnabledCache = v;
-    return v;
-  }
-
-  /// 同步版 (buildProxiedUrl 等热路径用, 避免 await)
-  /// v2.0.76: 默认 true — 用户期望默认走视频代理
-  static bool getVideoProxyEnabledSync() {
-    return _videoProxyEnabledCache ?? true;
-  }
-
-  // 保存 CF Worker 域名（不含 https:// 前缀）
-  static Future<void> saveCfWorkerDomain(String domain) async {
-    final cleaned = _cleanDomain(domain);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_cfWorkerDomainKey, cleaned);
-    _cfWorkerDomainCache = cleaned;
-  }
-
-  // 获取 CF Worker 域名（同步版，优先内存缓存）
-  static String getCfWorkerDomainSync() {
-    return _cfWorkerDomainCache ?? '';
-  }
-
-  // 获取 CF Worker 域名（异步版）
-  static Future<String> getCfWorkerDomain() async {
-    if (_cfWorkerDomainCache != null) return _cfWorkerDomainCache!;
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_cfWorkerDomainKey) ?? '';
-    _cfWorkerDomainCache = v;
-    return v;
-  }
-
-  // ===== v2.0.32: 手动优选 (支持 IP 或优选域名, 例如 cf.877774.xyz) =====
-
-  /// 保存用户手动填的优选 IP / 域名. 空串 = 清空.
-  /// 返回清理后的字符串, null 表示输入无效.
-  static Future<String?> saveCfBestIp(String input) async {
-    final cleaned = _cleanIpOrDomain(input);
-    final prefs = await SharedPreferences.getInstance();
-    if (cleaned == null) {
-      await prefs.remove(_cfBestIpKey);
-    } else {
-      await prefs.setString(_cfBestIpKey, cleaned);
-    }
-    _cfBestIpCache = cleaned;
-    return cleaned;
-  }
-
-  /// 异步读优选 IP / 域名. 没填 = null.
-  static Future<String?> getCfBestIp() async {
-    if (_cfBestIpCache != null) return _cfBestIpCache;
-    final prefs = await SharedPreferences.getInstance();
-    final v = prefs.getString(_cfBestIpKey);
-    if (v == null || v.isEmpty) {
-      _cfBestIpCache = null;
-      return null;
-    }
-    _cfBestIpCache = v;
-    return v;
-  }
-
   // ===== 豆瓣登录 cookie (v2.0.77) =====
   //
   // 用户从浏览器 DevTools → Application → Cookies → movie.douban.com
@@ -607,7 +508,7 @@ class UserDataService {
   ///
   /// v2.1.41 改: 'tmdb_proxy' → 'TMDB Worker 加速', 删 'off' → '已关闭'.
   ///   跟视频加速「CF Worker 加速」section 区分 (那是 CORSAPI 套娃,
-  ///   这里是 [djsevenx1/tmdb-proxy] path-based, 部署在 tmdb-8d1.pages.dev).
+  ///   这里是 [djsevenx1/tmdb-proxy] path-based, 部署在 your-worker.example.com).
   static String getTmdbDataSourceDisplayName(String key) {
     switch (key) {
       case 'tmdb_proxy':
@@ -640,12 +541,12 @@ class UserDataService {
 
   /// 保存 TMDB 代理 URL. 空串 = 清空. 返回清理后的字符串, null 表示输入无效.
   ///
-  /// 接受格式 (大小写不敏感):
-  ///   - "tmdb-8d1.pages.dev"            → "https://tmdb-8d1.pages.dev"
-  ///   - "https://tmdb-8d1.pages.dev"    → "https://tmdb-8d1.pages.dev"
-  ///   - "https://tmdb-8d1.pages.dev/"   → "https://tmdb-8d1.pages.dev"  (去尾斜杠)
-  ///   - "http://tmdb-8d1.pages.dev"     → "https://tmdb-8d1.pages.dev"  (强转 https)
-  ///   - "  https://tmdb-8d1.pages.dev  "→ "https://tmdb-8d1.pages.dev"  (去空白)
+  /// 接受格式 (大小写不敏感, 任意合法 https URL):
+  ///   - "your-worker.example.com"           → "https://your-worker.example.com"
+  ///   - "https://your-worker.example.com"   → "https://your-worker.example.com"
+  ///   - "https://your-worker.example.com/"  → "https://your-worker.example.com"  (去尾斜杠)
+  ///   - "http://your-worker.example.com"    → "https://your-worker.example.com"  (强转 https)
+  ///   - "  https://your-worker.example.com "→ "https://your-worker.example.com"  (去空白)
   ///
   /// 无效输入 (空 / 解析失败 / 无 host) → 返回 null, prefs 不写.
   static Future<String?> saveTmdbProxyDomain(String input) async {
@@ -700,260 +601,20 @@ class UserDataService {
   //   [buildGithubApiUrl] / [buildGithubReleaseAssetUrl] 内部用
   //   [getTmdbProxyDomainSync] 读 [_tmdbProxyDomainCache].
 
-  /// 同步读 (启动 warmup 后用)
-  static String? getCfBestIpSync() {
-    return _cfBestIpCache;
-  }
-
-  /// 校验/清理 IP 或域名. 返回 null = 无效 (清空).
-  /// - IPv4 (1.2.3.4) → 原样返回
-  /// - 域名 (cf.877774.xyz) → 原样返回
-  /// - 其他 → null
-  static String? _cleanIpOrDomain(String input) {
-    final s = input.trim();
-    if (s.isEmpty) return null;
-    // IPv4
-    final ipv4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$');
-    final m = ipv4.firstMatch(s);
-    if (m != null) {
-      for (var i = 1; i <= 4; i++) {
-        final n = int.parse(m.group(i)!);
-        if (n < 0 || n > 255) return null;
-      }
-      return s;
-    }
-    // 域名: 简单校验. 至少一个点, 标签 1-63 字符 [a-z0-9-], 总长 ≤ 253
-    final domain = RegExp(
-      r'^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$',
-    );
-    if (domain.hasMatch(s)) return s.toLowerCase();
-    return null;
-  }
-
-  // 清理域名：去掉尾部斜杠、协议前缀、空白
-  static String _cleanDomain(String input) {
-    var s = input.trim();
-    s = s.replaceAll(RegExp(r'\s+'), '');
-    if (s.endsWith('/')) s = s.substring(0, s.length - 1);
-    s = s.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
-    return s;
-  }
-
-  /// v2.2.1: 判断 [targetUrl] 是不是已经被 buildProxiedUrl 包过的 worker URL.
-  ///   形式: `https://<worker>/m3u8?url=...` 或 `https://<worker>/?url=...`.
-  ///   命中 → 不重包, 直接返原值 (调用方拿到 `url == targetUrl` 知道没动).
-  ///
-  ///   触发场景: m3u8_service 测段速 urlWrapper 对每个段 URL 调
-  ///   buildProxiedUrl, 但段 URL 可能是 worker 自己重写过 m3u8 内容后的
-  ///   worker 域 URL; 不去重会变成 worker URL 套 worker URL, 后端 fetch
-  ///   自己 → 死循环/卡死.
-  static bool _isAlreadyCfWorkerUrl(String targetUrl) {
-    final worker = _cfWorkerDomainCache?.trim() ?? '';
-    if (worker.isEmpty) return false;
-    // 形式 1: https://<worker>/m3u8?url=...
-    if (targetUrl.startsWith('https://$worker/m3u8?')) return true;
-    if (targetUrl.startsWith('http://$worker/m3u8?')) return true;
-    // 形式 2: https://<worker>/?url=...
-    if (targetUrl.startsWith('https://$worker/?')) return true;
-    if (targetUrl.startsWith('http://$worker/?')) return true;
-    return false;
-  }
-
-  /// 通用代理 URL 构造器
-  ///
-  /// 在以下任一情况下返回原 URL：
-  /// 1) [targetUrl] 为空
-  /// 2) 「视频代理」开关关 (v2.0.76 起: 视频是否走代理看的是视频代理开关, 不是
-  ///    优选 IP 开关; 优选 IP 只决定 HTTP 层解析到哪个 IP, 跟 URL 无关)
-  /// 3) Worker 域名未配置
-  ///
-  /// 否则根据链接类型返回 worker 代理后的 URL：
-  /// - m3u8 链接 →  `https://<worker>/m3u8?url=<encoded>`
-  /// - 普通链接 →  `https://<worker>/?url=<encoded>`
-  ///
-  /// [forceM3u8] 强制按 m3u8 端点处理（即使链接不一定是 .m3u8 后缀，比如 master playlist 无后缀）。
-  ///
-  /// v2.1.43.2 改: 加详细 DiaryService 日记, 跟 v2.1.43 Bangumi/TMDB 加速
-  ///   平行. 视频播放是热路径 (m3u8 解析会调几十次 — 每个 segment URL 都要
-  ///   wrap), 用一次性 hint flag + m3u8-per-call 跳过避免日记爆:
-  ///   - 视频代理关: 一次性 hint "视频代理关 (走直连原源)" + 每次都记
-  ///     "[Video] buildProxiedUrl passthrough: reason=video_proxy_off, in=..."
-  ///     (太频繁会爆, 改成一次性 hint, 跟 Bangumi/TMDB 一样)
-  ///   - worker URL 没配: 一次性 hint "视频代理开但 worker URL 未配, 走直连"
-  ///   - wrap 成功: 第一次 wrap 记 (source=video_proxy, worker=xxx, in=...,
-  ///     out=...); 后续 m3u8 segment 调不重复记, 但每次 wrap 的 URL 在
-  ///     [player_screen] 那层有日记, 这里只记关键路径
-  ///   - wrap 走不到 (m3u8 检测失败但 forceM3u8=false): 一次性 hint
-  ///
-  /// 用户原话: 「在添加播放加速的日记」 (跟之前「tmdb可用bangumi不行啊
-  ///   你把日记加速详细点」一脉相承)
-  static String buildProxiedUrl(String targetUrl, {bool forceM3u8 = false}) {
-    if (targetUrl.isEmpty) return targetUrl;
-    // v2.2.1: 已经是 worker URL 的不重包, 避免 double-wrap.
-    //   触发场景: m3u8_service 测段速时 urlWrapper 对每个段 URL 调 buildProxiedUrl,
-    //   但段 URL 可能是 worker 自身重写过的 (worker 内部把 .ts URL 改成了 worker 域),
-    //   不去重就会变成 worker URL 套 worker URL, 后端 fetch 自己 → 死循环/卡死.
-    //   同时也保护"已经走过 buildProxiedUrl" 的二次调用, 返回原值, 调用方拿到
-    //   `url == targetUrl` 时知道没变.
-    if (_isAlreadyCfWorkerUrl(targetUrl)) {
-      return targetUrl;
-    }
-    if (!_isCfWorkerUsableSync()) {
-      // v2.1.43.2: 视频代理关 / worker URL 没配 → 一次性 hint, 不每次都记
-      //   (m3u8 解析时一个播放会话调几十次, 每次都记会爆日记)
-      _logVideoProxyPassthroughOnce(targetUrl, forceM3u8: forceM3u8);
-      return targetUrl;
-    }
-    final worker = _cfWorkerDomainCache!.trim();
-    if (worker.isEmpty) {
-      // 跟上面 _isCfWorkerUsableSync 应该都过滤了, 但兜底再判一次
-      _logVideoProxyPassthroughOnce(targetUrl, forceM3u8: forceM3u8);
-      return targetUrl;
-    }
-    final isM3u8 = forceM3u8 || _looksLikeM3u8(targetUrl);
-    final endpoint = isM3u8 ? '/m3u8' : '/';
-    final wrapped =
-        'https://$worker$endpoint?url=${Uri.encodeComponent(targetUrl)}';
-    // v2.1.43.2: wrap 成功. m3u8 segment 调一次, 一次播放会话可能调
-    //   几十次, 每次都记会爆. 改成:
-    //   - 第一次 wrap 记完整 in/out
-    //   - 后续 m3u8 segment wrap 只记一个计数 (累计 N 次) + 最后一次 in/out
-    //   - 非 m3u8 wrap 每次都记 (数量少, 不会爆)
-    if (isM3u8) {
-      _videoProxyWrapCount++;
-      if (_videoProxyWrapCount == 1 || _videoProxyWrapCount % 50 == 0) {
-        // 第一次 / 每 50 次 记一次, 给一个累计统计 + 当前 in/out
-        DiaryService.add(
-            '[Video] buildProxiedUrl wrap (m3u8 #$_videoProxyWrapCount): worker=$worker endpoint=$endpoint, in=$targetUrl out=$wrapped');
-      }
-    } else {
-      // 非 m3u8 (mp4 / 其他) 一次播放会话只调几次, 每次都记
-      DiaryService.add(
-          '[Video] buildProxiedUrl wrap: worker=$worker endpoint=$endpoint, in=$targetUrl out=$wrapped');
-    }
-    return wrapped;
-  }
-
-  // v2.1.43.2: 视频代理 wrap 累计计数 (m3u8 segment 调一次 +1,
-  //   日记第一次/每 50 次记一次, 避免爆)
-  static int _videoProxyWrapCount = 0;
-
-  // v2.1.43.2: 视频代理 passthrough 一次性 hint flag
-  //   - video_proxy_off: 视频代理关 (用户关了视频代理开关)
-  //   - worker_unset: 视频代理开但 worker URL 没配
-  //   - m3u8_detect_fail: 非 m3u8 / 没 forceM3u8 但实际是 m3u8 (罕见)
-  static bool _videoProxyOffHinted = false;
-  static bool _videoProxyWorkerUnsetHinted = false;
-  static bool _videoProxyM3u8FailHinted = false;
-
-  static void _logVideoProxyPassthroughOnce(String targetUrl,
-      {required bool forceM3u8}) {
-    final videoProxyOn = _videoProxyEnabledCache == true;
-    final worker = _cfWorkerDomainCache;
-    if (!videoProxyOn) {
-      // 视频代理关
-      if (!_videoProxyOffHinted) {
-        _videoProxyOffHinted = true;
-        DiaryService.add(
-            '[Video] buildProxiedUrl passthrough hint: 视频代理开关关, 走直连原源 (不会加速). 想加速: 设置 → 视频代理开 + CF Worker 域名填好');
-      }
-      return;
-    }
-    if (worker == null || worker.isEmpty) {
-      // 视频代理开但 worker URL 没配
-      if (!_videoProxyWorkerUnsetHinted) {
-        _videoProxyWorkerUnsetHinted = true;
-        DiaryService.add(
-            '[Video] buildProxiedUrl passthrough hint: 视频代理开但 CF Worker 域名未配, 走直连原源. 想加速: 设置 → CF Worker 域名填好');
-      }
-      return;
-    }
-    // 兜底: 上面 _isCfWorkerUsableSync 返 false 但不是因为开关 / URL,
-    //   极罕见 (理论上不会到这里, 除非 _cfWorkerDomainCache 在异步
-    //   过程中被清空). 走一次性通用 hint.
-    DiaryService.add(
-        '[Video] buildProxiedUrl passthrough: videoProxyOn=$videoProxyOn, worker="$worker", forceM3u8=$forceM3u8, in=$targetUrl');
-  }
-
-  /// 异步版本：内部用内存缓存避免每次 await prefs
-  ///
-  /// v2.1.43.2 改: 调 [buildProxiedUrl] 之前重置 [_videoProxyWrapCount],
-  ///   让一次播放会话的 wrap 计数从 #1 开始. 之前 m3u8 segment 调一次
-  ///   +1, 全局累计, 一次播放可能 #500 / #1000, 不好看. reset 后:
-  ///   - 第一次 wrap → #1 (记完整 in/out)
-  ///   - 后续 wrap → #2, #3, ... 每 50 个记一次 (避免爆)
-  ///   - 跨播放会话也 reset, 计数一直是新会话内的
-  static Future<String> buildProxiedUrlAsync(String targetUrl,
-      {bool forceM3u8 = false}) async {
-    if (targetUrl.isEmpty) return targetUrl;
-    await _ensureCfWorkerCache();
-    // v2.1.43.2: 新会话开始, wrap 计数 reset
-    _videoProxyWrapCount = 0;
-    return buildProxiedUrl(targetUrl, forceM3u8: forceM3u8);
-  }
-
-  static Future<void> _ensureCfWorkerCache() async {
-    // v2.0.76: 同时缓存 优选 IP 开关 + 视频代理开关 两个独立值
-    if (_cfWorkerEnabledCache == null) {
-      final prefs = await SharedPreferences.getInstance();
-      _cfWorkerEnabledCache = prefs.getBool(_cfWorkerEnabledKey) ?? true;
-    }
-    if (_videoProxyEnabledCache == null) {
-      final prefs = await SharedPreferences.getInstance();
-      _videoProxyEnabledCache = prefs.getBool(_videoProxyEnabledKey) ?? true;
-    }
-    if (_cfWorkerDomainCache == null) {
-      final prefs = await SharedPreferences.getInstance();
-      _cfWorkerDomainCache = prefs.getString(_cfWorkerDomainKey) ?? '';
-    }
-  }
-
-  // 同步判断：buildProxiedUrl 是否能包 worker.
-  // v2.0.76: 改成看「视频代理」开关 (不是优选 IP 开关).
-  //   优选 IP 开关只影响 CfOptimizerHttpOverrides 的 DNS override,
-  //   不影响 URL 是否被包 worker.
-  static bool _isCfWorkerUsableSync() {
-    // 视频代理关 → 不包 worker
-    if (_videoProxyEnabledCache != true) return false;
-    final d = _cfWorkerDomainCache;
-    if (d == null || d.isEmpty) return false;
-    return true;
-  }
-
-  // 简单判断是否 m3u8 链接
-  static bool _looksLikeM3u8(String url) {
-    final lower = url.toLowerCase();
-    if (lower.contains('.m3u8')) return true;
-    if (lower.contains('.m3u')) return true;
-    return false;
-  }
-
-  // ===== Bangumi 数据/图片源（沿用豆瓣的"直连 / Cors Proxy / CF Worker"模式） =====
-
-  // 公共 CORS 代理（与豆瓣数据源共用同一个）
-  // ciao-cors.is-an.org 验证可代理 api.bgm.tv/calendar 和 /v0/subjects/*
-  // 但对 lain.bgm.tv 图片仍返回 403（上游拦了 CF 节点），所以图片必须走 CF Worker
-  static const String publicCorsProxyBase = 'https://ciao-cors.is-an.org/';
-
-  /// v2.0.12: 构造 ciao-cors 代理 URL
-  ///
-  /// 老用法 (v2.0.0 ~ v2.0.11):
-  ///   `https://ciao-cors.is-an.org/?url=https%3A%2F%2F...`
-  ///   → 现在返 400 "Invalid URL format", **100% 失败**
-  ///
-  /// 新用法 (v2.0.12+):
-  ///   `https://ciao-cors.is-an.org/https://...` (path 拼接, **不 encode**)
-  ///   + 必须带 `X-Requested-With: XMLHttpRequest` 或 `Origin` 头, 否则 403
-  ///
-  /// 调用方负责带 header (参考 [bangumi_service.dart] 的请求)
-  static String buildCiaoCorsUrl(String targetUrl) {
-    // 直接 path 拼接, target URL 必须带 https:// 前缀
-    if (targetUrl.startsWith('https://') || targetUrl.startsWith('http://')) {
-      return '$publicCorsProxyBase$targetUrl';
-    }
-    // 兜底: 协议相对或无协议, 强制 https
-    return '$publicCorsProxyBase/https://$targetUrl';
-  }
+  // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + buildProxiedUrl) 整个删了.
+  //   删了的方法 (都跟视频加速相关, 跟 TMDB / Bangumi / GitHub 加速无关):
+  //   - getCfBestIpSync / _cleanIpOrDomain / _cleanDomain
+  //   - _isAlreadyCfWorkerUrl / buildProxiedUrl / buildProxiedUrlAsync
+  //   - _ensureCfWorkerCache / _isCfWorkerUsableSync / _looksLikeM3u8
+  //   - _videoProxyWrapCount / 一次性 hint flag / _logVideoProxyPassthroughOnce
+  //   删了的字段 (SharedPreferences key + 内存缓存):
+  //   - _cfWorkerEnabledKey / _cfWorkerEnabledCache
+  //   - _cfWorkerDomainKey / _cfWorkerDomainCache
+  //   - _videoProxyEnabledKey / _videoProxyEnabledCache
+  //   - _cfBestIpKey / _cfBestIpCache
+  //   旧 SharedPreferences 值升级后留在 prefs 里没人读, 相当于自动清空.
+  //   行为变化: 视频播放时, m3u8 / 段 URL 不再走 CF Worker 套娃 (video
+  //   端点), ExoPlayer 直连 CDN 拉. playUrl = url 原源 (跟 v2.2.7 行为一致).
 
   // ===== v2.1.42: Bangumi 数据源 (v2.1.40 删, v2.1.42 跟 TMDB 一起加回 'bangumi_proxy') =====
 
@@ -1122,9 +783,9 @@ class UserDataService {
   ///   加速且配了 worker URL 时, 走 path-based: 剥 `api.bgm.tv` 前缀,
   ///   拼 `${workerUrl}/bangumi`, 例:
   ///     https://api.bgm.tv/calendar
-  ///     → https://tmdb-8d1.pages.dev/bangumi/calendar
+  ///     → https://your-worker.example.com/bangumi/calendar
   ///     https://api.bgm.tv/v0/subjects/123
-  ///     → https://tmdb-8d1.pages.dev/bangumi/v0/subjects/123
+  ///     → https://your-worker.example.com/bangumi/v0/subjects/123
   ///   worker 端 ([djsevenx1/tmdb-proxy] fork HuntzzZ) 拿 `/bangumi/...`
   ///   path 转给 api.bgm.tv, Authorization 透传. 跟 v2.0.77 之前
   ///   cf_worker 套娃 (`?url=`) 不一样: path-based worker 不需要
@@ -1197,7 +858,7 @@ class UserDataService {
   ///   加速且配了 worker URL 时, 走 path-based: 剥 `lain.bgm.tv` 前缀,
   ///   拼 `${workerUrl}/bgm-img`, 例:
   ///     https://lain.bgm.tv/img/.../abc.jpg
-  ///     → https://tmdb-8d1.pages.dev/bgm-img/img/.../abc.jpg
+  ///     → https://your-worker.example.com/bgm-img/img/.../abc.jpg
   ///   worker 端 ([djsevenx1/tmdb-proxy] fork HuntzzZ) 拿 `/bgm-img/...`
   ///   path 转给 lain.bgm.tv, 自动加 Referer: https://bgm.tv/ 绕过反盗链.
   ///   国内反盗链偶尔 403, 走 worker 反而成功率高. 跟 v2.0.74 之前
@@ -1297,7 +958,7 @@ class UserDataService {
   ///   配了 worker URL 时, 走 path-based: 把 `https://image.tmdb.org`
   ///   前缀换成 `${workerUrl}/image`, 例:
   ///     https://image.tmdb.org/t/p/w1280/abc.jpg
-  ///     → https://tmdb-8d1.pages.dev/image/t/p/w1280/abc.jpg
+  ///     → https://your-worker.example.com/image/t/p/w1280/abc.jpg
   ///   worker 端 ([djsevenx1/tmdb-proxy] fork HuntzzZ) 拿 `/image/...`
   ///   path 转给 image.tmdb.org, 顺带做 1 天 Cache-Control. 跟
   ///   v2.0.74 之前 cf_worker 套娃 (用 `?url=` 转) 不一样: path-based
@@ -1520,9 +1181,11 @@ class UserDataService {
     }
   }
 
-  // 应用启动时调用一次，缓存到内存，后续 buildProxiedUrl 不再 await
-  static Future<void> warmupCfWorkerConfig() async {
-    await _ensureCfWorkerCache();
+  // v2.3.0: 应用启动时调用一次, 缓存到内存, 后续读 prefs 走缓存 (避免 await)
+  //   原 warmupCfWorkerConfig() 名字来自 v2.0.70~v2.0.75 期间的"CF Worker 加速总开关"
+  //   配置, 视频加速链路整个删了, 这里改名去掉 CfWorker 关联, 只缓存非视频加速
+  //   的相关字段 (Bangumi / 豆瓣 cookie / TMDB API key / TMDB 数据源 / TMDB 代理 URL).
+  static Future<void> warmupUserDataConfig() async {
     await warmupBangumiConfig();
     // v2.0.77: 缓存豆瓣 cookie, 给 getImageUrl 高画质升级用
     if (_doubanCookieCache == null) {

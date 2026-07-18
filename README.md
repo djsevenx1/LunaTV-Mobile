@@ -57,7 +57,7 @@ LunaTV-Mobile 用 **2 个独立 CF Worker** 解决不同问题,互不干扰:
 | Worker | 仓库 | 负责 | 触发条件 |
 |---|---|---|---|
 | **CORSAPI** | [djsevenx1/CORSAPI](https://github.com/djsevenx1/CORSAPI) | m3u8 加速 / .ts 重写 / 源测速 / 视频流代理 | 设「CF Worker 加速源域名」(如 `xxx.workers.dev`),开关打开 |
-| **tmdb-proxy** (v2.1.41+) | [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) | TMDB API / TMDB 图片 / Bangumi 数据 / Bangumi 图片 / GitHub Releases API + assets (v2.1.46+) | 设「代理 URL」(如 `https://tmdb-8d1.pages.dev`),TMDB + Bangumi 3 个数据源默认自动选 Worker 加速,GitHub 检查更新 / APK 下载走 worker |
+| **tmdb-proxy** (v2.1.41+) | [djsevenx1/tmdb-proxy](https://github.com/djsevenx1/tmdb-proxy) | TMDB API / TMDB 图片 / Bangumi 数据 / Bangumi 图片 / GitHub Releases API + assets (v2.1.46+) | 设「代理 URL」(如 `https://your-worker.example.com`),TMDB + Bangumi 3 个数据源默认自动选 Worker 加速,GitHub 检查更新 / APK 下载走 worker |
 
 **tmdb-proxy** 路由 (path-based,比老 `?url=` 套娃干净):
 - `/movie/{id}` `/tv/{id}` `/search/...` `/movie/{id}/images` 等 → `api.themoviedb.org/3/...`

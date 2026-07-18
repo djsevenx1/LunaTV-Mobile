@@ -1,5 +1,7 @@
 # 编译期地址替换表 (给外部 build 脚本读)
 # 格式: 真地址==>占位符 (编译时反过来: 占位符==>真地址)
-# 部署时把占位符 (xx.workers.dev) 替换成 worker 真域名
+# 部署时把占位符 (xx.pages.dev) 替换成 worker 真域名
 # 仓库里不存真域名, 避免泄露
-your-worker.example.com==>xx.workers.dev
+# 注: [djsevenx1/tmdb-proxy] 部署到 Cloudflare **Pages** (非 Workers),
+#   Pages 默认域是 *.pages.dev, 不是 *.workers.dev.
+your-worker.example.com==>xx.pages.dev

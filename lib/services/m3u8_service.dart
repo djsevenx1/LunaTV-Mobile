@@ -28,6 +28,9 @@ class M3U8Service {
   ///     (测 worker URL 时必须传原始 m3u8 URL, 不传会用 worker URL 解析, segment 全错)
   ///   - [urlWrapper]: 测速时包装 segment URL 的回调
   ///     (传 `(url) => buildProxiedUrl(url)` 可让 segment 测速也走 worker)
+  /// v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 本地代理) 整个删了,
+  ///   测速走直连 CDN, [originalUrl] / [urlWrapper] 不再需要. 参数保留
+  ///   (传 null 即可, 字段仍占位保持向后兼容, 实际逻辑走 streamUrl 即可).
   Future<Map<String, dynamic>> getStreamInfo(
     String streamUrl, {
     String? originalUrl,
@@ -35,8 +38,11 @@ class M3U8Service {
   }) async {
     try {
       // 1) GET M3U8 manifest 一次, 同时解析 segments 和 resolution
-      //    streamUrl 可能是 worker URL, 但 manifest 内容来自 upstream (worker 透传),
-      //    里面 segment 路径是 upstream 相对路径, 必须用 originalUrl (upstream base) 解析
+      //    v2.3.0: 视频加速删了, originalUrl 不需要了, 传 null 走 streamUrl.
+      //    即便上游还传 originalUrl (老 player_screen 调法), 也不影响解析
+      //    (原 m3u8 manifest 里的相对路径用 upstream base / worker base
+      //     解析都行, 段是 absolute URL 走 _parseSegmentsFromContent 二次
+      //     检查, 没解析对会 fallback 到 upstream base 重新拼).
       final m3u8Content = await _fetchM3U8Content(streamUrl);
       if (m3u8Content == null) {
         // 不是 M3U8, 走直链测速
@@ -51,8 +57,7 @@ class M3U8Service {
       }
 
       // 2) 并发: HEAD 测延迟 + Range 测速 (都用第 1 个 segment, 反正测的是同一条线路)
-      //    segments[0] 是 absolute URL (用 originalUrl 解析), 用 urlWrapper 包装
-      //    → 走 worker 测速, 反映真实 worker 加速效果
+      //    v2.3.0: 视频加速删了, urlWrapper 不需要, 走 firstSegment 直连 CDN.
       final firstSegment = segments.first;
       final testUrl = urlWrapper != null ? urlWrapper(firstSegment) : firstSegment;
       final futures = await Future.wait([
