@@ -1692,22 +1692,24 @@ class _PlayerScreenState extends State<PlayerScreen>
     return _testOneUrl(m3u8, url, originalUrl: url);
   }
 
-  /// 单 URL 测速, 内部走 m3u8.getStreamInfo + 轻量 fallback (HEAD+Range)
+  /// 单 URL 测速, 内部走 m3u8.getStreamInfo
+  ///
+  /// v2.3.9: getStreamInfo 改成 3 步并发 (HEAD latency + 下 256KB 测速 +
+  ///   m3u8 解析) 整体 2.5s 内跑完. 之前的 6s timeout 仍然能 cover 整个
+  ///   链路, 不会出现"测速永远跑不完外层 timeout" 的问题.
   Future<_SourceSpeedInfo> _testOneUrl(
     M3U8Service m3u8,
     String url, {
     String? originalUrl,
   }) async {
     try {
-      // v2.3.3: master playlist 要先进入子 playlist 再测真实分片, 4s 太容易
-      //   掉到 fallback; 放宽到 6s, 仍比旧 worker 链路 8s 快。
       final result = await m3u8.getStreamInfo(
         url,
         // v2.3.0: 视频加速删了, 不用 originalUrl 二次 fallback (url==originalUrl)
         originalUrl: originalUrl,
         // v2.3.0: 视频加速删了, 不用 urlWrapper 包装段 URL
       ).timeout(
-        const Duration(seconds: 6),
+        const Duration(seconds: 5),
         onTimeout: () => <String, dynamic>{
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,
@@ -1727,8 +1729,12 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
     } catch (_) {}
-    // v2.3.0: fallback 直接用 url, 不用 altUrl (没有 worker URL 了)
-    return await _fallbackLightSpeed(url);
+    // v2.3.9: getStreamInfo 失败时不再调 fallback, 直接 unavailable.
+    //   之前 v2.3.7 加的 fallback _fallbackLightSpeed 跟 getStreamInfo
+    //   行为重复, 而且 2.5s timeout + 2.5s 内部 timeout 串起来很容易
+    //   全 timeout, 反而让用户看到"不可用" 假象. 现在的测速链路已经
+    //   简单稳定, 失败就如实显示"不可用", 用户能区分是真的慢还是测速崩.
+    return _SourceSpeedInfo.unavailable();
   }
 
   String _formatResolution(int h) {

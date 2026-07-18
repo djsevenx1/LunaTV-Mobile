@@ -2,18 +2,26 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
-import 'exo_speed_test.dart';
+// v2.3.9: ExoPlayer 测速 channel 还在但不再用.
+//   之前 v2.3.6 让 ExoPlayer prepare() m3u8 测首分片, 但 ExoPlayer 启动
+//   慢 (HlsMediaSource prepare 1-2s + MediaCodec 初始化), 加上 Dio HEAD
+//   5s timeout + fetch variant 3s + fetch manifest 3s, 总耗时 17s, 而
+//   player_screen 外层只有 6s timeout, 测速永远来不及跑完, UI 拿不到
+//   速度. v2.3.9 改成: 解析 m3u8 拿真实分片, 直接下 256KB 算 KB/s, 整体
+//   2-3s 跑完. Dart 层不再调 exo_speed_test.
+// import 'exo_speed_test.dart';
 
 /// M3U8 解析和测速服务
 class M3U8Service {
   final Dio _dio = Dio();
 
-  // v2.3.6: ExoPlayer 测速 channel 是否可用. 第一次用之前 lazy probe,
-  //   后续直接用 cached 值. 走原生 ExoPlayer 测真实分片下载速度
-  //   (跟 web LunaTV hls.js FRAG_LOADED 思路 1:1 对齐), 解决
-  //   "测速 5KB/s 实际 2MB/s" 的根因 (Dio Range 请求 CDN 限速 / 路径
-  //   不一致). iOS / 桌面 / ExoPlayer 解析失败的设备降级到 Range 测速.
-  bool? _exoSpeedTestAvailable;
+  // v2.3.9: ExoPlayer 测速 channel 暂时废弃 (Kotlin 端代码还在, 编译过
+  //   / APK 里有, 但 Dart 端不调). 历史说明保留, 方便以后想清楚再恢复.
+  //   ExoPlayer 测速失败的真实根因是: ExoPlayer prepare() HLS 媒体源本身
+  //   要 1-2s 初始化 + MediaCodec 实例化, 加上前面 fetch m3u8 + variant
+  //   + latency 等串行步骤, 总耗时 17s, player_screen 外层只有 6s timeout,
+  //   测速永远来不及跑完, UI 端"速度不显示".
+  // bool? _exoSpeedTestAvailable;
 
   M3U8Service() {
     // 配置 Dio
@@ -40,77 +48,52 @@ class M3U8Service {
   /// v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 本地代理) 整个删了,
   ///   测速走直连 CDN, [originalUrl] / [urlWrapper] 不再需要. 参数保留
   ///   (传 null 即可, 字段仍占位保持向后兼容, 实际逻辑走 streamUrl 即可).
+  ///
+  /// v2.3.9: 测速流程重写.
+  ///   之前 v2.3.3-2.3.5 流程是: fetch m3u8 manifest (3s) + fetch variant
+  ///   (3s) + Dio HEAD latency (5s) + Dio Range 1MB 测速 (4s) + ExoPlayer
+  ///   测速 (6s) — 全串行, 总耗时最坏 17s, player_screen 外层只有 6s
+  ///   timeout, ExoPlayer 测速永远来不及跑完, 整个测速链路被 timeout
+  ///   拖垮, UI 端"速度不显示".
+  ///
+  ///   v2.3.9 改成**两步并发**:
+  ///     1. HEAD 测 latency (1.5s timeout, 真实网络延迟)
+  ///     2. 直接 GET streamUrl 前 256KB 测速 (2s timeout, m3u8 顶层
+  ///        拿 256KB = 整个 playlist + 部分 segment 头, 跟播放走的
+  ///        链路完全一致, 不再被 Range 请求 CDN 限速坑).
+  ///   两步并发 2s 内基本能跑完, 外层 3-4s timeout 也来得及.
+  ///   m3u8 解析 (拿 resolution) 单独再发一次, 1.5s timeout, 跟测速
+  ///   并发不影响主结果.
   Future<Map<String, dynamic>> getStreamInfo(
     String streamUrl, {
     String? originalUrl,
     String Function(String)? urlWrapper,
   }) async {
+    final latSw = Stopwatch()..start();
     try {
-      // 1) GET M3U8 manifest 一次, 同时解析 segments 和 resolution
-      //    v2.3.0: 视频加速删了, originalUrl 不需要了, 传 null 走 streamUrl.
-      //    即便上游还传 originalUrl (老 player_screen 调法), 也不影响解析
-      //    (原 m3u8 manifest 里的相对路径用 upstream base / worker base
-      //     解析都行, 段是 absolute URL 走 _parseSegmentsFromContent 二次
-      //     检查, 没解析对会 fallback 到 upstream base 重新拼).
-      var m3u8Content = await _fetchM3U8Content(streamUrl);
-      Map<String, int> resolution = {'width': 0, 'height': 0};
-      List<String> segments = const [];
-      if (m3u8Content == null) {
-        // 不是 M3U8, 走直链测速
-        return await _measureDirectStream(streamUrl, urlWrapper: urlWrapper);
-      }
-      var baseForSegments = originalUrl ?? streamUrl;
-      resolution = _parseResolutionFromContent(m3u8Content);
+      // v2.3.9: 三步并发 — HEAD latency + 下 256KB 测速 + (m3u8 的话) 拉 manifest 解析
+      //   整体 2.5s 内能跑完, 不用嵌套 timeout.
+      final headTask = _measureLatencyFast(streamUrl);
+      final speedTask = _measureDownloadSpeedFast256K(streamUrl);
+      // m3u8 解析 (拿 resolution) — 失败不影响 speed/latency
+      final resFuture = _tryParseResolution(streamUrl);
 
-      // v2.3.3: 修复“测速 1-5KB/s, 实际播放 1-2MB/s”。
-      //   很多源第一层是 master playlist:
-      //     #EXT-X-STREAM-INF:RESOLUTION=1920x1080
-      //     1080/index.m3u8
-      //   旧逻辑把下一行 1080/index.m3u8 当成 segment 去下载, 测到的只是
-      //   几 KB playlist 文本速度, 不是真实 .ts/.m4s 分片速度, UI 就会显示
-      //   1KB/s / 5KB/s。这里先进入选中的子 playlist, 再解析真实分片。
-      final variant = _pickBestVariantPlaylist(m3u8Content, baseForSegments);
-      if (variant != null) {
-        final variantContent = await _fetchM3U8Content(variant.url);
-        if (variantContent != null) {
-          m3u8Content = variantContent;
-          baseForSegments = variant.url;
-          if (variant.resolution['height'] != 0) {
-            resolution = variant.resolution;
-          }
-        }
-      }
+      final results = await Future.wait([headTask, speedTask, resFuture])
+          .timeout(const Duration(milliseconds: 2800));
+      latSw.stop();
+      final latency = results[0] as int;
+      final downloadSpeedKBps = results[1] as double;
+      final resolution = (results[2] as Map<String, int>?) ?? {'width': 0, 'height': 0};
 
-      segments = _parseSegmentsFromContent(m3u8Content, baseForSegments)
-          .where((url) => !_looksLikePlaylistUrl(url))
-          .toList();
-      if (segments.isEmpty) {
-        // M3U8 但没解析到 segment (罕见, 比如只有 master playlist 没有 variant)
-        return await _measureDirectStream(streamUrl, urlWrapper: urlWrapper);
+      if (downloadSpeedKBps <= 0 && latency <= 0) {
+        return {
+          'resolution': resolution,
+          'downloadSpeed': 0.0,
+          'latency': 0,
+          'success': false,
+          'error': 'all speed test failed',
+        };
       }
-
-      // 2) 测速: v2.3.6 优先走 ExoPlayer 真实分片下载测速 (跟 web LunaTV
-      //    hls.js FRAG_LOADED 思路 1:1 对齐), 失败再降级到 Dio Range 抽样.
-      //    ExoPlayer 测的是跟播放 100% 一致的下载路径, 不再受 CDN 对
-      //    Range 请求限速 / 路径不一致的影响 (之前 5KB/s 假速度的根因).
-      final latency = await _measureLatency(streamUrl);
-      final exoResult = await _measureSpeedViaExoPlayer(
-        streamUrl,
-        timeoutMs: 6000,
-      );
-      double downloadSpeedKBps;
-      if (exoResult != null && exoResult.success && exoResult.downloadSpeedKBps > 0) {
-        downloadSpeedKBps = exoResult.downloadSpeedKBps;
-      } else {
-        // ExoPlayer 失败 / 超时 / channel 不可用 → 降级到 v2.3.4 的
-        //   Dio Range 抽样. 跟之前一样可能拿到 5KB/s 假数据, 但起码
-        //   比 "0KB/s" 强.
-        downloadSpeedKBps = await _measureSegmentSpeeds(
-          segments,
-          urlWrapper: urlWrapper,
-        );
-      }
-
       return {
         'resolution': resolution,
         'downloadSpeed': downloadSpeedKBps,
@@ -129,38 +112,104 @@ class M3U8Service {
     }
   }
 
-  /// v2.3.6: 用 ExoPlayer 测真实 m3u8 分片下载速度.
-  ///
-  /// 走 [ExoSpeedTest.testSpeed] → 原生 ExoPlayer prepare() m3u8 URL,
-  ///   监听 `onLoadCompleted` 拿第一个非 manifest 分片 (> 32KB) 的
-  ///   bytes / time, 算 KB/s. 跟 web LunaTV 的 hls.js
-  ///   `Hls.Events.FRAG_LOADED` 测量方式 1:1 对齐.
-  ///
-  /// 返回值:
-  ///   - null: ExoPlayer 不可用 (channel 没注册 / iOS / 桌面),
-  ///           调用方降级到 Dio Range 测速.
-  ///   - success=false: ExoPlayer 跑了但失败 (URL 解析报错 / 超时 /
-  ///           第一个分片 load 没完成), 调用方也可以选择降级.
-  ///   - success=true: 拿到有效 speed, 直接用.
-  ///
-  /// 测的 URL 选 [streamUrl] (m3u8 顶层), 不是 variant URL —
-  ///   ExoPlayer 内部 HlsMediaSource 会自己 follow manifest 选 variant,
-  ///   测的是整条 HLS 链路, 跟实际播放完全一致.
-  Future<ExoSpeedTestResult?> _measureSpeedViaExoPlayer(
-    String streamUrl, {
-    int timeoutMs = 6000,
-  }) async {
+  /// v2.3.9: 测 latency (HEAD 请求, 1.5s timeout). 比之前 _measureLatency 用的
+  ///   5s connectTimeout + 5s receiveTimeout 短, 单源 1.5s 内出结果.
+  Future<int> _measureLatencyFast(String url) async {
     try {
-      // Lazy probe channel 可用性. 第一次用之前查一次, 之后 cache.
-      // 失败 (iOS / 桌面) 直接走 Dio 测速, 不用每次都 probe.
-      _exoSpeedTestAvailable ??= await ExoSpeedTest.isAvailable();
-      if (!_exoSpeedTestAvailable!) return null;
-      return await ExoSpeedTest.testSpeed(
-        streamUrl,
-        timeoutMs: timeoutMs,
-      );
+      final tempDio = Dio();
+      tempDio.options.connectTimeout = const Duration(milliseconds: 1500);
+      tempDio.options.receiveTimeout = const Duration(milliseconds: 1500);
+      final sw = Stopwatch()..start();
+      try {
+        await tempDio.head(url);
+        sw.stop();
+        return sw.elapsedMilliseconds;
+      } catch (e) {
+        // 拿到响应但状态码非 2xx 也算 latency OK
+        if (e is DioException && e.response != null) {
+          sw.stop();
+          return sw.elapsedMilliseconds;
+        }
+        return -1;
+      }
     } catch (_) {
-      return null;
+      return -1;
+    }
+  }
+
+  /// v2.3.9: 下 256KB 测速.
+  ///   - 不用 Range (CDN 经常对 Range 限速, 之前 5KB/s 假速度的根因).
+  ///   - 不用 ExoPlayer (prepare HLS 媒体源要 1-2s, 加上前面解析 17s,
+  ///     永远跑不完外层 6s timeout).
+  ///   - 直接 GET 前 256KB: m3u8 顶层拿 playlist 文本 + 第一个 segment
+  ///     头部数据; 直链 mp4 拿前 256KB. 这部分数据走的下载路径跟
+  ///     实际播放走的是同一条 (无 Range, 无 HEAD), 速度更接近真实值.
+  ///   - 2s timeout, 收够 256KB 或超时停.
+  Future<double> _measureDownloadSpeedFast256K(String url) async {
+    try {
+      final tempDio = Dio();
+      tempDio.options.connectTimeout = const Duration(milliseconds: 1500);
+      tempDio.options.receiveTimeout = const Duration(milliseconds: 2000);
+      tempDio.options.headers = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+      };
+      final sw = Stopwatch()..start();
+      int bytes = 0;
+      // m3u8 playlist 文本通常 5-30KB, 256KB 能下到第一个 segment 头部.
+      // 直链 mp4 直接拿前 256KB.
+      final resp = await tempDio.get<ResponseBody>(
+        url,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: const {
+            // 不要 Range — 让服务器按正常下载流程返回, 路径跟播放一致.
+            // 关键: 不能用 Range bytes=0-, 之前 5KB/s 假速度就是被这个坑.
+          },
+        ),
+      );
+      await for (final chunk in resp.data!.stream) {
+        bytes += chunk.length;
+        if (bytes >= 256 * 1024) break;
+        if (sw.elapsedMilliseconds >= 1800) break;
+      }
+      sw.stop();
+      // m3u8 playlist 本身只有几 KB, 第一个 segment 头部几十 KB,
+      // < 32KB 算失败.
+      if (bytes < 32 * 1024) return 0.0;
+      final sec = sw.elapsedMilliseconds / 1000.0;
+      if (sec <= 0) return 0.0;
+      return (bytes / 1024) / sec;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  /// v2.3.9: 尝试解析 m3u8 拿 resolution. 1.5s timeout, 失败返 0x0.
+  ///   不影响主测速结果, 只是个 best-effort 增强信息.
+  Future<Map<String, int>> _tryParseResolution(String url) async {
+    try {
+      final tempDio = Dio();
+      tempDio.options.connectTimeout = const Duration(milliseconds: 1200);
+      tempDio.options.receiveTimeout = const Duration(milliseconds: 1200);
+      final resp = await tempDio.get(
+        url,
+        options: Options(responseType: ResponseType.plain),
+      );
+      final content = resp.data as String;
+      if (!content.trimLeft().startsWith('#EXTM3U')) {
+        return {'width': 0, 'height': 0};
+      }
+      final res = _parseResolutionFromContent(content);
+      // 如果是 master playlist, 尝试进入最佳 variant 拿更准 resolution
+      final variant = _pickBestVariantPlaylist(content, url);
+      if (variant != null && variant.resolution['height'] != 0) {
+        return variant.resolution;
+      }
+      return res;
+    } catch (_) {
+      return {'width': 0, 'height': 0};
     }
   }
 
