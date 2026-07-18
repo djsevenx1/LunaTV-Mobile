@@ -52,15 +52,12 @@ void main() async {
   // 异步初始化 ThemeService,恢复上次保存的主题模式
   final themeService = await ThemeService.create();
 
-  // v2.3.0: 删 _warmupCfOptimizer() / warmupUserDataConfig() 调用.
-  //   视频加速链路 (CF Worker 视频代理 + 优选 IP + 本地代理) 整个删了,
-  //   不再需要 HttpOverrides 注入优选 IP, 也不需要缓存 CF Worker 域名
-  //   给 buildProxiedUrl 用. TMDB / Bangumi / GitHub Worker 加速跟视频
-  //   加速独立, 字段 (TMDB 代理 URL / 豆瓣 cookie / TMDB API key /
-  //   TMDB 数据源 / Bangumi 数据源) 在 getTmdbProxyDomainSync() /
-  //   getBangumiDataSourceKey() 等 getter 内部 lazy 加载, 启动
-  //   不用预先 warmup. 删 warmupUserDataConfig 调用节省 1 次 prefs
-  //   I/O.
+  // v2.3.0: 只删视频加速 warmup, 保留用户配置 warmup.
+  //   TMDB 幻灯片 / 详情页大背景 / GitHub 更新代理都依赖同步 getter
+  //   (getTmdbApiKeySync / getTmdbProxyDomainSync), 这些字段必须启动时
+  //   先从 SharedPreferences 缓存到内存; 否则首页 Hero Banner 会以为
+  //   TMDB API Key 没配, 直接跳过 TMDB backdrop 升级.
+  await UserDataService.warmupUserDataConfig();
 
   runApp(LunaTVApp(themeService: themeService));
 }
