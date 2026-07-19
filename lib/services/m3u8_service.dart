@@ -928,7 +928,7 @@ class M3U8Service {
               'error': '获取流信息超时',
             };
           },
-        });
+        );
 
         if (streamInfo['success']) {
           final downloadSpeed = streamInfo['downloadSpeed'] as double;

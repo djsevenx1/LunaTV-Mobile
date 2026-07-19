@@ -332,6 +332,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         _updateSkipButtonVisibility();
         _maybeAutoPlayNext();
+      }
     });
     _durationSub = _player!.durationStream.listen((dur) {
       if (!mounted) return;
