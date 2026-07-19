@@ -209,12 +209,15 @@ class M3U8Service {
           if (sec > 0) return (v.bytes / 1024) / sec;
         }
         // variant 还是 m3u8 (多层 master), 解析拿第一段 segment
-        final segUrl = _pickFirstSegmentFromContent(v.content, variant);
-        if (segUrl != null) {
-          final s = await _downloadHead256K(segUrl);
-          if (s.bytes >= 2 * 1024) {
-            final sec = s.elapsedMs / 1000.0;
-            if (sec > 0) return (s.bytes / 1024) / sec;
+        final variantContent = v.content;
+        if (variantContent != null) {
+          final segUrl = _pickFirstSegmentFromContent(variantContent, variant);
+          if (segUrl != null) {
+            final s = await _downloadHead256K(segUrl);
+            if (s.bytes >= 2 * 1024) {
+              final sec = s.elapsedMs / 1000.0;
+              if (sec > 0) return (s.bytes / 1024) / sec;
+            }
           }
         }
       }
