@@ -716,31 +716,10 @@ class M3U8Service {
       streamInfoResults[result.key] = result.value;
     }
 
-    // 找出所有有效速度的最大值，用于线性映射
-    final validSpeeds = <double>[];
-    final validPings = <int>[];
-
-    for (final source in allSources) {
-      final sourceId = '${source.source}_${source.id}';
-      final streamInfo = streamInfoResults[sourceId];
-
-      if (streamInfo != null && streamInfo['success']) {
-        final downloadSpeed = streamInfo['downloadSpeed'] as double;
-        final latency = streamInfo['latency'] as int;
-
-        if (downloadSpeed > 0) {
-          validSpeeds.add(downloadSpeed);
-        }
-        if (latency > 0) {
-          validPings.add(latency);
-        }
-      }
-    }
-
-    // 计算基准值
-    final maxSpeed = validSpeeds.isNotEmpty ? validSpeeds.reduce((a, b) => a > b ? a : b) : 1024.0; // 默认1MB/s作为基准
-    final minPing = validPings.isNotEmpty ? validPings.reduce((a, b) => a < b ? a : b) : 50;
-    final maxPing = validPings.isNotEmpty ? validPings.reduce((a, b) => a > b ? a : b) : 1000;
+    // v2.3.16: 不再算 maxSpeed / minPing / maxPing 归一化基准.
+    //   v2.3.0 公式是 -(speed * resWeight) + ping (越小越优),
+    //   不需要 maxSpeed 归一化, 直接用原始 speed / ping 算就行.
+    //   失败源 (success=false 或 speed=0 或 latency=0) 给 1<<30 排最后.
 
     // 计算每个源的评分并排序
     final sourceScores = <MapEntry<dynamic, double>>[];
@@ -751,7 +730,14 @@ class M3U8Service {
       final streamInfo = streamInfoResults[sourceId];
 
       if (streamInfo == null || !streamInfo['success']) {
-        continue; // 跳过获取失败的源
+        // 失败源: UI 仍展示 (显示 "超时"), 但 score 给极大值排最后
+        sourceScores.add(MapEntry(source, (1 << 30).toDouble()));
+        allSourcesSpeed[sourceId] = {
+          'quality': '未知',
+          'loadSpeed': '超时',
+          'pingTime': '超时',
+        };
+        continue;
       }
 
       final downloadSpeed = streamInfo['downloadSpeed'] as double;
@@ -761,14 +747,11 @@ class M3U8Service {
       // 转换分辨率为标准格式
       final resolution = _convertResolutionToString(resolutionData);
 
-      // 计算综合评分
+      // 计算综合评分 (v2.3.0 公式)
       final score = _calculateSourceScore(
         resolution,
         downloadSpeed,
         latency,
-        maxSpeed,
-        minPing,
-        maxPing,
       );
 
       sourceScores.add(MapEntry(source, score));
@@ -780,8 +763,8 @@ class M3U8Service {
       };
     }
 
-    // 按综合评分排序，选择最佳播放源
-    sourceScores.sort((a, b) => b.value.compareTo(a.value));
+    // v2.3.16: 按 score 升序排 (smaller wins). 失败源 (1<<30) 自动排最后.
+    sourceScores.sort((a, b) => a.value.compareTo(b.value));
 
     final bestSource = sourceScores.isNotEmpty ? sourceScores.first.key : allSources.first;
 
@@ -793,34 +776,37 @@ class M3U8Service {
   }
 
   /// 计算源的综合评分
-  /// 使用线性映射算法，基于实际测速结果动态调整评分范围
-  /// 包含分辨率、下载速度和网络延迟三个维度的评分
+  /// v2.3.0 公式 (越小越优, 跟 web LunaTV 1:1):
+  ///   score = -(speed * resWeight) + ping
+  ///     resWeight = resScore / 100 (4K=1.0, 2K=0.85, 1080p=0.75, 720p=0.6,
+  ///                                 480p=0.4, 360p=0.2, 未知=0)
+  ///     speed = KB/s
+  ///     ping = ms
+  ///   速度越快 → -(speed*resWeight) 越负 → score 越小 → 越好
+  ///   ping 越低 → score 越小 → 越好
+  ///   失败源 (speed=0 或 latency=0) → 返 1<<30 排最后
+  ///
+  /// v2.3.0 ~ v2.3.10 一直用这公式. v2.3.11 自研 CustomExoPlayer 时没改.
+  /// v2.3.12 移植 Selene-TV u74.h: resScore*0.5 + speedScore*0.5 (越大越优,
+  ///   maxSpeed 归一化), 用户反馈"测速永远拿不到速度"删了.
+  /// v2.3.14 rollback 说"回到 v2.3.0 公式", 但实际代码残留了 v2.3.12 风格
+  ///   的线性 0..100 公式 (40% 质量 + 40% 速度 + 20% 延迟 + maxSpeed 归一化),
+  ///   changelog 跟代码对不上. v2.3.16 真正改回 v2.3.0 公式.
   double _calculateSourceScore(
     String quality,
     double speedKBps,
     int latencyMs,
-    double maxSpeed,
-    int minPing,
-    int maxPing,
   ) {
-    double score = 0;
+    // 失败源: speed=0 或 latency=0 视为无效, 给极大值排最后
+    if (speedKBps <= 0 || latencyMs <= 0) return (1 << 30).toDouble();
 
-    // 分辨率评分 (40% 权重)
-    final qualityScore = _getQualityScore(quality);
-    score += qualityScore * 0.4;
-
-    // 下载速度评分 (40% 权重) - 基于最大速度线性映射
-    final speedScore = _getSpeedScore(speedKBps, maxSpeed);
-    score += speedScore * 0.4;
-
-    // 网络延迟评分 (20% 权重) - 基于延迟范围线性映射
-    final pingScore = _getPingScore(latencyMs, minPing, maxPing);
-    score += pingScore * 0.2;
-
-    return (score * 100).round() / 100.0; // 保留两位小数
+    final resWeight = _getQualityScore(quality) / 100.0;
+    return -(speedKBps * resWeight) + latencyMs;
   }
 
-  /// 获取分辨率评分
+  /// 获取分辨率评分 (0..100), 同时给 v2.3.0 公式当 resWeight 分母
+  ///   4K=100, 2K=85, 1080p=75, 720p=60, 480p=40, 360p=20, 未知=0
+  ///   跟 web LunaTV 一致
   double _getQualityScore(String quality) {
     switch (quality.toLowerCase()) {
       case '4k':
@@ -841,27 +827,6 @@ class M3U8Service {
       default:
         return 0;
     }
-  }
-
-  /// 获取下载速度评分
-  double _getSpeedScore(double speedKBps, double maxSpeed) {
-    if (speedKBps <= 0) return 30; // 无效速度给默认分
-
-    // 基于最大速度线性映射，最高100分
-    final speedRatio = speedKBps / maxSpeed;
-    return (speedRatio * 100).clamp(0.0, 100.0);
-  }
-
-  /// 获取网络延迟评分
-  double _getPingScore(int latencyMs, int minPing, int maxPing) {
-    if (latencyMs <= 0) return 0; // 无效延迟给0分
-
-    // 如果所有延迟都相同，给满分
-    if (maxPing == minPing) return 100;
-
-    // 线性映射：最低延迟=100分，最高延迟=0分
-    final pingRatio = (maxPing - latencyMs) / (maxPing - minPing);
-    return (pingRatio * 100).clamp(0.0, 100.0);
   }
 
   /// 将分辨率数据转换为标准字符串格式
