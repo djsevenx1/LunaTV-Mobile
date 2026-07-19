@@ -98,18 +98,24 @@ class M3U8Service {
     }
   }
 
-  /// v2.3.18: 测速入口 — ExoPlayer 优先, Range 抽样兜底.
+  /// v2.3.19 (hotfix v2.3.18): 测速入口 — ExoPlayer 优先 (3s), Range 抽样兜底.
   ///
   /// 跟 web LunaTV hls.js FRAG_LOADED 原理 1:1 对齐: ExoPlayer 真实加载
   ///   m3u8, 监听 AnalyticsListener.onLoadCompleted 拿首分片 > 32KB 的
   ///   bytes / time 算 KB/s. 测的是真实分片下载速度, 跟实际播放走
   ///   同一条 HlsMediaSource 链路.
   ///
-  /// 跟 v2.3.6 的区别:
-  ///   - v2.3.6 串行 (fetch m3u8 → variant → latency → ExoPlayer 17s 超)
-  ///   - v2.3.18 ExoPlayer 单调用 8s timeout, 失败立即降级 Range
-  ///     (不阻塞 UI)
-  ///   - m3u8 resolution 解析跟 ExoPlayer 并行 (Future.wait)
+  /// v2.3.18 → v2.3.19 关键变化:
+  ///   - v2.3.18: ExoPlayer 8s timeout. 超过 player_screen 外层 7s
+  ///     timeout, Android 全源返回 "不可用" (实测 7/8 源失败).
+  ///   - v2.3.19: ExoPlayer 缩到 3s timeout. 失败立即降级 v2.3.14
+  ///     Range 抽样, 总耗时 max 3s + ~3s = 6s < 7s 兜底.
+  ///   - resolutionFuture 跟 ExoPlayer 并行, 但只在 ExoPlayer 成功
+  ///     时才 await (失败路径不再等 resolution, 省 1-2s).
+  ///
+  /// 设备分级:
+  ///   - iOS / 桌面: 直接走 Range (ExoPlayer channel 没注册 / 不可用)
+  ///   - Android: ExoPlayer 3s → Range 兜底
   Future<Map<String, dynamic>> _measureM3u8SpeedExoFirst(
     String m3u8Url, {
     String Function(String)? urlWrapper,
@@ -119,18 +125,16 @@ class M3U8Service {
       return await _measureM3u8Speed(m3u8Url, urlWrapper: urlWrapper);
     }
 
-    // Android: ExoPlayer 优先, 8s timeout, 失败降级
+    // Android: ExoPlayer 优先, 3s timeout, 失败降级 Range
+    // (3s 跟外层 7s 留 4s 给 Range 抽样, Range 一般 2-3s, 留 1s 余量)
     try {
-      final exoFuture = ExoSpeedTest.testSpeed(m3u8Url, timeoutMs: 8000);
+      // 并行: ExoPlayer 测速 + resolution 解析 (后者只跟 ExoPlayer 成功路径用)
+      final exoFuture = ExoSpeedTest.testSpeed(m3u8Url, timeoutMs: 3000);
       final resolutionFuture = _getResolutionFromM3U8(m3u8Url);
-      final exoResult = await exoFuture.timeout(
-        const Duration(seconds: 8),
-        onTimeout: () => ExoSpeedTestResult.failure(error: 'timeout'),
-      );
-      // 并行拿 resolution (不等 ExoPlayer 失败也算 resolution)
-      final resolution = await resolutionFuture;
-
+      final exoResult = await exoFuture;
       if (exoResult.success && exoResult.downloadSpeedKBps > 0) {
+        // 成功: 等 resolution (已经跟 ExoPlayer 并行了 1-2s, 通常已经完成)
+        final resolution = await resolutionFuture;
         DiaryService.add(
             '[SpeedTest] ExoPlayer OK: speed=${exoResult.downloadSpeedKBps.toStringAsFixed(1)}KB/s, latency=${exoResult.latencyMs}ms, bytes=${exoResult.bytesLoaded}');
         return {
