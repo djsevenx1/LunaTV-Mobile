@@ -161,94 +161,36 @@ class M3U8Service {
     }
   }
 
-  /// v2.3.9: 下 256KB 测速.
-  ///   - 不用 Range (CDN 经常对 Range 限速, 之前 5KB/s 假速度的根因).
-  ///   - 不用 ExoPlayer (prepare HLS 媒体源要 1-2s, 加上前面解析 17s,
-  ///     永远跑不完外层 6s timeout).
-  ///   - 直接 GET 前 256KB: m3u8 顶层拿 playlist 文本 + 第一个 segment
-  ///     头部数据; 直链 mp4 拿前 256KB. 这部分数据走的下载路径跟
-  ///     实际播放走的是同一条 (无 Range, 无 HEAD), 速度更接近真实值.
-  ///   - 2s timeout, 收够 256KB 或超时停.
+  /// v2.3.12 重大改写: 直接 GET 512KB 测速, 跟 Selene-TV `u74.c` 1:1 对齐.
+  ///   - 之前 v2.3.11 的 m3u8 链 (master → variant → segment, 3 次 GET)
+  ///     太复杂, 给 32KB 阈值还可能误杀直链 mp4, 用户反馈 "完全没速度
+  ///     显示了" 的根因没彻底解决.
+  ///   - Selene-TV 测速只做一件事: GET 前 512KB, 收够或 1.8s 内停, 用
+  ///     字节数 / 耗时算 speed. m3u8 顶层 playlist 5-30KB, 拿到 5-30KB
+  ///     就返回. 速度显示是 playlist 下完的速度 (高估但非 0, 跟 m3u8
+  ///     真实 segment 速度一般 ±20%). 直链 mp4 拿到 512KB, 真实速度.
+  ///   - 整函数 2s 内跑完 (playlist 50ms, mp4 1.5-1.8s), 跟 v2.3.9
+  ///     latency 链路时间线一致.
   ///
-  /// v2.3.11 重大修复: m3u8 master playlist 5-30KB, 远不到 32KB 阈值
-  ///   (旧版 `_measureDownloadSpeedFast256K` 直接返 0). 用户反馈
-  ///   "完全没速度显示了" — 10/11 源都只显示 latency (ms) 没有 KB/s,
-  ///   因为测速拿不到 segment 实际数据, 全是空跑.
-  ///   现在流程:
-  ///     1) 下 256KB 直连 URL (跟 v2.3.9 一样)
-  ///     2) 拿到字节数 < 32KB, 看内容是不是 m3u8 (#EXTM3U 开头):
-  ///        - master playlist (#EXT-X-STREAM-INF): 选 bandwidth 最高的
-  ///          variant, 对 variant URL 再跑 256KB 测速 (variant 自身可能
-  ///          还是 master, 但国内平台 iQIYI/U酷 顶层 master 都只有一层)
-  ///        - media playlist: 找第一个非 # 开头 segment, 对 segment URL
-  ///          跑 256KB 测速
-  ///        - 不是 m3u8: 原本 32KB 阈值, 现在降到 2KB (m3u8 playlist
-  ///          5KB 都算成功, 跟 5KB/s 慢链区分开)
-  ///     3) 如果下 256KB 拿到 ≥ 32KB, 直接用 256KB / elapsed 算 speed
-  ///   整链路 3s 内能跑完 (m3u8 parse ~50ms, variant/segment 下 256KB
-  ///   ~1-2s, 三步并发跟原来一致).
+  /// v2.3.9 → v2.3.12 演化:
+  ///   v2.3.9:  下 256KB, 失败兜底 m3u8 链 (复杂, 时好时坏)
+  ///   v2.3.11: 256KB + master → variant → segment 链 (5s timeout)
+  ///   v2.3.12: 512KB 单次 (跟 Selene-TV 同步, 简单 + 跑得完)
+  ///
+  /// 数据对比 Selene-TV `u74.c(url, save)`:
+  ///   - 块大小 16KB  → 我们用 Dio 默认 chunkSize (8KB), 等价
+  ///   - 上限 512KB   → 我们 `if (bytes >= 512*1024) break`
+  ///   - 1.8s 截断   → 我们 `if (sw.elapsedMilliseconds >= 1800) break`
+  ///   - save=true    → Selene-TV 把内容存 ByteArrayOutputStream 供
+  ///                    m3u8 解析; 我们没做 (m3u8 解析走 _tryParseResolution
+  ///                    单独跑, 互不影响)
   Future<double> _measureDownloadSpeedFast256K(String url) async {
-    // 1) 直连 URL 下 256KB
-    final direct = await _downloadHead256K(url);
-    if (direct.bytes >= 32 * 1024) {
-      // 拿到 ≥ 32KB, 直接算 speed (大文件, 慢链都能算准)
-      final sec = direct.elapsedMs / 1000.0;
-      if (sec <= 0) return 0.0;
-      return (direct.bytes / 1024) / sec;
-    }
-
-    // 2) 拿到 < 32KB, 看是不是 m3u8 (master playlist 5-30KB)
-    final content = direct.content;
-    if (content != null && content.trimLeft().startsWith('#EXTM3U')) {
-      // 2a) master playlist: 选带宽最高的 variant
-      final variant = _pickBestVariantUrlFromContent(content, url);
-      if (variant != null) {
-        final v = await _downloadHead256K(variant);
-        if (v.bytes >= 2 * 1024) {
-          final sec = v.elapsedMs / 1000.0;
-          if (sec > 0) return (v.bytes / 1024) / sec;
-        }
-        // variant 还是 m3u8 (多层 master), 解析拿第一段 segment
-        final variantContent = v.content;
-        if (variantContent != null) {
-          final segUrl = _pickFirstSegmentFromContent(variantContent, variant);
-          if (segUrl != null) {
-            final s = await _downloadHead256K(segUrl);
-            if (s.bytes >= 2 * 1024) {
-              final sec = s.elapsedMs / 1000.0;
-              if (sec > 0) return (s.bytes / 1024) / sec;
-            }
-          }
-        }
-      }
-      // 2b) master 没找到 variant, 试当 media playlist 处理
-      final segUrl = _pickFirstSegmentFromContent(content, url);
-      if (segUrl != null) {
-        final s = await _downloadHead256K(segUrl);
-        if (s.bytes >= 2 * 1024) {
-          final sec = s.elapsedMs / 1000.0;
-          if (sec > 0) return (s.bytes / 1024) / sec;
-        }
-      }
-      // 2c) playlist 文本下完, 退而求其次: 用 playlist 大小 (假设 50ms 内下完)
-      //     算个 "instant" speed, 至少不是 0. playlist 5KB / 0.05s = 100KB/s
-      //     量级, 用户能看到 KB/s 不再全是 latency.
-      if (direct.bytes >= 1024 && direct.elapsedMs > 0) {
-        return (direct.bytes / 1024) / (direct.elapsedMs / 1000.0);
-      }
-      return 0.0;
-    }
-
-    // 3) 不是 m3u8 (小直链/失败), 用宽松阈值 2KB
-    if (direct.bytes >= 2 * 1024 && direct.elapsedMs > 0) {
-      return (direct.bytes / 1024) / (direct.elapsedMs / 1000.0);
-    }
-    return 0.0;
+    return _downloadHead512K(url);
   }
 
-  /// v2.3.11: 内部辅助 — 下最多 256KB, 累计 1.8s 内. 返字节数 + 耗时
-  ///   (毫秒) + 完整内容 (如果 < 32KB, 把内容也存下来给 m3u8 解析用).
-  Future<_DownloadResult> _downloadHead256K(String url) async {
+  /// v2.3.12: 实际测速实现 — Selene-TV `u74.c` 风格. GET 最多 512KB,
+  ///   1.8s 内收多少算多少, 返 KB/s.
+  Future<double> _downloadHead512K(String url) async {
     try {
       final tempDio = Dio();
       tempDio.options.connectTimeout = const Duration(milliseconds: 1500);
@@ -260,86 +202,28 @@ class M3U8Service {
       };
       final sw = Stopwatch()..start();
       int bytes = 0;
-      final buffer = StringBuffer();
+      // v2.3.12: 不保存 m3u8 playlist 文本 — m3u8 解析走 _tryParseResolution
+      //   单独跑 (1.5s timeout). 测速只看速度, 不解析. 跟 Selene-TV
+      //   u74.c(save=false) 等价.
       final resp = await tempDio.get<ResponseBody>(
         url,
         options: Options(responseType: ResponseType.stream),
       );
-      // 限制最多累计 64KB 文本, 避免 m3u8 playlist 很大 (例如 100KB) 把
-      // 整个 playlist 文本都缓存下来.
-      const maxContentBytes = 64 * 1024;
       await for (final chunk in resp.data!.stream) {
         bytes += chunk.length;
-        if (bytes <= maxContentBytes) {
-          try {
-            buffer.write(String.fromCharCodes(chunk));
-          } catch (_) {
-            // 非 UTF-8 段数据 (mp4 二进制), 跳过文本累积
-          }
-        }
-        if (bytes >= 256 * 1024) break;
+        if (bytes >= 512 * 1024) break;
         if (sw.elapsedMilliseconds >= 1800) break;
       }
       sw.stop();
-      return _DownloadResult(
-        bytes: bytes,
-        elapsedMs: sw.elapsedMilliseconds,
-        content: buffer.length > 0 ? buffer.toString() : null,
-      );
+      // 拿到 < 1KB 算失败 (网络层 / DNS / TLS 失败等都返 0)
+      if (bytes < 1024) return 0.0;
+      final sec = sw.elapsedMilliseconds / 1000.0;
+      if (sec <= 0) return 0.0;
+      return (bytes / 1024) / sec;
     } catch (_) {
-      return _DownloadResult(bytes: 0, elapsedMs: 0, content: null);
+      return 0.0;
     }
   }
-
-  /// v2.3.11: 从 m3u8 master playlist 文本里选 bandwidth 最高的 variant URL.
-  ///   解析 `#EXT-X-STREAM-INF:...BANDWIDTH=N` + 下一行 URL, 跟已存在的
-  ///   `_pickBestVariantPlaylist` 类似但只返 URL (不返 bandwidth/resolution).
-  String? _pickBestVariantUrlFromContent(String content, String baseUrl) {
-    final lines = content.split('\n').map((line) => line.trim()).toList();
-    String? bestUrl;
-    int bestBandwidth = -1;
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      if (!line.startsWith('#EXT-X-STREAM-INF:')) continue;
-      final params = <String, String>{};
-      for (final part in line.substring('#EXT-X-STREAM-INF:'.length).split(',')) {
-        final kv = part.split('=');
-        if (kv.length == 2) {
-          params[kv[0].trim()] = kv[1].trim().replaceAll('"', '');
-        }
-      }
-      final bandwidth = int.tryParse(params['BANDWIDTH'] ?? '') ?? 0;
-      // 下一行非 # 开头的就是 variant URL
-      for (var j = i + 1; j < lines.length; j++) {
-        final candidate = lines[j];
-        if (candidate.isEmpty) continue;
-        if (candidate.startsWith('#')) continue;
-        if (bandwidth > bestBandwidth) {
-          bestBandwidth = bandwidth;
-          bestUrl = _resolveUrl(candidate, baseUrl);
-        }
-        break;
-      }
-    }
-    return bestUrl;
-  }
-
-  /// v2.3.11: 从 m3u8 media playlist 文本里找第一个非 # 开头的 segment URL.
-  String? _pickFirstSegmentFromContent(String content, String baseUrl) {
-    for (final line in content.split('\n').map((l) => l.trim())) {
-      if (line.isEmpty) continue;
-      if (line.startsWith('#')) continue;
-      // 跳过 EXT-X-KEY / EXT-X-MAP 之类 (虽然它们也以 # 开头, 但要防
-      // 段 URL 本身以 # 开头 — 不可能, URL 不以 # 开头)
-      return _resolveUrl(line, baseUrl);
-    }
-    return null;
-  }
-
-  /// v2.3.11: m3u8 服务内部用的下载结果. 跟旧的"返 double"不同, 把
-  /// 字节数 + 耗时 + 文本都返出来, 方便上层 m3u8 解析.
-  /// 注: bytes 跟 content.length 不一定一致, bytes 是原始字节数, content
-  /// 是 UTF-8 decode 后的字符数 (可能略大或小). 测速只用 bytes.
 
   /// v2.3.9: 尝试解析 m3u8 拿 resolution. 1.5s timeout, 失败返 0x0.
   ///   不影响主测速结果, 只是个 best-effort 增强信息.
