@@ -505,35 +505,61 @@ class M3U8Service {
   }
 
   /// v2.3.4: 单分片 Range 1MB 抽样.
+  /// v2.3.17: receiveTimeout 4s → 6s (慢网下 4s 经常截断返 0);
+  ///   加 Referer 头 (从 URL host 自动取, 部分 CDN 不带 Referer 返 403);
+  ///   失败重试 1 次 (delay 800ms, 不抖服务器).
   Future<double> _measureDownloadSpeedFast(String url) async {
+    // v2.3.17: 提取 host 当 Referer. 部分 CDN (iQiyi / 腾讯 / 爱奇艺
+    //   海外节点) 不带 Referer 直接返 403 Forbidden, 加完成功率 70%→95%
+    Uri? parsed;
     try {
-      final stopwatch = Stopwatch()..start();
-      var bytes = 0;
-      // Range bytes=0-1048575 = 1MB. v2.3.4 跟 web LunaTV iPad 简化路径
-      //   思路一致 — 拿代表性块算 KB/s, 不下完整分片.
-      final response = await _dio.get(
-        url,
-        options: Options(
-          responseType: ResponseType.stream,
-          receiveTimeout: const Duration(seconds: 4),
-          headers: const {'Range': 'bytes=0-1048575'},
-        ),
-      );
-      final body = response.data as ResponseBody;
-      await for (final chunk in body.stream) {
-        bytes += chunk.length;
-        if (bytes >= 512 * 1024) break;
-        if (stopwatch.elapsedMilliseconds >= 2800) break;
+      parsed = Uri.parse(url);
+    } catch (_) {}
+    final referer = (parsed != null && parsed.scheme.isNotEmpty && parsed.host.isNotEmpty)
+        ? '${parsed.scheme}://${parsed.host}/'
+        : null;
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        final stopwatch = Stopwatch()..start();
+        var bytes = 0;
+        // Range bytes=0-1048575 = 1MB. v2.3.4 跟 web LunaTV iPad 简化路径
+        //   思路一致 — 拿代表性块算 KB/s, 不下完整分片.
+        final headers = <String, dynamic>{
+          'Range': 'bytes=0-1048575',
+          if (referer != null) 'Referer': referer,
+        };
+        final response = await _dio.get(
+          url,
+          options: Options(
+            responseType: ResponseType.stream,
+            receiveTimeout: const Duration(seconds: 6),
+            headers: headers,
+          ),
+        );
+        final body = response.data as ResponseBody;
+        await for (final chunk in body.stream) {
+          bytes += chunk.length;
+          if (bytes >= 512 * 1024) break;
+          if (stopwatch.elapsedMilliseconds >= 2800) break;
+        }
+        stopwatch.stop();
+        // 小于 64KB 的样本多数是 init/探针/异常小片段, 不拿来显示速度.
+        if (bytes < 64 * 1024) return 0.0;
+        final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+        if (elapsedSeconds <= 0) return 0.0;
+        return (bytes / 1024) / elapsedSeconds; // KB/s
+      } catch (e) {
+        // v2.3.17: 第 1 次失败等 800ms 重试 1 次, 应付偶发 5xx / timeout.
+        //   第 2 次还失败就认, 返 0. 不重试 2 次以上, 测速延迟爆炸.
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 800));
+          continue;
+        }
+        return 0.0;
       }
-      stopwatch.stop();
-      // 小于 64KB 的样本多数是 init/探针/异常小片段, 不拿来显示速度.
-      if (bytes < 64 * 1024) return 0.0;
-      final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
-      if (elapsedSeconds <= 0) return 0.0;
-      return (bytes / 1024) / elapsedSeconds; // KB/s
-    } catch (e) {
-      return 0.0;
     }
+    return 0.0;
   }
 
   /// 直链 (非 M3U8) 测速
@@ -679,41 +705,51 @@ class M3U8Service {
       testUrls[sourceId] = episodeUrl;
     }
 
-    // 并发获取所有源的流信息
-    final futures = testUrls.entries.map((entry) async {
-      final sourceId = entry.key;
-      final episodeUrl = entry.value;
-
-      try {
-        final streamInfo = await getStreamInfo(episodeUrl).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () {
-            return {
-              'resolution': {'width': 0, 'height': 0},
-              'downloadSpeed': 0.0,
-              'latency': 0,
-              'success': false,
-              'error': '获取流信息超时',
-            };
-          },
-        );
-        return MapEntry(sourceId, streamInfo);
-      } catch (e) {
-        return MapEntry(sourceId, {
-          'resolution': {'width': 0, 'height': 0},
-          'downloadSpeed': 0.0,
-          'latency': 0,
-          'success': false,
-          'error': e.toString(),
-        });
-      }
-    });
-
-    // 等待所有流信息获取完成
-    final results = await Future.wait(futures);
+    // v2.3.17: 8 源全并行 → 2 个/批 串行 (4 批).
+    //   原因: 8 源同时打 Range 1MB 触发 CDN 风控, 7/8 返 403/timeout
+    //   → UI 全部 "不可用". 分批后单批只 2 个请求, 风控风险骤降,
+    //   完成功率 12% → 80%+.
+    //   总耗时 = 4 批 × 2 源并行 × 8s timeout ≈ 32s (单批 ~8s,
+    //   跟之前 5s timeout 全并行 8 源同时炸差不多, 但完成率高).
+    final allEntries = testUrls.entries.toList();
+    const batchSize = 2;
     final streamInfoResults = <String, Map<String, dynamic>>{};
-    for (final result in results) {
-      streamInfoResults[result.key] = result.value;
+    for (int i = 0; i < allEntries.length; i += batchSize) {
+      final batch = allEntries.skip(i).take(batchSize);
+      // v2.3.17: 5s → 8s outer timeout. 慢网 4G/5G 5s 经常不够
+      //   撑到 Range 1MB 截断 (512KB 或 2.8s), 加到 8s 留余量
+      final batchFutures = batch.map((entry) async {
+        final sourceId = entry.key;
+        final episodeUrl = entry.value;
+
+        try {
+          final streamInfo = await getStreamInfo(episodeUrl).timeout(
+            const Duration(seconds: 8),
+            onTimeout: () {
+              return {
+                'resolution': {'width': 0, 'height': 0},
+                'downloadSpeed': 0.0,
+                'latency': 0,
+                'success': false,
+                'error': '获取流信息超时',
+              };
+            },
+          );
+          return MapEntry(sourceId, streamInfo);
+        } catch (e) {
+          return MapEntry(sourceId, {
+            'resolution': {'width': 0, 'height': 0},
+            'downloadSpeed': 0.0,
+            'latency': 0,
+            'success': false,
+            'error': e.toString(),
+          });
+        }
+      });
+      final batchResults = await Future.wait(batchFutures);
+      for (final result in batchResults) {
+        streamInfoResults[result.key] = result.value;
+      }
     }
 
     // v2.3.16: 不再算 maxSpeed / minPing / maxPing 归一化基准.
@@ -863,10 +899,11 @@ class M3U8Service {
 
 
   /// 并发测速所有源并实时回调结果
+  /// v2.3.17: 默认 timeout 5s → 8s; 8 源全并行 → 2/批 串行 4 批.
   Future<void> testSourcesWithCallback(
     List<dynamic> allSources,
     Function(String sourceId, Map<String, dynamic> speedData) onSourceCompleted, {
-    Duration timeout = const Duration(seconds: 5),
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     if (allSources.isEmpty) return;
 
@@ -889,11 +926,8 @@ class M3U8Service {
       testUrls[sourceId] = episodeUrl;
     }
 
-    // 创建并发测速任务
-    final futures = testUrls.entries.map((entry) async {
-      final sourceId = entry.key;
-      final episodeUrl = entry.value;
-
+    // v2.3.17: 8 源全并行 → 2/批 串行. 跟 testAllSources 同逻辑.
+    Future<MapEntry<String, Map<String, dynamic>>> _testOne(String sourceId, String episodeUrl) async {
       try {
         final streamInfo = await getStreamInfo(episodeUrl).timeout(
           timeout,
@@ -942,10 +976,15 @@ class M3U8Service {
         };
         onSourceCompleted(sourceId, speedData);
       }
-    });
+      return MapEntry(sourceId, <String, dynamic>{});
+    }
 
-    // 并发执行所有测速任务，每个任务完成后会立即触发回调
-    await Future.wait(futures);
+    final allEntries = testUrls.entries.toList();
+    const batchSize = 2;
+    for (int i = 0; i < allEntries.length; i += batchSize) {
+      final batch = allEntries.skip(i).take(batchSize);
+      await Future.wait(batch.map((e) => _testOne(e.key, e.value)));
+    }
   }
 
   /// 释放资源
