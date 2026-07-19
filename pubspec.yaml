@@ -1,7 +1,7 @@
 name: luna_tv
 description: "LunaTV-inspired Flutter client"
 publish_to: 'none'
-version: 2.3.13
+version: 2.3.14
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -40,13 +40,9 @@ dependencies:
   #     ExoPlayer Listener.onBandwidthSample (Dart 端 video_player 不暴露)
   #   - 默认硬解 (Media3 默认就是硬解 + codec 自适应, 不需要手动 hwdec=)
   #   只支持 Android+iOS, macOS/web 跟以前一样不编
-  # 注: 锁 ^2.10.1 而非 2.11.x, 因为 2.11.0+ 要求 Dart SDK >=3.10.0,
-  #   CI 用的 Flutter 3.32.5 自带 Dart 3.8.1, 解不出. 升 Flutter 到 3.44.6
-  #   也行 (pub 推荐), 但风险更大 (3.32.5 → 3.44.6 API 可能 break,
-  #   编译 + dart API 兼容性都要重测). 降 video_player 风险最小:
-  #   2.10.1 跟 2.11.x API 几乎一致, ExoPlayer 2.x 老一点但 build.gradle
-  #   显式列 androidx.media3 1.4.1 会覆盖 transitive, 实际生效还是 1.4.1.
-  # video_player: ^2.10.1  # v2.3.11: 卸 video_player, 改用自研 CustomExoPlayer
+  # v2.3.11: 卸 video_player 改自研 CustomExoPlayer (MethodChannel + SurfaceTexture).
+  # v2.3.14: 加回 video_player, 卸自研 CustomExoPlayer. 跟 v2.3.0 行为一致.
+  video_player: ^2.10.1
   screen_brightness: 0.2.2+1
   volume_controller: 2.0.8
   # macos_window_utils: ^1.0.4

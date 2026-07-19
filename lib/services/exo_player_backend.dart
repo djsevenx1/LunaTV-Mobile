@@ -1,47 +1,37 @@
 // v2.2.0: ExoPlayer (AndroidX Media3) 版本的 [PlayerBackend] 实现.
 //
-// v2.3.11 重大改动: 真正替换 video_player Flutter package, 改用自研
-//   [CustomExoPlayer] (Kotlin MethodChannel + SurfaceTexture 输出).
-//   video_player 整个包从 pubspec.yaml 移除.
+//   走 Flutter 官方 [video_player] package, Android 端底层就是
+//   androidx.media3 ExoPlayer 1.4.x (跟 build.gradle.kts 显式列的
+//   media3-exoplayer 1.4.1 是同一份, video_player transitive 依赖).
+//   iOS 端走 AVPlayer.
 //
-//   为什么:
-//   - video_player Dart 端只暴露 VideoPlayerController 抽象, 内部
-//     ExoPlayer 的 DefaultLoadControl (min=15s/max=50s/fp=2.5s/
-//     fp_re=5s) 没法从 Dart 配.
-//   - 用户反馈 "卡顿时 buffer 时间短, 频繁 rebuffer" 是这个根因.
-//     想加长 buffer, 必须直接配 ExoPlayer.
-//   - 之前 v2.2.0 ~ v2.3.10 走 video_player, 自研 CustomExoPlayer
-//     只是 building block. v2.3.11 真正接管.
+//   v2.3.11 ~ v2.3.13 卸了 video_player 改自研 [CustomExoPlayer]
+//   (CustomExoPlayerChannel.kt + custom_exo_player.dart), 走自配
+//   DefaultLoadControl (min=30s / max=90s). 用户反馈 "卡顿时
+//   buffer 时间短, 频繁 rebuffer" 是这个根因.
 //
-//   现在:
-//   - 走 [CustomExoPlayer] 调原生 ExoPlayer, buffer 配置:
-//       minBufferMs=30s / maxBufferMs=90s
-//       bufferForPlaybackMs=5s / bufferForPlaybackAfterRebufferMs=8s
-//   - 视频输出走 Flutter SurfaceTexture (TextureRegistry), Dart 用
-//     [Texture] widget 渲染. 见 [exo_player_view.dart].
-//   - 状态同步走 EventChannel (CustomExoPlayer.events), 不再依赖
-//     video_player VideoPlayerValue listener. position/duration/isPlaying/
-//     isBuffering/videoWidth/videoHeight 全部从原生推过来.
+//   v2.3.14: 卸自研 CustomExoPlayer, 回到 video_player Flutter package.
+//   - 走 video_player 2.10.1 内部 ExoPlayer (1.4.x), DefaultLoadControl
+//     用 video_player 默认值 (min=15s / max=50s / bufferForPlaybackMs=2.5s
+//     / bufferForPlaybackAfterRebufferMs=5s).
+//   - 视频输出走 video_player 的 [VideoPlayer] widget, 渲染逻辑跟 v2.3.0
+//     一致, 详见 [exo_player_view.dart].
+//   - 状态同步走 video_player [VideoPlayerController] 内部 listener
+//     (VideoPlayerValue 推送 isPlaying / position / duration / size).
 //
 //   v2.3.0 视频加速 (VideoProxyServer / CfOptimizer) 整个删了, 跟现在无关.
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:video_player/video_player.dart';
 
-import 'package:luna_tv/services/custom_exo_player.dart';
 import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/player_backend.dart';
 
 class ExoPlayerBackend implements PlayerBackend {
-  // ── 内部 CustomExoPlayer state ────────────────────────
-  CustomExoPlayerHandle? _handle;
-  StreamSubscription<Map<String, dynamic>>? _eventSub;
-  // v2.3.11: position 由 Dart 端 200ms 轮询拿 (ExoPlayer 没有 dart 端
-  //   listener 直接推 currentPosition, 跟 video_player VideoPlayerValue
-  //   不一样). duration / isPlaying / isBuffering 走 EventChannel.
-  Timer? _positionTimer;
-  int _lastPositionMs = 0;
+  // ── 内部 state ──────────────────────────────────────
+  VideoPlayerController? _controller;
+  StreamSubscription<VideoPlayerValue>? _valueSub;
 
   // ── 缓存的状态 ────────────────────────────────────────
   bool _isPlaying = false;
@@ -64,144 +54,54 @@ class ExoPlayerBackend implements PlayerBackend {
 
   // ── 内部辅助 ────────────────────────────────────────
   bool _disposed = false;
-  String? _currentUrl;
 
   ExoPlayerBackend();
 
-  /// v2.3.11: 工厂 — 创建 CustomExoPlayer + 订阅 events.
+  /// 工厂 — 创建空 backend, [open] 时再实际初始化 VideoPlayerController.
+  ///  v2.3.0 行为: 不在工厂里就创建 controller, 因为 [open] 可能要
+  ///  传不同 URL, 提前创建再 dispose 浪费资源. _PlayerScreenState
+  ///  _initPlayerAsync 拿 backend 后调 [open] 才会实际建 controller.
   static Future<ExoPlayerBackend> create({
     Map<String, String>? defaultHeaders,
   }) async {
     final backend = ExoPlayerBackend();
-    backend._init();
     DiaryService.add(
-        '[ExoPlayer] init OK: custom=true, defaultBuffer=30s/90s/5s/8s, headers=${defaultHeaders?.keys.join(",") ?? "none"}');
+        '[ExoPlayer] init OK: video_player=^2.10.1, headers=${defaultHeaders?.keys.join(",") ?? "none"}');
     return backend;
   }
 
-  void _init() {
-    // 订阅 EventChannel (CustomExoPlayer.events), 同步 isPlaying /
-    //   isBuffering / duration / videoSize 状态. position 走 200ms 轮询.
-    _eventSub = CustomExoPlayer.events.listen(_onNativeState);
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 200),
-        (_) => _pollPosition());
-  }
-
-  void _onNativeState(Map<String, dynamic> state) {
+  void _onValue(VideoPlayerValue v) {
     if (_disposed) return;
-    final handle = _handle;
-    if (handle == null) return;
-    final pid = state['playerId'];
-    if (pid is! int || pid != handle.playerId) return;
+    final c = _controller;
+    if (c == null) return;
 
-    final isPlaying = state['isPlaying'] == true;
-    final isBuffering = state['isBuffering'] == true;
-    final durMs = (state['durationMs'] as num?)?.toInt() ?? 0;
-    final w = (state['videoWidth'] as num?)?.toInt() ?? 0;
-    final h = (state['videoHeight'] as num?)?.toInt() ?? 0;
-
-    if (isPlaying != _isPlaying) {
-      _isPlaying = isPlaying;
-      _safeAdd(_playingCtl, isPlaying);
+    if (v.isPlaying != _isPlaying) {
+      _isPlaying = v.isPlaying;
+      _safeAdd(_playingCtl, v.isPlaying);
     }
-    if (isBuffering != _isBuffering) {
-      _isBuffering = isBuffering;
-      _safeAdd(_bufferingCtl, isBuffering);
+    if (v.isBuffering != _isBuffering) {
+      _isBuffering = v.isBuffering;
+      _safeAdd(_bufferingCtl, v.isBuffering);
     }
-    if (durMs > 0) {
-      final dur = Duration(milliseconds: durMs);
-      if (dur != _duration) {
-        _duration = dur;
-        _safeAdd(_durationCtl, dur);
-      }
+    final dur = v.duration;
+    if (dur > Duration.zero && dur != _duration) {
+      _duration = dur;
+      _safeAdd(_durationCtl, dur);
     }
-    if (w != _width || h != _height) {
-      _width = w;
-      _height = h;
+    final pos = v.position;
+    if (pos != _position) {
+      _position = pos;
+      _safeAdd(_positionCtl, pos);
     }
-  }
-
-  Future<void> _pollPosition() async {
-    if (_disposed) return;
-    final handle = _handle;
-    if (handle == null) return;
-    // v2.3.11: 直接调 getState 拿 position 跟 duration. 200ms 一次,
-    //   每次跨 thread 调一次原生, 跟 video_player 内部 100ms listener
-    //   差不多频率. 状态 eventChannel 已经推过来时, _position/_duration
-    //   已经是最新, getState 不会再发新值 (事件层 isPlaying / isBuffering
-    //   推到 broadcast stream, position 推 positionStream).
-    try {
-      final s = await CustomExoPlayer.getState(handle.playerId);
-      if (s == null || _disposed) return;
-      // v2.3.11: 重新检查 handle 防止 race (await 期间 dispose)
-      final cur = _handle;
-      if (cur == null || cur.playerId != handle.playerId) return;
-      if (s.positionMs != _lastPositionMs) {
-        _lastPositionMs = s.positionMs;
-        _position = Duration(milliseconds: s.positionMs);
-        _safeAdd(_positionCtl, _position);
-        // 推断 completed (跟 video_player VideoPlayerValue.isCompleted 行为对齐)
-        if (_duration > Duration.zero &&
-            _position >= _duration - const Duration(milliseconds: 500) &&
-            !_isCompleted) {
-          _isCompleted = true;
-          _safeAdd(_completedCtl, true);
-        } else if (_isCompleted && _position < _duration - const Duration(seconds: 2)) {
-          // 重新 seek 回去, 清 completed
-          _isCompleted = false;
-          _safeAdd(_completedCtl, false);
-        }
-      }
-      if (s.error.isNotEmpty) {
-        DiaryService.add('[ExoPlayer] ERROR: ${s.error}');
-        if (!_isCompleted) {
-          _isCompleted = true;
-          _safeAdd(_completedCtl, true);
-        }
-      }
-    } catch (_) {
-      // getState 失败 (player 已 release) 静默忽略
+    if (v.size.width > 0 && v.size.height > 0 &&
+        (v.size.width.round() != _width || v.size.height.round() != _height)) {
+      _width = v.size.width.round();
+      _height = v.size.height.round();
     }
-  }
-
-  Future<void> _ensurePlayer(String url) async {
-    if (_disposed) {
-      throw StateError('ExoPlayerBackend disposed');
+    if (v.isCompleted != _isCompleted) {
+      _isCompleted = v.isCompleted;
+      _safeAdd(_completedCtl, v.isCompleted);
     }
-    if (_handle != null && _currentUrl == url) {
-      // 同一个 URL 复用, 不重建
-      return;
-    }
-    // 释放旧的 (texture 也会跟着释放, 旧 textureId 失效)
-    final old = _handle;
-    if (old != null) {
-      try {
-        await CustomExoPlayer.release(old.playerId);
-      } catch (_) {}
-      _handle = null;
-    }
-    final h = await CustomExoPlayer.create(
-      minBufferMs: CustomExoPlayer.defaultMinBufferMs,
-      maxBufferMs: CustomExoPlayer.defaultMaxBufferMs,
-      bufferForPlaybackMs: CustomExoPlayer.defaultBufferForPlaybackMs,
-      bufferForPlaybackAfterRebufferMs:
-          CustomExoPlayer.defaultBufferForPlaybackAfterRebufferMs,
-      withTexture: true,
-    );
-    if (_disposed) {
-      // dispose 在 create 期间发生, 立即释放
-      try {
-        await CustomExoPlayer.release(h.playerId);
-      } catch (_) {}
-      throw StateError('ExoPlayerBackend disposed during create');
-    }
-    _handle = h;
-    _currentUrl = url;
-    _width = 0;
-    _height = 0;
-    _duration = Duration.zero;
-    _position = Duration.zero;
-    _lastPositionMs = 0;
   }
 
   // ── PlayerBackend 实现 ────────────────────────────────────
@@ -243,25 +143,62 @@ class ExoPlayerBackend implements PlayerBackend {
     Map<String, String>? headers,
     Duration? startAt,
   }) async {
+    if (_disposed) {
+      throw StateError('ExoPlayerBackend disposed');
+    }
+    if (url.isEmpty) {
+      throw ArgumentError('url is empty');
+    }
     _isCompleted = false;
     _safeAdd(_completedCtl, false);
 
-    await _ensurePlayer(url);
+    // 释放旧 controller (切集 / 重新打开)
+    final old = _controller;
+    if (old != null) {
+      try {
+        await _valueSub?.cancel();
+        _valueSub = null;
+        await old.pause();
+        await old.dispose();
+      } catch (_) {}
+      _controller = null;
+    }
 
-    final handle = _handle!;
+    final c = VideoPlayerController.networkUrl(
+      Uri.parse(url),
+      httpHeaders: headers,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    );
     try {
-      await CustomExoPlayer.setMediaItem(handle.playerId, url);
-      await CustomExoPlayer.prepare(handle.playerId);
+      await c.initialize();
     } catch (e) {
-      DiaryService.add('[ExoPlayer] open($url) err: $e');
+      DiaryService.add('[ExoPlayer] initialize($url) err: $e');
+      try {
+        await c.dispose();
+      } catch (_) {}
       rethrow;
     }
+    if (_disposed) {
+      try {
+        await c.dispose();
+      } catch (_) {}
+      throw StateError('ExoPlayerBackend disposed during initialize');
+    }
+    _controller = c;
+    _width = c.value.size.width.round();
+    _height = c.value.size.height.round();
+    _duration = c.value.duration;
+    _position = Duration.zero;
+    _safeAdd(_durationCtl, _duration);
+    _safeAdd(_positionCtl, _position);
+
+    // 订阅 listener, 同步 isPlaying / isBuffering / position / size
+    _valueSub = c.addListener(() => _onValue(c.value));
 
     if (startAt != null && startAt > Duration.zero) {
       try {
-        await CustomExoPlayer.seekTo(handle.playerId, startAt.inMilliseconds);
+        await c.seekTo(startAt);
         _position = startAt;
-        _lastPositionMs = startAt.inMilliseconds;
         _safeAdd(_positionCtl, _position);
       } catch (e) {
         DiaryService.add('[ExoPlayer] initial seekTo($startAt) err: $e');
@@ -269,7 +206,7 @@ class ExoPlayerBackend implements PlayerBackend {
     }
 
     try {
-      await CustomExoPlayer.play(handle.playerId);
+      await c.play();
     } catch (e) {
       DiaryService.add('[ExoPlayer] play err: $e');
     }
@@ -277,38 +214,37 @@ class ExoPlayerBackend implements PlayerBackend {
 
   @override
   Future<void> play() async {
-    final h = _handle;
-    if (h == null) return;
+    final c = _controller;
+    if (c == null) return;
     try {
-      await CustomExoPlayer.play(h.playerId);
+      await c.play();
     } catch (_) {}
   }
 
   @override
   Future<void> pause() async {
-    final h = _handle;
-    if (h == null) return;
+    final c = _controller;
+    if (c == null) return;
     try {
-      await CustomExoPlayer.pause(h.playerId);
+      await c.pause();
     } catch (_) {}
   }
 
   @override
   Future<void> stop() async {
-    final h = _handle;
-    if (h == null) return;
+    final c = _controller;
+    if (c == null) return;
     try {
-      await CustomExoPlayer.pause(h.playerId);
+      await c.pause();
     } catch (_) {}
     try {
-      await CustomExoPlayer.seekTo(h.playerId, 0);
+      await c.seekTo(Duration.zero);
     } catch (_) {}
     _isPlaying = false;
     _isBuffering = false;
     _isCompleted = false;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _lastPositionMs = 0;
     _safeAdd(_playingCtl, false);
     _safeAdd(_bufferingCtl, false);
     _safeAdd(_completedCtl, false);
@@ -318,16 +254,14 @@ class ExoPlayerBackend implements PlayerBackend {
 
   @override
   Future<void> seek(Duration position) async {
-    final h = _handle;
-    if (h == null) return;
-    final ms = position.inMilliseconds;
+    final c = _controller;
+    if (c == null) return;
     try {
-      await CustomExoPlayer.seekTo(h.playerId, ms);
+      await c.seekTo(position);
     } catch (e) {
       DiaryService.add('[ExoPlayer] seekTo($position) err: $e');
     }
     _position = position;
-    _lastPositionMs = ms;
     _safeAdd(_positionCtl, position);
     if (_isCompleted) {
       _isCompleted = false;
@@ -338,13 +272,13 @@ class ExoPlayerBackend implements PlayerBackend {
   @override
   Future<void> setVolume(double volume) async {
     final v = volume.clamp(0.0, 1.0);
-    final h = _handle;
-    if (h == null) {
+    final c = _controller;
+    if (c == null) {
       _volume = v;
       return;
     }
     try {
-      await CustomExoPlayer.setVolume(h.playerId, v);
+      await c.setVolume(v);
     } catch (_) {}
     _volume = v;
   }
@@ -352,13 +286,13 @@ class ExoPlayerBackend implements PlayerBackend {
   @override
   Future<void> setSpeed(double speed) async {
     final s = speed.clamp(0.25, 4.0);
-    final h = _handle;
-    if (h == null) {
+    final c = _controller;
+    if (c == null) {
       _speed = s;
       return;
     }
     try {
-      await CustomExoPlayer.setSpeed(h.playerId, s);
+      await c.setPlaybackSpeed(s);
     } catch (e) {
       DiaryService.add('[ExoPlayer] setSpeed($s) err: $e');
     }
@@ -379,16 +313,19 @@ class ExoPlayerBackend implements PlayerBackend {
   @override
   Future<void> dispose() async {
     _disposed = true;
-    _positionTimer?.cancel();
-    _positionTimer = null;
-    await _eventSub?.cancel();
-    _eventSub = null;
-    final h = _handle;
-    if (h != null) {
+    try {
+      await _valueSub?.cancel();
+    } catch (_) {}
+    _valueSub = null;
+    final c = _controller;
+    if (c != null) {
       try {
-        await CustomExoPlayer.release(h.playerId);
+        await c.pause();
       } catch (_) {}
-      _handle = null;
+      try {
+        await c.dispose();
+      } catch (_) {}
+      _controller = null;
     }
     await _playingCtl.close();
     await _bufferingCtl.close();
@@ -399,10 +336,9 @@ class ExoPlayerBackend implements PlayerBackend {
   }
 
   // ── 辅助 ──────────────────────────────────────────────
-  /// v2.3.11: 给 widget 层用, 拿到底层 Flutter SurfaceTexture textureId
-  ///   渲染 [Texture] widget. 没初始化完 (player 还没 create) → null,
-  ///   widget 渲染黑屏兜底.
-  int? get textureId => _handle?.textureId;
+  /// 给 widget 层用, 拿到 VideoPlayerController 给 [VideoPlayer] widget.
+  /// 没初始化完 (controller 还没 build) → null, widget 渲染黑屏兜底.
+  VideoPlayerController? get controller => _controller;
 
   void _safeAdd<T>(StreamController<T> ctl, T value) {
     if (!ctl.isClosed) ctl.add(value);

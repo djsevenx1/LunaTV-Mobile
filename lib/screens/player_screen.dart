@@ -5,11 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 // v2.2.0: 卸 libmpv (media_kit) 改 ExoPlayer (AndroidX Media3).
-// v2.3.11: 卸 video_player Flutter package, 改用自研 [CustomExoPlayer]
-//   (CustomExoPlayerChannel.kt + custom_exo_player.dart). video_player
-//   import 整个删了. 视频输出走 Flutter SurfaceTexture + Texture widget.
-//   实际 ExoPlayer 1.4.x (跟 video_player 2.x 内部是同一份) + 自配
-//   DefaultLoadControl (min=30s/max=90s, 卡顿恢复后等 8s 再继续).
+// v2.3.14: 加回 video_player Flutter package, 卸自研 CustomExoPlayer.
+//   跟 v2.3.0 行为一致 — 走 video_player 内部 ExoPlayer (1.4.x) +
+//   默认 DefaultLoadControl. 视频输出走 video_player [VideoPlayer] widget.
+//   实际 ExoPlayer 1.4.x (跟 video_player 2.x 内部是同一份).
 
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
@@ -34,12 +33,8 @@ import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/douban_detail_header.dart';
 import 'package:luna_tv/widgets/dlna_device_dialog.dart';
 import 'package:luna_tv/widgets/exo_player_view.dart';
-// v2.3.12: 弹幕系统 (移植自 Selene-TV).
-//   - danmaku_service: facade, UI 唯一入口
-//   - danmaku_overlay: 浮在 ExoPlayer 上的弹幕渲染层
-//   - danmaku_models: 弹幕数据模型 (DanmakuComment / DanmakuEpisode / DanmakuMedia)
-import 'package:luna_tv/services/danmaku/danmaku_service.dart';
-import 'package:luna_tv/widgets/danmaku_overlay.dart';
+// v2.3.14: 卸弹幕系统 (v2.3.12 移植自 Selene-TV, 用户反馈 UX 太差: 要求
+//   手动输 B站 cid, 违背 "TV 客户端" 一键体验原则, 整个删了).
 import 'package:dlna_dart/dlna.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:provider/provider.dart';
@@ -79,6 +74,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   v2.3.11: 卸 video_player, 改用自研 [CustomExoPlayer] (走
   //   CustomExoPlayerChannel.kt). 视频输出走 Flutter SurfaceTexture,
   //   [ExoPlayerView] 渲染 [Texture] widget, 不再依赖 video_player.
+  //   v2.3.14: 加回 video_player Flutter package, 卸自研 [CustomExoPlayer].
+  //     走 video_player 2.10.1 内部 ExoPlayer (1.4.x) + 默认
+  //     DefaultLoadControl. [ExoPlayerView] 渲染 [VideoPlayer] widget.
+  //     跟 v2.3.0 行为一致.
   ExoPlayerBackend? _player;
   // v2.3.0: 视频加速链路整个删了, 以下字段跟着删:
   //   - VideoProxyServer _videoProxy  (本地代理服务, 整个文件删了)
@@ -190,19 +189,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 自动播下一集: 防止 position/completed 重复触发
   bool _autoPlayedThisEpisode = false;
 
-  // v2.3.12: 弹幕系统状态
-  //   - _danmakuCtrl: 弹幕池 + ticker, 跟 player position 同步
-  //   - _danmakuEnabled: 用户开关 (默认 false, 不打扰)
-  //   - _danmakuOid: 当前集数的弹幕 id (B站 = cid). 一集一个 oid
-  //   - _danmakuFetched: 本集已经拉过弹幕标记, 避免反复拉
-  //   - _danmakuLoading: 加载中 (UI 禁用开关防抖)
-  //   - _danmakuPreferred: 用户在 UI 选的 provider, 跟 Selene-TV DanmakuSource 一致
-  final DanmakuOverlayController _danmakuCtrl = DanmakuOverlayController();
-  bool _danmakuEnabled = false;
-  String? _danmakuOid;
-  bool _danmakuFetched = false;
-  bool _danmakuLoading = false;
-  String _danmakuPreferred = 'bilibili';
+  // v2.3.14: 卸弹幕系统 (v2.3.12 移植自 Selene-TV, 用户反馈 UX 太差:
+  //   要求手动输 B 站 cid, 违背 "TV 客户端" 一键体验原则, 整个删了).
+  //   整个 danmaku 模块 (danmaku_service.dart / danmaku_overlay.dart /
+  //   danmaku_models.dart / danmaku/providers/*) 全部删除.
+  //   播放器核心只剩 ExoPlayerBackend, 不再有弹幕 overlay / 控制流.
 
   // UI 控制
   bool _isPlaying = false;
@@ -341,12 +332,6 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         _updateSkipButtonVisibility();
         _maybeAutoPlayNext();
-        // v2.3.12: 弹幕 tick — 推进时间线, 触发 active 弹幕出/入.
-        //   只在 enabled 时 tick, 关闭时不消耗 CPU.
-        if (_danmakuEnabled) {
-          _danmakuCtrl.tick(pos.inMilliseconds);
-        }
-      }
     });
     _durationSub = _player!.durationStream.listen((dur) {
       if (!mounted) return;
@@ -391,8 +376,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     _seekHintTimer?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
-    // v2.3.12: 释放弹幕池, 避免 stream tick 写已 disposed widget.
-    _danmakuCtrl.dispose();
     // v2.0.51: 释放选集 PageView 控制器
     _episodesPageController.dispose();
     _pageControllerNotifier.dispose();
@@ -1663,22 +1646,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!mounted) return;
     if (mounted) setState(() {});
 
-    // v2.3.12: 计算本会话所有源的最大速度, 给 _SourceSpeedInfo.score 用
-    //   (跟 Selene-TV u74.g 一致). 放在自动选源前, 否则首次比对时
-    //   _SessionMaxSpeedHolder 还在默认 1024 KB/s, 排序结果会偏.
-    double maxSpeed = 1024.0;
-    for (final s in _sourceResults) {
-      final sp = _sourceSpeeds[s.source];
-      if (sp != null && sp.success && sp.loadSpeedKBps > maxSpeed) {
-        maxSpeed = sp.loadSpeedKBps;
-      }
-    }
-    _SessionMaxSpeedHolder.maxSpeedKBps = maxSpeed;
-
     // 自动选最快源 (除非用户已经主动选过, 或从历史点进来明确指定了源)
     // v1.0.46 fix: 之前从历史进来也会被自动改源, 因为 _selectSource 不传 episodeIndex
     //   会重置到 0, 导致每次历史播放都从第 1 集开始
-    // v2.3.12: 跟 score 公式方向一致, 越大越好. 失败源 (score = -2) 自动排最后.
+    // v2.3.14: 跟 v2.3.0 score 公式方向一致, 越小越好. 失败源 (score = 1<<30) 排最后.
     final cameFromHistory = widget.videoInfo.source.isNotEmpty && widget.videoInfo.index > 0;
     if (!cameFromHistory && _autoSelectedSource == null && _sourceResults.isNotEmpty) {
       _SourceSpeedInfo? bestSpeed;
@@ -1686,7 +1657,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       for (final s in _sourceResults) {
         final sp = _sourceSpeeds[s.source];
         if (sp == null) continue;
-        if (bestSpeed == null || sp.score > bestSpeed.score) {
+        if (bestSpeed == null || sp.score < bestSpeed.score) {
           bestSpeed = sp;
           bestSource = s.source;
         }
@@ -2014,9 +1985,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     return PingState.slow;
   }
 
-  /// 按测速综合分从高到低排序源列表
-  /// v2.3.12: 跟 score 公式方向一致 (越大越好), 排序从大到小. 失败源
-  ///   (score = -2) 自动排最后.
+  /// 按测速综合分从低到高排序源列表
+  /// v2.3.0 ~ v2.3.5: 跟 score 公式方向一致 (越小越好), 排序从小到大.
+  ///   失败源 (score = 1<<30) 自动排最后.
+  /// v2.3.12 改大到小, v2.3.14 回到小到大.
   void _sortSourcesBySpeed() {
     setState(() {
       _sourceResults.sort((a, b) {
@@ -2025,7 +1997,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         if (sa == null && sb == null) return 0;
         if (sa == null) return 1; // 未测的排后面
         if (sb == null) return -1;
-        return sb.score.compareTo(sa.score); // 大到小
+        return sa.score.compareTo(sb.score); // 小到大
       });
     });
   }
@@ -2237,14 +2209,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   不跳 (用户反馈). 新一集可能没广告, 必须重新检测.
     _adResetDetected = false;
     _lastPosForAdDetect = -1;
-    // v2.3.12: 切集时清弹幕 oid, 关闭弹幕 (下一集的 cid 跟当前不一样).
-    //   用户重新打开会弹输入框. 跟 Selene-TV 行为一致 (切集 DanmakuController reset).
-    if (_danmakuEnabled) {
-      _danmakuCtrl.clear();
-      _danmakuEnabled = false;
-      _danmakuOid = null;
-      _danmakuFetched = false;
-    }
 
     // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
     // 仅在用户主动开新集时且和云记忆吻合的那次才用
@@ -2312,24 +2276,24 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   只剩原源直连 playUrl. _currentPlayUrl 字段已删, 加速链路弹层也删了.
     try {
       await _player!.stop();
-      // v2.3.12 hotfix: 云记忆恢复 (resume) 改用 open(startAt:) 而不是
+      // v2.3.13 hotfix: 云记忆恢复 (resume) 改用 open(startAt:) 而不是
       //   open() + 之后 play() + seek(). 之前 v2.3.11 自研 CustomExoPlayer
       //   时, seek 放在 play() 之后, ExoPlayer 在 buffer 没填满时经常
       //   静默丢 seek, 用户从历史点进来还是从 0 开始.
       //
       //   v1.0.61 时 (走 media_kit / libmpv), video_player / libmpv 内部
       //   已经处理了 "prepare + startAt 在 play 前" 这套逻辑, 所以 seek
-      //   总能生效. v2.3.11 自研 CustomExoPlayer 后, 这套时序得 Dart 端
-      //   自己做.
+      //   总能生效.
       //
       //   ExoPlayer 标准做法: setMediaItem → prepare → seekTo(startAt) →
       //   play. seekTo 必须在 play 前, 否则 player 状态是 STATE_READY +
       //   isPlaying=true, seek 调用走"异步缓冲队列", 在 buffer 没填满时
       //   被 ExoPlayer 内部 messageQueue 排队, 实际不生效.
       //
-      //   现在 [ExoPlayerBackend.open] 已经把 setMediaItem + prepare +
-      //   seekTo(startAt) + play 全部按这个顺序排好了 (见
-      //   exo_player_backend.dart open()), Dart 端只要传 startAt 就行.
+      //   v2.3.14: 卸自研 CustomExoPlayer 走 video_player package, 但
+      //   open(startAt:) 仍生效 — [ExoPlayerBackend.open] 把 setMediaItem +
+      //   prepare + seekTo(startAt) + play 全部按这个顺序排好了
+      //   (见 exo_player_backend.dart open()), Dart 端传 startAt 即可.
       //   保留 verify + 重试 seek 兜底, 万一 open() 内 seek 失败.
       await _player!.open(playUrl, startAt: resumeAt);
       if (resumeAt != null) {
@@ -4070,125 +4034,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  // v2.3.12: 弹幕开关处理.
-  //   - 第一次开启: 弹输入框 (B站 cid / ss id / bv id), 拉弹幕
-  //   - 已绑定 oid 时再开: 直接用旧 oid 拉
-  //   - 关闭: 清空
-  //   - 切集: oid 清空, 提示用户重新绑定
-  Future<void> _toggleDanmaku() async {
-    if (_danmakuLoading) return;
-    if (_danmakuEnabled) {
-      // 关闭
-      setState(() {
-        _danmakuEnabled = false;
-        _danmakuCtrl.clear();
-      });
-      return;
-    }
-    // 打开: 没 oid 就问用户
-    String? oid = _danmakuOid;
-    if (oid == null) {
-      oid = await _askDanmakuOidDialog();
-      if (oid == null || oid.isEmpty) return;
-    }
-    setState(() {
-      _danmakuLoading = true;
-    });
-    try {
-      final list = await DanmakuService.instance.fetchByRange(
-        startSec: 0,
-        endSec: 0, // 0 = 整集 (跟 Selene-TV 一致, 0 表示不限时间)
-        oid: oid,
-        preferredProvider: _danmakuPreferred,
-      );
-      if (!mounted) return;
-      _danmakuCtrl.setDanmaku(list);
-      _danmakuCtrl.tick(_currentPosition.inMilliseconds);
-      setState(() {
-        _danmakuEnabled = true;
-        _danmakuOid = oid;
-        _danmakuFetched = true;
-        _danmakuLoading = false;
-      });
-      DiaryService.add('[Danmaku] fetched ${list.length} comments for oid=$oid');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _danmakuLoading = false;
-      });
-      DiaryService.add('[Danmaku] fetch FAIL oid=$oid: $e');
-    }
-  }
-
-  /// 弹一个简单 dialog 让用户输入 B站 cid / BV / ss id.
-  ///
-  /// v2.3.12: 没有"自动从当前 URL 解析 B站 cid" 的能力, 因为 LunaTV 的
-  ///   视频源绝大多数是自建 / 爬的, 不是 B站. 用户需要手动去 B站搜
-  ///   同一集, 把 cid / ss / bv 复制过来. 后续会加"标题搜 B站剧集" 选择.
-  Future<String?> _askDanmakuOidDialog() async {
-    final controller = TextEditingController();
-    final providers = DanmakuService.instance.availableProviders;
-    String selected = _danmakuPreferred;
-    final result = await showDialog<String?>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('绑定弹幕源'),
-          content: StatefulBuilder(
-            builder: (ctx, setLocal) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '输入 B站 cid / ss id / BV id (B站搜本剧, 复制 URL 里的数字部分):',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: controller,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. 123456789  或  ss12345  或  BV1xx',
-                      border: OutlineInputBorder(),
-                    ),
-                    autofocus: true,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('弹幕源:', style: TextStyle(fontSize: 12)),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      for (final p in providers)
-                        ChoiceChip(
-                          label: Text(p),
-                          selected: selected == p,
-                          onSelected: (_) {
-                            setLocal(() => selected = p);
-                            _danmakuPreferred = p;
-                          },
-                        ),
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-    return (result == null || result.isEmpty) ? null : result;
-  }
+  // v2.3.14: 弹幕系统 (v2.3.12 移植自 Selene-TV) 整个删了. 见类顶部
+  //   `// v2.3.14: 卸弹幕系统` 注释块. _toggleDanmaku / _askDanmakuOidDialog
+  //   / _danmakuCtrl / _danmakuEnabled / _danmakuOid / _danmakuFetched /
+  //   _danmakuLoading / _danmakuPreferred 全部移除.
 
   /// v2.3.0: 删了顶部「加速状态」指示器 + 「加速链路」弹层 + 一系列
   ///   相关 UI 组件 (_buildAccelStatusIcon / _showAccelStatusDialog /
@@ -4546,18 +4395,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ),
                           ),
                           const Spacer(),
-                          // v2.3.12: 弹幕开关 — 跟 Selene-TV DanmakuButton 一致.
-                          //   默认关闭, 打开后第一次要求用户输入 B站 cid
-                          //   (或 BV/ss id), 后续切集记忆.
-                          _iconBtn(
-                            icon: _danmakuEnabled
-                                ? Icons.subtitles
-                                : Icons.subtitles_outlined,
-                            iconColor: _danmakuEnabled
-                                ? const Color(0xFFFBBF24)
-                                : Colors.white,
-                            onTap: _toggleDanmaku,
-                          ),
+                          // v2.3.14: 卸弹幕开关 (v2.3.12 移植自 Selene-TV,
+                          //   用户反馈 UX 太差, 整个删了).
                           // 右: 倍速
                           _iconBtn(
                             icon: Icons.speed,
@@ -4746,9 +4585,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                   alignment: Alignment.center,
                   children: [
                     // v2.2.0: 卸 libmpv Video() 改 ExoPlayerView.
-                    // v2.3.11: 内部不再用 video_player.VideoPlayer 渲染,
-                    //   改用 Flutter [Texture] widget 渲染 CustomExoPlayer
-                    //   拿到的 SurfaceTexture (ExoPlayer 后端纹理 ID).
+                    //   内部 [ExoPlayerView] 走 [VideoPlayer] widget
+                    //   (video_player package) 渲染 ExoPlayer 视频帧.
+                    // v2.3.14: 卸自研 CustomExoPlayer + Flutter [Texture]
+                    //   widget, 回到 v2.3.0 video_player [VideoPlayer] 渲染.
                     //   UI 控件 (LunaTV 自定义底栏/顶栏/手势) 全部在外层
                     //   Stack 上, 这里只是个视频画面的薄壳.
                     ExoPlayerView(backend: _player!),
@@ -4835,18 +4675,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
         // 中央双圆快进/快退 (放在最上层, 避免被顶部栏/底部栏/跳过按钮遮挡)
         _buildSideSeekButtons(),
-        // v2.3.12: 弹幕渲染层 (浮在 ExoPlayer 上, 不挡触摸)
-        //   IgnorePointer 在 DanmakuOverlay 内部已设, 触摸穿透到 player controls.
-        //   videoWidth/Height 来自 backend 同步的 _videoWidth/_videoHeight,
-        //   没拿到前用 1280x720 兜底, 跟 selene default 对齐.
-        IgnorePointer(
-          ignoring: true,
-          child: DanmakuOverlay(
-            controller: _danmakuCtrl,
-            videoWidth: _videoWidth > 0 ? _videoWidth.toDouble() : 1280,
-            videoHeight: _videoHeight > 0 ? _videoHeight.toDouble() : 720,
-          ),
-        ),
+        // v2.3.14: 卸弹幕 overlay (整个弹幕系统删了).
       ],
     );
   }
@@ -5067,34 +4896,30 @@ class _SourceSpeedInfo {
     return '${loadSpeedKBps.toStringAsFixed(0)}KB/s';
   }
 
-  /// 综合评分 (越大越好, 用作排序 key)
-  /// v2.3.12: 1:1 移植 Selene-TV `u74.h(v64, maxSpeed)` 公式:
-  ///   resScore (基于 width: 0/20/40/60/75/85/100) * 0.5
-  ///   + speedScore (speed / maxSpeed * 100, 限幅 0..100, 默认 30) * 0.5
-  ///   = 0..100 的标量, 越大越优.
-  ///
-  ///   之前 v1.0.45 公式 `-(speed * resWeight) + ping`:
-  ///     - 方向反了 (越小越好), 跟排序方向耦合
-  ///     - 速度项没归一化 (5MB/s 和 500KB/s 数量级差 10x, 排序被速度主导)
-  ///     - 失败项用 `1 << 30` 兜底, 但跟成功项的"差很大但仍然有限"耦合
-  ///   Selene-TV 公式归一化到 0..100 后:
-  ///     - 排序方向跟"大=好"统一, 不容易写错
-  ///     - 速度项按 maxSpeed 归一化, 不再被极端值主导
-  ///     - 失败/超时返回 -1/-2, 排在所有成功项之前
+  /// 综合评分 (越小越好, 用作排序 key)
+  /// v2.3.0 公式: `-(speed * resWeight) + ping` (越小越优)
+  ///   - speed 越大 → 越负 → 越小 → 排越前
+  ///   - ping 越大 → 越大 → 排越后
+  ///   - resWeight 是分辨率惩罚项: 高分片 (1080p/4K) 需要更高速度才算好
+  ///     (1080p resWeight=0.4, 720p resWeight=0.6, 480p resWeight=0.9).
+  ///     公式: `resWeight = resolutionScore / 100` (resScore 0~100 归一化).
+  ///   - 失败/超时的源 → `1 << 30` 兜底, 排到最末尾.
+  /// v2.3.12 改用 Selene-TV `u74.h` (越大越好), v2.3.14 回到 v2.3.0
+  ///   (越小越好). UI 显示按 score 排, 选源时取最前的.
   int get score {
     if (!success) {
-      // v2.3.12: 跟 Selene-TV u74.h 一致, 失败返 -2 (跟 v74.t 等价)
-      return -2;
+      // v2.3.0 公式: 失败/超时的源排末尾, 用 (1 << 30) 大常数兜底
+      return 1 << 30;
     }
     final resScore = _qualityScoreRaw();
-    final maxSpeed = _SessionMaxSpeedHolder.maxSpeedKBps;
-    final speedScore = loadSpeedKBps <= 0
-        ? 30.0
-        : (((loadSpeedKBps / maxSpeed) * 100.0).clamp(0.0, 100.0));
-    return ((speedScore * 0.5) + (resScore * 0.5)).round();
+    final resWeight = resScore <= 0 ? 1.0 : (resScore / 100.0);
+    // -(speed * resWeight) + ping. 速度越快 / ping 越低 → 越小 → 越好.
+    return (-(loadSpeedKBps * resWeight) + pingMs).round();
   }
 
-  /// 原始分辨率分 (0..100), 1:1 移植 Selene-TV `u74.h` 嵌套的分辨率映射
+  /// 原始分辨率分 (0..100), 给 resWeight 用.
+  /// v2.3.0: 跟 v2.3.12 同公式, 但 v2.3.0 用 score=100-resScore*resWeight+ping
+  ///   (1-3 数列), 现在改成 resScore/100 当 resWeight, 跟 v1.0.45 同步.
   double _qualityScoreRaw() {
     if (resolution.isEmpty) return 0.0;
     final p = int.tryParse(resolution.replaceAll('p', '').replaceAll('K', '000')) ?? 0;
@@ -5108,12 +4933,12 @@ class _SourceSpeedInfo {
   }
 }
 
+/// v2.3.14: 卸 _SessionMaxSpeedHolder (v2.3.12 公式依赖 maxSpeed 归一化,
+///   v2.3.0 `-(speed * resWeight) + ping` 不需要). 类定义整个删了.
 /// v2.3.12: 全局 max speed 持有者 — Selene-TV u74.g 思路.
 ///   测速时需要先知道本会话所有有效速度的最大值, 才能算归一化.
 ///   不存在时 fallback 1024 KB/s (跟 u74.g 默认值一致).
-class _SessionMaxSpeedHolder {
-  static double maxSpeedKBps = 1024.0;
-}
+///   (此注释是 v2.3.12 留下的, 提醒后来人这个类删了的理由)
 
 /// v2.0.51: 空 PageController placeholder (initState 之前给 notifier 占位用)
 class _EmptyPageController extends PageController {
