@@ -31,10 +31,13 @@ class CustomExoPlayer {
   static Stream<Map<String, dynamic>>? _eventsStream;
 
   /// v2.3.10 默认 buffer 配置 (毫秒) — 跟 Kotlin 默认值同步.
-  static const int defaultMinBufferMs = 30_000;
-  static const int defaultMaxBufferMs = 90_000;
-  static const int defaultBufferForPlaybackMs = 5_000;
-  static const int defaultBufferForPlaybackAfterRebufferMs = 8_000;
+  /// v2.3.11: 不能用 30_000 digit separator — Dart 3.8.1 还是实验特性,
+  ///   编译需要 --enable-experiment=digit-separators, Flutter 3.32.5 不带.
+  ///   改回普通数字 30000, Kotlin 那边的 const 不受影响.
+  static const int defaultMinBufferMs = 30000;
+  static const int defaultMaxBufferMs = 90000;
+  static const int defaultBufferForPlaybackMs = 5000;
+  static const int defaultBufferForPlaybackAfterRebufferMs = 8000;
 
   /// v2.3.11: 创建一个自定义 ExoPlayer 实例 + Flutter SurfaceTexture.
   ///

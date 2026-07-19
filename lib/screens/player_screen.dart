@@ -1699,6 +1699,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// v2.3.9: getStreamInfo 改成 3 步并发 (HEAD latency + 下 256KB 测速 +
   ///   m3u8 解析) 整体 2.5s 内跑完. 之前的 6s timeout 仍然能 cover 整个
   ///   链路, 不会出现"测速永远跑不完外层 timeout" 的问题.
+  ///
+  /// v2.3.11: getStreamInfo 内部 speed 任务可能要 m3u8 链 (master →
+  ///   variant → segment, 3 次 GET 各 1.8s = 5.4s 最坏), 加上 latency
+  ///   / resolution 各自 1.5s, 整函数 max 5.4s. 外层 timeout 从 5s 提到
+  ///   7s 留余量. 截图反馈 "完全没速度显示了" 的根因是 m3u8 master
+  ///   playlist < 32KB 被旧版 _measureDownloadSpeedFast256K 拒掉,
+  ///   v2.3.11 m3u8_service.dart 内部已修, 走 variant/segment 真实分片.
   Future<_SourceSpeedInfo> _testOneUrl(
     M3U8Service m3u8,
     String url, {
@@ -1711,7 +1718,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         originalUrl: originalUrl,
         // v2.3.0: 视频加速删了, 不用 urlWrapper 包装段 URL
       ).timeout(
-        const Duration(seconds: 5),
+        const Duration(seconds: 7),
         onTimeout: () => <String, dynamic>{
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,

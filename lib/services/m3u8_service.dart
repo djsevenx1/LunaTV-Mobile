@@ -64,26 +64,50 @@ class M3U8Service {
   ///   两步并发 2s 内基本能跑完, 外层 3-4s timeout 也来得及.
   ///   m3u8 解析 (拿 resolution) 单独再发一次, 1.5s timeout, 跟测速
   ///   并发不影响主结果.
+  ///
+  /// v2.3.11: 用户反馈"完全没速度显示了" — 截图里 10/11 源都只显示
+  ///   latency (ms) 没有 KB/s. 根因是 m3u8 master playlist 5-30KB,
+  ///   `_measureDownloadSpeedFast256K` 旧版 < 32KB 直接返 0.
+  ///   现在 _measureDownloadSpeedFast256K 内部会自动:
+  ///     - 拿到 ≥ 32KB → 直接算 speed
+  ///     - 拿到 < 32KB + 内容是 m3u8 → 解析拿 variant / segment,
+  ///       对真实分片再测
+  ///   但 m3u8 链 (master → variant → segment) 最坏 3 次 GET, 每次
+  ///   2s, 总 6s. v2.3.9 用的 Future.wait 全局 2.8s timeout 会砍掉.
+  ///   改成**各自 timeout**: latency 1.5s, resolution 1.5s, speed 5s.
+  ///   整函数 max 5s 跑完 (m3u8 链真实耗时 1-3s 居多), player_screen
+  ///   外层 5s timeout 来得及.
   Future<Map<String, dynamic>> getStreamInfo(
     String streamUrl, {
     String? originalUrl,
     String Function(String)? urlWrapper,
   }) async {
-    final latSw = Stopwatch()..start();
     try {
-      // v2.3.9: 三步并发 — HEAD latency + 下 256KB 测速 + (m3u8 的话) 拉 manifest 解析
-      //   整体 2.5s 内能跑完, 不用嵌套 timeout.
-      final headTask = _measureLatencyFast(streamUrl);
-      final speedTask = _measureDownloadSpeedFast256K(streamUrl);
-      // m3u8 解析 (拿 resolution) — 失败不影响 speed/latency
+      // v2.3.11: 各自独立 timeout, 不再用 Future.wait 统一 2.8s.
+      //   speed 任务可能要走 m3u8 链 (3 次 GET) 给 5s, latency / resolution
+      //   各自 1.5s. 三个任务**同时启动**, 谁先完谁先返, 跟 v2.3.9 行为一致.
+      final latFuture = _measureLatencyFast(streamUrl);
       final resFuture = _tryParseResolution(streamUrl);
+      final speedFuture = _measureDownloadSpeedFast256K(streamUrl);
 
-      final results = await Future.wait([headTask, speedTask, resFuture])
-          .timeout(const Duration(milliseconds: 2800));
-      latSw.stop();
-      final latency = results[0] as int;
-      final downloadSpeedKBps = results[1] as double;
-      final resolution = (results[2] as Map<String, int>?) ?? {'width': 0, 'height': 0};
+      int latency = -1;
+      try {
+        latency = await latFuture.timeout(const Duration(milliseconds: 1500));
+      } catch (_) {}
+
+      Map<String, int> resolution = {'width': 0, 'height': 0};
+      try {
+        final r = await resFuture.timeout(const Duration(milliseconds: 1500));
+        if (r['width'] != null || r['height'] != null) {
+          resolution = r;
+        }
+      } catch (_) {}
+
+      double downloadSpeedKBps = 0.0;
+      try {
+        downloadSpeedKBps =
+            await speedFuture.timeout(const Duration(seconds: 5));
+      } catch (_) {}
 
       if (downloadSpeedKBps <= 0 && latency <= 0) {
         return {
@@ -145,7 +169,83 @@ class M3U8Service {
   ///     头部数据; 直链 mp4 拿前 256KB. 这部分数据走的下载路径跟
   ///     实际播放走的是同一条 (无 Range, 无 HEAD), 速度更接近真实值.
   ///   - 2s timeout, 收够 256KB 或超时停.
+  ///
+  /// v2.3.11 重大修复: m3u8 master playlist 5-30KB, 远不到 32KB 阈值
+  ///   (旧版 `_measureDownloadSpeedFast256K` 直接返 0). 用户反馈
+  ///   "完全没速度显示了" — 10/11 源都只显示 latency (ms) 没有 KB/s,
+  ///   因为测速拿不到 segment 实际数据, 全是空跑.
+  ///   现在流程:
+  ///     1) 下 256KB 直连 URL (跟 v2.3.9 一样)
+  ///     2) 拿到字节数 < 32KB, 看内容是不是 m3u8 (#EXTM3U 开头):
+  ///        - master playlist (#EXT-X-STREAM-INF): 选 bandwidth 最高的
+  ///          variant, 对 variant URL 再跑 256KB 测速 (variant 自身可能
+  ///          还是 master, 但国内平台 iQIYI/U酷 顶层 master 都只有一层)
+  ///        - media playlist: 找第一个非 # 开头 segment, 对 segment URL
+  ///          跑 256KB 测速
+  ///        - 不是 m3u8: 原本 32KB 阈值, 现在降到 2KB (m3u8 playlist
+  ///          5KB 都算成功, 跟 5KB/s 慢链区分开)
+  ///     3) 如果下 256KB 拿到 ≥ 32KB, 直接用 256KB / elapsed 算 speed
+  ///   整链路 3s 内能跑完 (m3u8 parse ~50ms, variant/segment 下 256KB
+  ///   ~1-2s, 三步并发跟原来一致).
   Future<double> _measureDownloadSpeedFast256K(String url) async {
+    // 1) 直连 URL 下 256KB
+    final direct = await _downloadHead256K(url);
+    if (direct.bytes >= 32 * 1024) {
+      // 拿到 ≥ 32KB, 直接算 speed (大文件, 慢链都能算准)
+      final sec = direct.elapsedMs / 1000.0;
+      if (sec <= 0) return 0.0;
+      return (direct.bytes / 1024) / sec;
+    }
+
+    // 2) 拿到 < 32KB, 看是不是 m3u8 (master playlist 5-30KB)
+    final content = direct.content;
+    if (content != null && content.trimLeft().startsWith('#EXTM3U')) {
+      // 2a) master playlist: 选带宽最高的 variant
+      final variant = _pickBestVariantUrlFromContent(content, url);
+      if (variant != null) {
+        final v = await _downloadHead256K(variant);
+        if (v.bytes >= 2 * 1024) {
+          final sec = v.elapsedMs / 1000.0;
+          if (sec > 0) return (v.bytes / 1024) / sec;
+        }
+        // variant 还是 m3u8 (多层 master), 解析拿第一段 segment
+        final segUrl = _pickFirstSegmentFromContent(v.content, variant);
+        if (segUrl != null) {
+          final s = await _downloadHead256K(segUrl);
+          if (s.bytes >= 2 * 1024) {
+            final sec = s.elapsedMs / 1000.0;
+            if (sec > 0) return (s.bytes / 1024) / sec;
+          }
+        }
+      }
+      // 2b) master 没找到 variant, 试当 media playlist 处理
+      final segUrl = _pickFirstSegmentFromContent(content, url);
+      if (segUrl != null) {
+        final s = await _downloadHead256K(segUrl);
+        if (s.bytes >= 2 * 1024) {
+          final sec = s.elapsedMs / 1000.0;
+          if (sec > 0) return (s.bytes / 1024) / sec;
+        }
+      }
+      // 2c) playlist 文本下完, 退而求其次: 用 playlist 大小 (假设 50ms 内下完)
+      //     算个 "instant" speed, 至少不是 0. playlist 5KB / 0.05s = 100KB/s
+      //     量级, 用户能看到 KB/s 不再全是 latency.
+      if (direct.bytes >= 1024 && direct.elapsedMs > 0) {
+        return (direct.bytes / 1024) / (direct.elapsedMs / 1000.0);
+      }
+      return 0.0;
+    }
+
+    // 3) 不是 m3u8 (小直链/失败), 用宽松阈值 2KB
+    if (direct.bytes >= 2 * 1024 && direct.elapsedMs > 0) {
+      return (direct.bytes / 1024) / (direct.elapsedMs / 1000.0);
+    }
+    return 0.0;
+  }
+
+  /// v2.3.11: 内部辅助 — 下最多 256KB, 累计 1.8s 内. 返字节数 + 耗时
+  ///   (毫秒) + 完整内容 (如果 < 32KB, 把内容也存下来给 m3u8 解析用).
+  Future<_DownloadResult> _downloadHead256K(String url) async {
     try {
       final tempDio = Dio();
       tempDio.options.connectTimeout = const Duration(milliseconds: 1500);
@@ -157,34 +257,86 @@ class M3U8Service {
       };
       final sw = Stopwatch()..start();
       int bytes = 0;
-      // m3u8 playlist 文本通常 5-30KB, 256KB 能下到第一个 segment 头部.
-      // 直链 mp4 直接拿前 256KB.
+      final buffer = StringBuffer();
       final resp = await tempDio.get<ResponseBody>(
         url,
-        options: Options(
-          responseType: ResponseType.stream,
-          headers: const {
-            // 不要 Range — 让服务器按正常下载流程返回, 路径跟播放一致.
-            // 关键: 不能用 Range bytes=0-, 之前 5KB/s 假速度就是被这个坑.
-          },
-        ),
+        options: Options(responseType: ResponseType.stream),
       );
+      // 限制最多累计 64KB 文本, 避免 m3u8 playlist 很大 (例如 100KB) 把
+      // 整个 playlist 文本都缓存下来.
+      const maxContentBytes = 64 * 1024;
       await for (final chunk in resp.data!.stream) {
         bytes += chunk.length;
+        if (bytes <= maxContentBytes) {
+          try {
+            buffer.write(String.fromCharCodes(chunk));
+          } catch (_) {
+            // 非 UTF-8 段数据 (mp4 二进制), 跳过文本累积
+          }
+        }
         if (bytes >= 256 * 1024) break;
         if (sw.elapsedMilliseconds >= 1800) break;
       }
       sw.stop();
-      // m3u8 playlist 本身只有几 KB, 第一个 segment 头部几十 KB,
-      // < 32KB 算失败.
-      if (bytes < 32 * 1024) return 0.0;
-      final sec = sw.elapsedMilliseconds / 1000.0;
-      if (sec <= 0) return 0.0;
-      return (bytes / 1024) / sec;
+      return _DownloadResult(
+        bytes: bytes,
+        elapsedMs: sw.elapsedMilliseconds,
+        content: buffer.length > 0 ? buffer.toString() : null,
+      );
     } catch (_) {
-      return 0.0;
+      return _DownloadResult(bytes: 0, elapsedMs: 0, content: null);
     }
   }
+
+  /// v2.3.11: 从 m3u8 master playlist 文本里选 bandwidth 最高的 variant URL.
+  ///   解析 `#EXT-X-STREAM-INF:...BANDWIDTH=N` + 下一行 URL, 跟已存在的
+  ///   `_pickBestVariantPlaylist` 类似但只返 URL (不返 bandwidth/resolution).
+  String? _pickBestVariantUrlFromContent(String content, String baseUrl) {
+    final lines = content.split('\n').map((line) => line.trim()).toList();
+    String? bestUrl;
+    int bestBandwidth = -1;
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (!line.startsWith('#EXT-X-STREAM-INF:')) continue;
+      final params = <String, String>{};
+      for (final part in line.substring('#EXT-X-STREAM-INF:'.length).split(',')) {
+        final kv = part.split('=');
+        if (kv.length == 2) {
+          params[kv[0].trim()] = kv[1].trim().replaceAll('"', '');
+        }
+      }
+      final bandwidth = int.tryParse(params['BANDWIDTH'] ?? '') ?? 0;
+      // 下一行非 # 开头的就是 variant URL
+      for (var j = i + 1; j < lines.length; j++) {
+        final candidate = lines[j];
+        if (candidate.isEmpty) continue;
+        if (candidate.startsWith('#')) continue;
+        if (bandwidth > bestBandwidth) {
+          bestBandwidth = bandwidth;
+          bestUrl = _resolveUrl(candidate, baseUrl);
+        }
+        break;
+      }
+    }
+    return bestUrl;
+  }
+
+  /// v2.3.11: 从 m3u8 media playlist 文本里找第一个非 # 开头的 segment URL.
+  String? _pickFirstSegmentFromContent(String content, String baseUrl) {
+    for (final line in content.split('\n').map((l) => l.trim())) {
+      if (line.isEmpty) continue;
+      if (line.startsWith('#')) continue;
+      // 跳过 EXT-X-KEY / EXT-X-MAP 之类 (虽然它们也以 # 开头, 但要防
+      // 段 URL 本身以 # 开头 — 不可能, URL 不以 # 开头)
+      return _resolveUrl(line, baseUrl);
+    }
+    return null;
+  }
+
+  /// v2.3.11: m3u8 服务内部用的下载结果. 跟旧的"返 double"不同, 把
+  /// 字节数 + 耗时 + 文本都返出来, 方便上层 m3u8 解析.
+  /// 注: bytes 跟 content.length 不一定一致, bytes 是原始字节数, content
+  /// 是 UTF-8 decode 后的字符数 (可能略大或小). 测速只用 bytes.
 
   /// v2.3.9: 尝试解析 m3u8 拿 resolution. 1.5s timeout, 失败返 0x0.
   ///   不影响主测速结果, 只是个 best-effort 增强信息.
@@ -1202,4 +1354,18 @@ class _VariantPlaylist {
     if (height > 0) return height * 1000000 + bandwidth;
     return bandwidth;
   }
+}
+
+/// v2.3.11: _downloadHead256K 的返回值. 跟 _VariantPlaylist 平行放在
+///   m3u8_service.dart 文件底部, 跟其他私有 class 一起.
+class _DownloadResult {
+  final int bytes;
+  final int elapsedMs;
+  final String? content;
+
+  const _DownloadResult({
+    required this.bytes,
+    required this.elapsedMs,
+    required this.content,
+  });
 }
