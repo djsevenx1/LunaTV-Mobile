@@ -21,7 +21,7 @@ import 'dart:collection';
 
 import 'package:flutter/material.dart';
 
-import '../models/danmaku_models.dart';
+import 'package:luna_tv/models/danmaku_models.dart';
 
 /// 弹幕轨道 (mode 1 滚动专用). 每条轨道独立时间线, 满了就分配下一条.
 class _ScrollTrack {

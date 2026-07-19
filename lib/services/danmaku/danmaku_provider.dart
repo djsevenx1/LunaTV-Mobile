@@ -6,7 +6,7 @@
 //
 // 不同 provider 走不同实现, 但对外 API 一致. UI 层只跟 [DanmakuProvider] 打交道.
 
-import '../models/danmaku_models.dart';
+import 'package:luna_tv/models/danmaku_models.dart';
 
 abstract class DanmakuProvider {
   /// provider 标识, 用于日志 / 路由, e.g. "bilibili"

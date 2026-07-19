@@ -16,8 +16,8 @@
 //   默认 header, 后续要补真实逻辑时直接改 fetchByRange / getEpisodes 即可,
 //   UI / facade 不用动.
 
-import '../../models/danmaku_models.dart';
-import '../danmaku_provider.dart';
+import 'package:luna_tv/models/danmaku_models.dart';
+import 'package:luna_tv/services/danmaku/danmaku_provider.dart';
 
 /// 优酷弹幕 provider (Selene-TV: l15.java).
 ///

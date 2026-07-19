@@ -13,10 +13,10 @@
 
 import 'dart:async';
 
-import '../../models/danmaku_models.dart';
-import 'danmaku_provider.dart';
-import 'providers/bilibili_provider.dart';
-import 'providers/stub_providers.dart';
+import 'package:luna_tv/models/danmaku_models.dart';
+import 'package:luna_tv/services/danmaku/danmaku_provider.dart';
+import 'package:luna_tv/services/danmaku/providers/bilibili_provider.dart';
+import 'package:luna_tv/services/danmaku/providers/stub_providers.dart';
 
 class DanmakuService {
   /// 单例 — 全 app 共用一个 service, 跟 Selene-TV `ph0.a` 单例对齐.

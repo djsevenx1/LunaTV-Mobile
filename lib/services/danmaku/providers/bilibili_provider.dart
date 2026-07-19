@@ -31,8 +31,8 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 
-import '../../models/danmaku_models.dart';
-import 'danmaku_provider.dart';
+import 'package:luna_tv/models/danmaku_models.dart';
+import 'package:luna_tv/services/danmaku/danmaku_provider.dart';
 
 class BilibiliDanmakuProvider implements DanmakuProvider {
   @override
@@ -120,19 +120,19 @@ class BilibiliDanmakuProvider implements DanmakuProvider {
     // gzip magic = 0x1F 0x8B
     if (b0 == 0x1F && b1 == 0x8B) {
       try {
-        return gzip.decode(bytes);
+        return utf8.decode(gzip.decode(bytes), allowMalformed: true);
       } catch (_) {}
     }
     // zlib (deflate with header) 第一个字节低 4 位通常是 8 (deflate),
     //   高 4 位是窗口大小. 大部分 B站 seg.so 走 zlib.
     if ((b0 & 0x0F) == 0x08) {
       try {
-        return zlib.decode(bytes);
+        return utf8.decode(zlib.decode(bytes), allowMalformed: true);
       } catch (_) {}
     }
     // 否则 raw deflate (无 header)
     try {
-      return zlib.decode(bytes);
+      return utf8.decode(zlib.decode(bytes), allowMalformed: true);
     } catch (_) {}
     return utf8.decode(bytes, allowMalformed: true);
   }
