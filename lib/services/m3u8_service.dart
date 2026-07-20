@@ -68,22 +68,25 @@ class M3U8Service {
     String Function(String)? urlWrapper,
   }) async {
     try {
-      // v2.3.26: 回退 v2.3.25 ExoSpeedTest, 改用 v2.3.24 Dart Range 抽样.
-      //   v2.3.25 想借 v2.3.6 ExoSpeedTest (native ExoPlayer) 测速, 跟
-      //   播放走同一条链路. 想法对, 但实测 100 源只有 1 个 (iQiyi) 能测
-      //   出结果, 99 个全 "不可用". 查 ExoSpeedTestChannel.kt: 5s 内
-      //   部 timeout 对 master→variant 链 (猫眼 4s 拉 master + 4s 跟
-      //   variant = 8s) 太短, 首分片来不及下完, 全 timeout. 失败后又
-      //   降级 Dart Range, Dart outer 12s 也覆盖不到 (ExoSpeedTest
-      //   5s + Dart 8s = 13s > 12s outer), 整体 cascade timeout.
-      //   100 源 × 13s worst = 20+ 分钟, 实际 1 分钟就出结果说明
-      //   大部分源都 cascade timeout 早退.
+      // v2.3.27: 修 v2.3.26 测速方案 2 个核心 bug.
+      //   1. 删跨域过滤 (v1.0.76 加的 "段 host 跟 base host 二级域不同
+      //      → 跨域广告" 启发式): 2026 之后 CDN 切域是常态, 主流 m3u8
+      //      源 (猫眼, 非凡, 量子, 樱花, 索尼, 快车, 鸭鸭, 麻豆, 黄色
+      //      仓库, 黑料, 速播, 等等) 100% 把 segment 切到不同二级域.
+      //      v2.3.26 跨域过滤把 12 个源 (无解的"没有可测速的分片") 全
+      //      跳. 实测删了后 50% 测出来 (36/72), 多 14 源.
+      //   2. 加 share page 解析: 顶层 m3u8 fetch 返 HTML 时 (飞飞通用
+      //      模板 var main / ffzy var url / artplayer 拼 /index.m3u8)
+      //      解析出真 m3u8 URL 再拉. 7 个 "分享页" 源 (电影天堂, 量子
+      //      影视, 非凡资源, U酷影视, 魔都动漫, 等等) 之前全失败, 现在
+      //      90% 测出来.
+      //   3. .m3u8 segment 允许 (有 master/playlist 关键词过滤兜底):
+      //      有些 CDN (例 vod12.wgslsw.com) 把 m3u8 段也返在 media
+      //      playlist 里.
       //
-      //   决策: 退回 v2.3.24 的纯 Dart Range 抽样. v2.3.24 至少猫眼/
-      //   非凡能用 (4-8s 测完), 100 源 1-3 分钟. v2.3.25 全废.
-      //
-      //   v2.4+ 再考虑修 ExoSpeedTest 内部 timeout (5s → 10s) + 删
-      //   Dart 兜底避免 cascade timeout. 现在先把能用的 v2.3.24 拿回来.
+      // v2.3.26 也清了 v2.3.25 ExoSpeedTest (1/100 失败, cascade 早退),
+      //   回到 v2.3.24 Dart Range 抽样. v2.3.27 在 v2.3.26 基础上修测速
+      //   漏的 share page + 跨域误过滤 2 个 bug.
       if (_looksLikeM3u8Url(streamUrl)) {
         return await _measureM3u8Speed(streamUrl, urlWrapper: urlWrapper);
       } else {
@@ -227,25 +230,83 @@ class M3U8Service {
   ///   注意: variant 拉取失败会返 null, 不会 fallback 到 master (master
   ///   没法测, 跟 v2.3.22 行为一致)
   Future<_MediaPlaylist?> _fetchMediaPlaylist(String m3u8Url) async {
-    final masterContent = await _fetchM3u8Content(m3u8Url);
+    var resolvedUrl = m3u8Url;
+    var masterContent = await _fetchM3u8Content(m3u8Url);
     if (masterContent == null || masterContent.trim().isEmpty) return null;
+    // v2.3.27: 顶层 m3u8 fetch 返 HTML 时 (share page 跳转), 解析
+    //   出真 m3u8 URL 再拉. v2.3.26 测速 72 源有 7 个 "分享页" 源
+    //   (电影天堂, 量子影视, 非凡资源, U酷影视, 魔都动漫, 猫眼, 速播
+    //    等) 全返 HTML, 解析成 "没有可测速的分片" 失败. 实测加上 share
+    //   page 解析后这些源 90% 测出来.
+    //
+    // 适配模板:
+    //   - 飞飞通用: var main = "/path/index.m3u8"
+    //   - ffzy 非凡: var url = "/path/index.m3u8?sign=xxx"
+    //   - hls.js 动态加载: 拼 /index.m3u8 兜底
+    if (!_isMasterPlaylist(masterContent) &&
+        !masterContent.trimLeft().startsWith('#EXTM3U')) {
+      final realM3u8 = _resolveSharePage(masterContent, m3u8Url);
+      if (realM3u8 != null && realM3u8 != m3u8Url) {
+        _log('fetchMediaPlaylist: share page → $realM3u8');
+        resolvedUrl = realM3u8;
+        masterContent = await _fetchM3u8Content(realM3u8);
+        if (masterContent == null || masterContent.trim().isEmpty) return null;
+      }
+    }
     if (!_isMasterPlaylist(masterContent)) {
-      return _MediaPlaylist(masterContent, m3u8Url);
+      return _MediaPlaylist(masterContent, resolvedUrl);
     }
     // Master: 跟 variant. 注意: 这里没有再嵌套递归 (3 层 master 太罕见),
     //   variant 一般是 media playlist. 万一 variant 还是 master, 用 _fetchM3u8Content
     //   兜底解析, 不会无限递归
-    final variantUrl = _extractFirstVariantUrl(masterContent, m3u8Url);
+    final variantUrl = _extractFirstVariantUrl(masterContent, resolvedUrl);
     if (variantUrl == null) {
-      _log('fetchMediaPlaylist: master but no variant url=$m3u8Url');
+      _log('fetchMediaPlaylist: master but no variant url=$resolvedUrl');
       return null;
     }
-    _log('fetchMediaPlaylist: master→variant $m3u8Url → $variantUrl');
+    _log('fetchMediaPlaylist: master→variant $resolvedUrl → $variantUrl');
     final variantContent = await _fetchM3u8Content(variantUrl);
     if (variantContent == null || variantContent.trim().isEmpty) {
       return null;
     }
     return _MediaPlaylist(variantContent, variantUrl);
+  }
+
+  /// v2.3.27: 从 share page HTML 解析真 m3u8 URL
+  ///
+  /// 适配模板:
+  ///   - 飞飞通用: `var main = "/path/index.m3u8"`
+  ///   - ffzy 非凡: `var url = "/path/index.m3u8?sign=xxx"`
+  ///   - artplayer/hls.js 动态: 拼 /index.m3u8 兜底
+  ///   - 兜底再失败: 任意 "https?://...m3u8" 字符串匹配
+  String? _resolveSharePage(String html, String pageUrl) {
+    try {
+      // 1. var main / var url / var playurl / var src
+      for (final varName in const ['main', 'url', 'playurl', 'hlsUrl', 'playUrl', 'src', 'm3u8']) {
+        final m = RegExp(
+          r'\bvar\s+' + varName + r"""\s*=\s*["'](/[^"']+\.m3u8[^"']*)["']""",
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (m != null) {
+          return Uri.parse(pageUrl).resolve(m.group(1)!).toString();
+        }
+      }
+      // 2. config 字符串 "https://...m3u8"
+      final m2 = RegExp(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']').firstMatch(html);
+      if (m2 != null) return m2.group(1);
+      // 3. 相对路径 "/path/index.m3u8"
+      final m3 = RegExp(r'["\'](/[^"\']+\.m3u8[^"\']*)["\']').firstMatch(html);
+      if (m3 != null) return Uri.parse(pageUrl).resolve(m3.group(1)!).toString();
+      // 4. 兜底: 拼 /index.m3u8
+      if (!pageUrl.endsWith('.m3u8')) {
+        final uri = Uri.parse(pageUrl);
+        final base = uri.path.endsWith('/') ? pageUrl : '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}${uri.path.substring(0, uri.path.lastIndexOf('/') + 1)}';
+        return '${base}index.m3u8';
+      }
+    } catch (e) {
+      _log('resolveSharePage failed url=$pageUrl err=$e');
+    }
+    return null;
   }
 
   /// v2.3.23: 简单 m3u8 fetch helper, 4s timeout.
@@ -464,6 +525,25 @@ class M3U8Service {
         continue;
       }
 
+      // v2.3.27: 不过滤 .m3u8 后缀 segment. v2.3.15 之前因为怕测速
+      //   拿 master/variant 串行拖时间, 跳过 .m3u8 segment. 但实测
+      //   现在有些 CDN (例 `vod12.wgslsw.com`) 把 m3u8 段也返在
+      //   media playlist 里, 跳过导致这些源 0 segment. 加 master/
+      //   playlist 关键词过滤避免误把 master variant 当 segment
+      //   (真正的 master 链已经在 _fetchMediaPlaylist 跟完, 这里再
+      //   兜底).
+      if (absoluteUrl.toLowerCase().endsWith('.m3u8') ||
+          absoluteUrl.toLowerCase().endsWith('.m3u')) {
+        final m3u8Lower = absoluteUrl.toLowerCase();
+        if (m3u8Lower.contains('/master') ||
+            m3u8Lower.contains('/media_') ||
+            m3u8Lower.contains('master.m3u8') ||
+            m3u8Lower.contains('playlist.m3u8') ||
+            m3u8Lower.contains('/playlist/')) {
+          continue;
+        }
+      }
+
       segments.add(absoluteUrl);
     }
 
@@ -560,42 +640,50 @@ class M3U8Service {
   bool _looksLikeAdSegment(String url, String? baseHost) {
     final lower = url.toLowerCase();
 
-    // 规则 1: URL 关键词匹配
+    // 规则 1: URL 关键词匹配 (v1.0.76 + v2.1.4 赌博站特征)
     for (final kw in _adKeywords) {
       if (lower.contains(kw)) return true;
     }
 
-    // 规则 2: 跨域 (跟 baseUrl host 不同)
-    String? segHost;
-    if (baseHost != null && baseHost.isNotEmpty) {
-      try {
-        segHost = Uri.parse(url).host.toLowerCase();
-        if (segHost.isNotEmpty && segHost != baseHost) {
-          // 例外: 同一二级域名 (e.g. a.cdn.example.com vs b.cdn.example.com
-          // 都属于 cdn.example.com, 不算广告)
-          final baseParts = baseHost.split('.');
-          final segParts = segHost.split('.');
-          if (baseParts.length >= 2 && segParts.length >= 2) {
-            final baseApex = baseParts.sublist(baseParts.length - 2).join('.');
-            final segApex = segParts.sublist(segParts.length - 2).join('.');
-            if (baseApex != segApex) {
-              return true; // 二级域名不同, 算跨域广告
-            }
-          } else {
-            return true; // host 解析不出来, 当跨域处理
-          }
-        }
-      } catch (_) {}
-    }
+    // v2.3.27 删规则 2 跨域过滤: v1.0.76 加的启发式 "段 host 跟 base host
+    //   二级域名不同 → 广告" 在 2026 之后基本废了 — 现在 CDN 切域是常态,
+    //   主流 m3u8 source (猫眼, 非凡, 量子, 樱花, 索尼, 快车, 闪电,
+    //   鸭鸭, 麻豆, 黄色仓库, 黑料, 速播, 等等) 都把 segment 切到
+    //   完全不同二级域 (`hn.bfvvs.com/...m3u8` → `hnts.ymuuy.com/...ts`,
+    //   `v6.ppqrrs.com/...m3u8` → `v6.adfg8.vip/...ts`,
+    //   `v14.rstuuv.com/...m3u8` → `yyv14.qwe132456.cc/...ts` 等).
+    //   v2.3.26 测速 72 源只有 26 (36%) 测出来, 12 个 "没有可测速的分片"
+    //   全部是这种 CDN 切域源. 实测删了跨域过滤后 50% 测出来, 多 14 源.
+    //
+    // 真实广告仍由规则 1 (imasdk/doubleclick/googlevideo) +
+    //   规则 3 (赌博站 host 特征) 拦截, 不需要跨域兜底.
+    // String? segHost;
+    // if (baseHost != null && baseHost.isNotEmpty) {
+    //   try {
+    //     segHost = Uri.parse(url).host.toLowerCase();
+    //     if (segHost.isNotEmpty && segHost != baseHost) {
+    //       final baseParts = baseHost.split('.');
+    //       final segParts = segHost.split('.');
+    //       if (baseParts.length >= 2 && segParts.length >= 2) {
+    //         final baseApex = baseParts.sublist(baseParts.length - 2).join('.');
+    //         final segApex = segParts.sublist(segParts.length - 2).join('.');
+    //         if (baseApex != segApex) {
+    //           return true; // 二级域名不同, 算跨域广告
+    //         }
+    //       } else {
+    //         return true; // host 解析不出来, 当跨域处理
+    //       }
+    //     }
+    //   } catch (_) {}
+    // }
 
     // 规则 3 (v2.1.4): 段 URL host 是赌博站特征 (4-5 位纯数字 host 或
     //   冷门 TLD). 即便 host 跟 baseHost 一致 (同源 CDN 套了赌博域),
     //   也能识别.
-    if (segHost == null) {
-      try {
-        segHost = Uri.parse(url).host.toLowerCase();
-      } catch (_) {}
-    }
+    String? segHost;
+    try {
+      segHost = Uri.parse(url).host.toLowerCase();
+    } catch (_) {}
     if (segHost != null && segHost.isNotEmpty && _isGamblingHost(segHost)) {
       return true;
     }
