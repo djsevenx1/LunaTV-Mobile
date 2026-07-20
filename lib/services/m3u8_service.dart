@@ -279,6 +279,14 @@ class M3U8Service {
   ///   - ffzy 非凡: `var url = "/path/index.m3u8?sign=xxx"`
   ///   - artplayer/hls.js 动态: 拼 /index.m3u8 兜底
   ///   - 兜底再失败: 任意 "https?://...m3u8" 字符串匹配
+  ///
+  /// v2.3.28 补:
+  ///   - DPlayer 模板: `url: 'https://v.gsuus.com/play/xxx/index.m3u8'`
+  ///     (光速资源 / 玉兔资源 / 部分 ffzy 镜像等, 短 HTML 966 字节)
+  ///   - `<meta http-equiv="refresh" content="0;url=https://...m3u8">`
+  ///   - 修兜底 bug: v2.3.27 拼 base 路径时丢掉末段 (`/play/dJ680A9d` 拼
+  ///     出 `/play/index.m3u8` 而不是 `/play/dJ680A9d/index.m3u8`), 改成
+  ///     直接 `pageUrl + '/index.m3u8'`
   String? _resolveSharePage(String html, String pageUrl) {
     try {
       // 1. var main / var url / var playurl / var src
@@ -291,17 +299,34 @@ class M3U8Service {
           return Uri.parse(pageUrl).resolve(m.group(1)!).toString();
         }
       }
-      // 2. config 字符串 "https://...m3u8"
+      // 2. v2.3.28 DPlayer 模板: url: 'https://...m3u8' (光速/玉兔/部分镜像)
+      //   短 HTML (~1KB), 用 hls.js + DPlayer, JS 写在 inline script 里
+      final dpM = RegExp(
+        r"""\burl\s*:\s*['"](https?://[^'"]+\.m3u8[^'"]*)['"]""",
+        caseSensitive: false,
+      ).firstMatch(html);
+      if (dpM != null) return dpM.group(1);
+      // 3. v2.3.28 meta refresh: <meta http-equiv="refresh" content="0;url=https://...m3u8">
+      final metaM = RegExp(
+        r"""<meta[^>]+http-equiv=["']?refresh["']?[^>]+url=([^"'\s>]+)""",
+        caseSensitive: false,
+      ).firstMatch(html);
+      if (metaM != null) {
+        final refreshUrl = metaM.group(1)!.trim();
+        if (refreshUrl.contains('.m3u8')) {
+          return Uri.parse(pageUrl).resolve(refreshUrl).toString();
+        }
+      }
+      // 4. config 字符串 "https://...m3u8"
       final m2 = RegExp(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']').firstMatch(html);
       if (m2 != null) return m2.group(1);
-      // 3. 相对路径 "/path/index.m3u8"
+      // 5. 相对路径 "/path/index.m3u8"
       final m3 = RegExp(r'["\'](/[^"\']+\.m3u8[^"\']*)["\']').firstMatch(html);
       if (m3 != null) return Uri.parse(pageUrl).resolve(m3.group(1)!).toString();
-      // 4. 兜底: 拼 /index.m3u8
+      // 6. v2.3.28 修兜底: 直接 pageUrl + '/index.m3u8' (不再丢末段)
+      //   v2.3.27 拼 base 路径会丢末段 (/play/dJ680A9d → /play/index.m3u8)
       if (!pageUrl.endsWith('.m3u8')) {
-        final uri = Uri.parse(pageUrl);
-        final base = uri.path.endsWith('/') ? pageUrl : '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}${uri.path.substring(0, uri.path.lastIndexOf('/') + 1)}';
-        return '${base}index.m3u8';
+        return pageUrl.endsWith('/') ? '${pageUrl}index.m3u8' : '$pageUrl/index.m3u8';
       }
     } catch (e) {
       _log('resolveSharePage failed url=$pageUrl err=$e');
