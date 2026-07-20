@@ -164,7 +164,7 @@ class M3U8Service {
           urlWrapper: urlWrapper,
         ),
         _measureLatency(m3u8Url),
-        _parseResolutionFromContent(content),
+        Future.value(_parseResolutionFromContent(content)),
       ]);
       final speed = results[0] as double;
       final latency = results[1] as int;
