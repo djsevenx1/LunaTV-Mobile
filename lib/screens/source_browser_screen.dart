@@ -143,16 +143,12 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
     try {
       final list = await SearchService.getActiveResources();
       if (!mounted) return;
+      // v2.4.3: 把 _loadCategories 调用从 setState 内移出来, 跟 v2.4.2
+      //   _loadCategories 把 _loadPage 移出来同款. 避免嵌套 setState
+      //   + async race, 这是「一直显示加载内容」的根因.
       setState(() {
         _resources = list;
         _isLoadingSources = false;
-        // v2.3.32.1 改: auto-select 第一个源, 跟 web useEffect 1:1
-        //   if (sources.length > 0 && !activeSourceKey) {
-        //     setActiveSourceKey(sources[0].key);
-        //   }
-        // 跟 TV/movie 自动用所有源同款 (TV/movie 不卡用户选源).
-        // "第一源不固定" 指 app 不内置 hardcoded 源 (grep 验证过),
-        //   不是禁止 auto-select 用户配的第一个源
         if (list.isNotEmpty) {
           _selectedSourceKey = list.first.key;
         } else {
@@ -164,7 +160,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
         _items.clear();
         _meta = null;
       });
-      // auto-select 后立即拉分类 (跟 web useEffect 同款)
+      // auto-select 后立即拉分类 (在 setState 外, 跟 web useEffect 同款)
       if (list.isNotEmpty) {
         _loadCategories(list.first.key);
       }
@@ -211,7 +207,9 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
         _selectedCategoryId = cats.first.typeId;
       });
       // auto-select 第一个分类后, 在 setState 外 fire-and-forget 调 _loadPage
-      _loadPage(reset: true);
+      // v2.4.3: 删 reset 参数 (dead code), _loadPage() 默认 isLoadMore=false
+      //   就是 reset 行为
+      _loadPage();
     } else {
       setState(() {
         _isLoadingCategories = false;
@@ -225,7 +223,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
 
   // -------- data load: page (list / search) --------
 
-  Future<void> _loadPage({bool reset = false, bool isLoadMore = false}) async {
+  Future<void> _loadPage({bool isLoadMore = false}) async {
     final key = _selectedSourceKey;
     if (key == null) return;
     final idx = _resources.indexWhere((r) => r.key == key);
@@ -261,25 +259,36 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
       });
     }
 
-    final SourceBrowserPage? result = _searchQuery.isEmpty
-        ? await SourceBrowserService.getList(r, typeId: typeId!, page: page)
-        // v2.3.32.1: search 模式不传 typeId, 跟 web source-browser search route
-        //   ?ac=videolist&wd=Q&pg=N 1:1 (web search route 不带 t 参数)
-        : await SourceBrowserService.search(r,
-            query: _searchQuery, page: page);
-
-    if (!mounted) return;
-    setState(() {
-      _isLoadingPage = false;
-      _isLoadingMore = false;
-      if (result == null) {
-        _error = '加载失败 (源 API 错误 / 网络不通)';
-      } else {
-        _items.addAll(result.items);
-        _meta = result.meta;
-      }
-      _lastFetchAt = DateTime.now();
-    });
+    // v2.4.3: 跟 web fetchItems finally { setLoadingItems(false) } 1:1
+    //   try/catch/finally 兜底, 防止任何异常导致 _isLoadingPage 卡在 true
+    //   (SourceBrowserService._getJson 已吞异常返 null, 但加 try/finally
+    //   是 defense in depth, 跟 web fetchItems 行 240-243 对齐)
+    SourceBrowserPage? result;
+    try {
+      result = _searchQuery.isEmpty
+          ? await SourceBrowserService.getList(r, typeId: typeId!, page: page)
+          // v2.3.32.1: search 模式不传 typeId, 跟 web source-browser search route
+          //   ?ac=videolist&wd=Q&pg=N 1:1 (web search route 不带 t 参数)
+          : await SourceBrowserService.search(r,
+              query: _searchQuery, page: page);
+    } catch (e) {
+      result = null;
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingPage = false;
+        _isLoadingMore = false;
+        if (result == null) {
+          if (!isLoadMore) {
+            _error = '加载失败 (源 API 错误 / 网络不通)';
+          }
+        } else {
+          _items.addAll(result.items);
+          _meta = result.meta;
+        }
+        _lastFetchAt = DateTime.now();
+      });
+    }
   }
 
   // -------- infinite scroll --------
@@ -346,7 +355,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
         _mode = newMode;
       });
       if (_selectedSourceKey != null) {
-        _loadPage(reset: true);
+        _loadPage();
       }
     });
   }
@@ -364,7 +373,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
     setState(() {
       _selectedCategoryId = typeId;
     });
-    _loadPage(reset: true);
+    _loadPage();
   }
 
   // -------- derived: filtered + sorted items (client-side) --------
