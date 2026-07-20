@@ -3,8 +3,6 @@ import 'dart:developer' as developer;
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
-import 'exo_speed_test.dart';
-
 /// v2.3.22 测速调试日志 helper
 void _log(String msg) {
   developer.log(msg, name: 'M3U8Service');
@@ -70,44 +68,22 @@ class M3U8Service {
     String Function(String)? urlWrapper,
   }) async {
     try {
-      // v2.3.25: 主路径走 ExoSpeedTest (native ExoPlayer 真实测速).
-      //   之前 v2.3.20 因为 caller (player_screen._testOneUrl) timeout
-      //   只有 7s, ExoSpeedTest 内部 5s 但 ExoPlayer 启动 1-2s + 首分片
-      //   加载 2-3s, 最坏 8s+ 被 7s outer 砍, 退回 Dart Range 抽样.
-      //   v2.3.24 caller timeout 已修到 12s, ExoSpeedTest 5s 内部 timeout
-      //   足够, 重新启用. 完整 changelog:
+      // v2.3.26: 回退 v2.3.25 ExoSpeedTest, 改用 v2.3.24 Dart Range 抽样.
+      //   v2.3.25 想借 v2.3.6 ExoSpeedTest (native ExoPlayer) 测速, 跟
+      //   播放走同一条链路. 想法对, 但实测 100 源只有 1 个 (iQiyi) 能测
+      //   出结果, 99 个全 "不可用". 查 ExoSpeedTestChannel.kt: 5s 内
+      //   部 timeout 对 master→variant 链 (猫眼 4s 拉 master + 4s 跟
+      //   variant = 8s) 太短, 首分片来不及下完, 全 timeout. 失败后又
+      //   降级 Dart Range, Dart outer 12s 也覆盖不到 (ExoSpeedTest
+      //   5s + Dart 8s = 13s > 12s outer), 整体 cascade timeout.
+      //   100 源 × 13s worst = 20+ 分钟, 实际 1 分钟就出结果说明
+      //   大部分源都 cascade timeout 早退.
       //
-      //   v2.3.14: Range 抽样, 7s 兜底, 8/8 源能测速 ✅
-      //   v2.3.18: ExoPlayer 8s > outer 7s, 7/8 源 "不可用"
-      //   v2.3.19: ExoPlayer 缩 3s, 但吃时间预算, 7/8 仍 "不可用"
-      //   v2.3.20: 退回 Dart Range 抽样. ExoPlayer 代码留 APK 不调用
-      //   v2.3.22: master→variant 跟随 (Dart 自实现)
-      //   v2.3.23: 测速 4 步并发 (Dart 自实现)
-      //   v2.3.24: latency 并发 + outer 12s (Dart 自实现)
-      //   v2.3.25: 重新启用 ExoSpeedTest (native ExoPlayer), Dart 兜底
+      //   决策: 退回 v2.3.24 的纯 Dart Range 抽样. v2.3.24 至少猫眼/
+      //   非凡能用 (4-8s 测完), 100 源 1-3 分钟. v2.3.25 全废.
       //
-      //   ExoSpeedTest 优势 (跟 Dart 自实现对比):
-      //   - 跟播放走同一 ExoPlayer (同 UA / 同 HlsMediaSource / 同 DataSource)
-      //   - 原生 master→variant 选档 (HlsMediaSource)
-      //   - 原生 AES-128 解 key
-      //   - 真实 KB/s (首个 > 32KB 分片的 bytes / time, 跟 web LunaTV
-      //     hls.js FRAG_LOADED 思路 1:1 对齐)
-      //   - 真实 ExoPlayer UA (Chrome Mobile, CDN 不再 block)
-      //   - 5s 内部 timeout, 典型 1-3s 完成
-      //   - 100% 对齐播放行为, 不再有 "测速失败但能播放" 的情况
-      final exoResult =
-          await ExoSpeedTest.testSpeed(streamUrl, timeoutMs: 5000);
-      if (exoResult.success) {
-        return {
-          'resolution': {'width': 0, 'height': 0}, // native 不返 resolution
-          'downloadSpeed': exoResult.downloadSpeedKBps,
-          'latency': exoResult.latencyMs,
-          'success': true,
-          'error': null,
-        };
-      }
-      _log('ExoSpeedTest fail: ${exoResult.error}, falling back to Dart Range');
-      // 兜底: iOS (channel 没注册) / ExoPlayer 解析失败 → 原 Dart Range 抽样
+      //   v2.4+ 再考虑修 ExoSpeedTest 内部 timeout (5s → 10s) + 删
+      //   Dart 兜底避免 cascade timeout. 现在先把能用的 v2.3.24 拿回来.
       if (_looksLikeM3u8Url(streamUrl)) {
         return await _measureM3u8Speed(streamUrl, urlWrapper: urlWrapper);
       } else {
