@@ -506,7 +506,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    Colors.emerald.withOpacity(0.1),
+                    Color(0xFF10B981).withOpacity(0.1),
                     Colors.green.withOpacity(0.1),
                     Colors.teal.withOpacity(0.1),
                   ],
@@ -551,12 +551,12 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                     gradient: const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [Colors.emerald, Colors.green, Colors.teal],
+                      colors: [const Color(0xFF10B981), Colors.green, Colors.teal],
                     ),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.emerald.withOpacity(0.4),
+                        color: Color(0xFF10B981).withOpacity(0.4),
                         blurRadius: 15,
                         offset: const Offset(0, 4),
                       ),
@@ -572,7 +572,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                       // 渐变标题
                       ShaderMask(
                         shaderCallback: (bounds) => const LinearGradient(
-                          colors: [Colors.emerald, Colors.green, Colors.teal],
+                          colors: [const Color(0xFF10B981), Colors.green, Colors.teal],
                         ).createShader(bounds),
                         child: const Text(
                           '源浏览器',
@@ -598,22 +598,22 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.emerald.withOpacity(0.1),
+                      color: Color(0xFF10B981).withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: Colors.emerald.withOpacity(0.3),
+                        color: Color(0xFF10B981).withOpacity(0.3),
                       ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.storage, size: 16, color: Colors.emerald.shade700),
+                        Icon(Icons.storage, size: 16, color: const Color(0xFF047857)),
                         const SizedBox(width: 4),
                         Text(
                           '${_resources.length} 个源可用',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.emerald.shade700,
+                            color: const Color(0xFF047857),
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -639,7 +639,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
           end: Alignment.bottomRight,
           colors: isDark
               ? [Colors.grey.shade800, Colors.teal.withOpacity(0.05), Colors.grey.shade800]
-              : [Colors.white, Colors.emerald.withOpacity(0.05), Colors.white],
+              : [Colors.white, Color(0xFF10B981).withOpacity(0.05), Colors.white],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
@@ -672,10 +672,10 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: Colors.emerald.withOpacity(0.15),
+                    color: Color(0xFF10B981).withOpacity(0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.storage, size: 16, color: Colors.emerald.shade600),
+                  child: Icon(Icons.storage, size: 16, color: const Color(0xFF059669)),
                 ),
                 const SizedBox(width: 10),
                 const Text(
@@ -687,14 +687,14 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.emerald.withOpacity(0.15),
+                      color: Color(0xFF10B981).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       '${_resources.length} 个',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.emerald.shade700,
+                        color: const Color(0xFF047857),
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -721,7 +721,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
             height: 16,
             child: CircularProgressIndicator(
               strokeWidth: 2,
-              color: Colors.emerald.shade600,
+              color: const Color(0xFF059669),
             ),
           ),
           const SizedBox(width: 8),
@@ -794,7 +794,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               // 选中态: emerald → green 渐变
               gradient: selected
                   ? const LinearGradient(
-                      colors: [Colors.emerald, Colors.green],
+                      colors: [const Color(0xFF10B981), Colors.green],
                     )
                   : null,
               color: selected ? null : (isDark ? Colors.grey.shade800 : Colors.white),
@@ -808,7 +808,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               boxShadow: selected
                   ? [
                       BoxShadow(
-                        color: Colors.emerald.withOpacity(0.4),
+                        color: Color(0xFF10B981).withOpacity(0.4),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
