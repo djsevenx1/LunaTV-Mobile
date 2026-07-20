@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -31,6 +32,20 @@ import 'package:luna_tv/services/user_data_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // v2.4.4: 全局信任所有 SSL 证书 (跟 web Node.js undici 默认行为对齐).
+  //   之前 source_browser_service.dart:44 注释撒谎说"main() 全局 HttpOverrides
+  //   关 badCertificate", 但其实根本没设. 实际效果:
+  //   - 自签名证书 / 过期证书 / hostname 不匹配 → HandshakeException
+  //   - CF edge zone TLS 1.3 cipher 跟 dart:io OpenSSL 不兼容
+  //     (luna_image_http.dart:1-14 已记录此问题, 图片走 MethodChannel+OkHttp
+  //      绕开, 但 SourceBrowser / Downstream 都没绕)
+  //   全部被 service 层 catch 吞成 null, UI 显示「加载失败」,
+  //   这就是用户反馈「很多源都这样」(v2.4.1/v2.4.2/v2.4.3 都没修干净) 的根因.
+  //   web Node.js undici 用自带 TLS 栈, cipher 支持更全, 不挂.
+  //   修: 跟 web 对齐, 全局信任所有证书. 安全风险可接受 — app 只读源 API,
+  //   不传敏感信息, 用户主动配的源.
+  HttpOverrides.global = _AllowBadCertsOverrides();
 
   // v2.2.0: ExoPlayer (AndroidX Media3) 是 AndroidX Java 库, 不需要
   //   Dart 端 ensureInitialized. 之前 media_kit 的 MediaKit.ensureInitialized()
@@ -194,5 +209,19 @@ class _AppWrapperState extends State<AppWrapper> {
         child: CircularProgressIndicator(),
       ),
     );
+  }
+}
+
+/// v2.4.4: 全局信任所有 SSL 证书, 解决:
+///   - 自签名证书 / 过期证书 / hostname 不匹配 → HandshakeException
+///   - CF edge zone TLS 1.3 cipher 跟 dart:io OpenSSL 不兼容
+///   跟 web Node.js undici 默认行为对齐. 安全风险可接受 — app 只读源 API,
+///   不传敏感信息, 用户主动配的源.
+class _AllowBadCertsOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
   }
 }

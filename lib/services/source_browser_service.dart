@@ -37,14 +37,20 @@ class SourceBrowserService {
   static const Duration _cacheTtl = Duration(minutes: 5);
   static final Map<String, _CacheEntry<dynamic>> _cache = {};
 
-  // v2.3.31: 跟 DownstreamService 同一套配置.
-  //   - 8s timeout (源浏览器是浏览性质, 慢于 8s 直接放弃)
-  //   - User-Agent 跟 DownstreamService 一致 (Chrome Win)
-  //   - SSL 验证: 走 http 默认, badCertificate 在 app 启动时统一关
-  //     (DownstreamService 也不单独配置, 信任 main() 全局 HttpOverrides)
-  static const Duration _timeout = Duration(seconds: 8);
+  // v2.4.4: 跟 web source-browser routes 1:1 配置.
+  //   - categories timeout: 10s (web categories/route.ts:32 = 10s)
+  //   - list timeout: 15s (web list/route.ts:82 = 15s, 比之前 8s 长,
+  //     解决用户反馈「分类出来后卡」— 中等速度源 8s 超时 15s 不超时)
+  //   - search/detail timeout: 8s (跟 web searchWithCache downstream.ts:57 一致)
+  //   - User-Agent: Chrome 147 (跟 web user-agent.ts:10,126 1:1, 之前 Chrome 122
+  //     已落后 2 年多, 部分 CDN/WAF (CF Bot Mgmt) 直接 403)
+  //   - SSL 验证: main.dart 全局 HttpOverrides.global 关 badCertificate
+  //     (v2.4.4 加的, 之前注释撒谎说有其实没, 导致 HandshakeException 全挂)
+  static const Duration _timeoutCategories = Duration(seconds: 10);
+  static const Duration _timeoutList = Duration(seconds: 15);
+  static const Duration _timeoutDefault = Duration(seconds: 8);
   static const String _userAgent =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.139 Safari/537.36';
 
   // -------- cache helpers --------
 
@@ -75,8 +81,10 @@ class SourceBrowserService {
     final cached = _getCached<List<SourceCategory>>(key);
     if (cached != null) return cached;
 
-    final url = '${resource.api}?ac=list';
-    final json = await _getJson(url);
+    // v2.4.4: URL 构建检查 api 是否已带 `?`, 跟 web 1:1 (web 也没检查,
+    //   但用户配置的某些源 api 带 ?from=xxx, 直接拼 ?ac=list 会破损)
+    final url = _buildUrl(resource.api, 'ac=list');
+    final json = await _getJson(url, timeout: _timeoutCategories);
     if (json == null) return null;
 
     final list = (json['class'] as List? ?? const [])
@@ -95,8 +103,9 @@ class SourceBrowserService {
     required int typeId,
     required int page,
   }) async {
-    final url = '${resource.api}?ac=videolist&t=$typeId&pg=$page';
-    return _fetchPage(url, 'list:$typeId:$page');
+    final url =
+        _buildUrl(resource.api, 'ac=videolist&t=$typeId&pg=$page');
+    return _fetchPage(url, 'list:$typeId:$page', timeout: _timeoutList);
   }
 
   /// 搜索 (源 API `?ac=videolist&wd=Q&pg=N`)
@@ -109,9 +118,9 @@ class SourceBrowserService {
   }) async {
     final encoded = Uri.encodeComponent(query);
     final tParam = typeId != null ? '&t=$typeId' : '';
-    final url =
-        '${resource.api}?ac=videolist&wd=$encoded$tParam&pg=$page';
-    return _fetchPage(url, 'search:$query:$typeId:$page');
+    final url = _buildUrl(resource.api, 'ac=videolist&wd=$encoded$tParam&pg=$page');
+    return _fetchPage(url, 'search:$query:$typeId:$page',
+        timeout: _timeoutDefault);
   }
 
   /// 取详情 (源 API `?ac=videolist&ids=ID`)
@@ -121,8 +130,8 @@ class SourceBrowserService {
     SearchResource resource, {
     required String id,
   }) async {
-    final url = '${resource.api}?ac=videolist&ids=$id';
-    final json = await _getJson(url);
+    final url = _buildUrl(resource.api, 'ac=videolist&ids=$id');
+    final json = await _getJson(url, timeout: _timeoutDefault);
     if (json == null) return null;
     final list = (json['list'] as List? ?? const [])
         .whereType<Map<String, dynamic>>();
@@ -135,13 +144,27 @@ class SourceBrowserService {
 
   // -------- private helpers --------
 
+  /// v2.4.4: URL 构建检查 api 是否已带 `?`.
+  ///   之前直接 `${api}?ac=list`, 如果 api 是 `https://x/api.php?from=xxx`
+  ///   会拼出破损的 `?from=xxx?ac=list`. 现在检查 api 是否含 `?`,
+  ///   含则用 `&` 拼接, 不含则用 `?` 拼接.
+  ///   同时 trim api 字段去除前后空格.
+  static String _buildUrl(String api, String query) {
+    final trimmed = api.trim();
+    if (trimmed.isEmpty) return '';
+    final sep = trimmed.contains('?') ? '&' : '?';
+    return '$trimmed$sep$query';
+  }
+
   static Future<SourceBrowserPage?> _fetchPage(
-      String url, String cacheKey) async {
+      String url, String cacheKey,
+      {required Duration timeout}) async {
+    if (url.isEmpty) return null;
     final key = 'page:$cacheKey';
     final cached = _getCached<SourceBrowserPage>(key);
     if (cached != null) return cached;
 
-    final json = await _getJson(url);
+    final json = await _getJson(url, timeout: timeout);
     if (json == null) return null;
 
     final items = (json['list'] as List? ?? const [])
@@ -163,7 +186,11 @@ class SourceBrowserService {
   /// GET 拿 JSON, 失败返 null. GBK / UTF-8 自动检测.
   ///   跟 DownstreamService.searchPage 同一套: 读 content-type charset, 失败
   ///   试 GBK, 失败再试 UTF-8 allowMalformed.
-  static Future<Map<String, dynamic>?> _getJson(String url) async {
+  ///   v2.4.4: timeout 改成参数 (categories 10s / list 15s / search 8s / detail 8s),
+  ///     跟 web source-browser routes 1:1.
+  static Future<Map<String, dynamic>?> _getJson(String url,
+      {required Duration timeout}) async {
+    if (url.isEmpty) return null;
     try {
       final response = await http
           .get(
@@ -173,7 +200,7 @@ class SourceBrowserService {
               'Accept': 'application/json',
             },
           )
-          .timeout(_timeout);
+          .timeout(timeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         if (kDebugMode) {
           debugPrint(
