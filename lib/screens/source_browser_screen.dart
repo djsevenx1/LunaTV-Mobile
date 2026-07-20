@@ -200,22 +200,27 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
     });
     final cats = await SourceBrowserService.getCategories(r);
     if (!mounted) return;
-    setState(() {
-      _isLoadingCategories = false;
-      _categories = cats ?? const [];
-      // v2.3.32.1 改: auto-select 第一个分类, 跟 web useEffect 1:1
-      //   if (categories.length > 0 && !activeCategory) {
-      //     setActiveCategory(categories[0].type_id);
-      //   }
-      if (_categories.isNotEmpty) {
-        _selectedCategoryId = _categories.first.typeId;
-        _loadPage(reset: true);
-      } else if (cats == null) {
-        _error = '加载分类失败 (源 API `?ac=list` 错误)';
-      } else {
-        _error = '该源无分类 (可能 API 不支持 `?ac=list`)';
-      }
-    });
+    // v2.4.2: 把 _loadPage 调用从 setState 内移出来, 避免嵌套 setState
+    //   + async race. 之前 v2.4.1 在 setState 内调 _loadPage(reset: true)
+    //   会触发 _loadPage 内部 setState (_isLoadingPage=true) 跟外层
+    //   setState 时序混乱, 导致用户反馈「一直显示加载内容」.
+    if (cats != null && cats.isNotEmpty) {
+      setState(() {
+        _isLoadingCategories = false;
+        _categories = cats;
+        _selectedCategoryId = cats.first.typeId;
+      });
+      // auto-select 第一个分类后, 在 setState 外 fire-and-forget 调 _loadPage
+      _loadPage(reset: true);
+    } else {
+      setState(() {
+        _isLoadingCategories = false;
+        _categories = const [];
+        _error = cats == null
+            ? '加载分类失败 (源 API `?ac=list` 错误)'
+            : '该源无分类 (可能 API 不支持 `?ac=list`)';
+      });
+    }
   }
 
   // -------- data load: page (list / search) --------
