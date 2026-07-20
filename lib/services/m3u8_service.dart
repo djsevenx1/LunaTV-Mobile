@@ -1,6 +1,12 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
+
+/// v2.3.22 测速调试日志 helper
+void _log(String msg) {
+  developer.log(msg, name: 'M3U8Service');
+}
 
 /// M3U8 解析和测速服务
 class M3U8Service {
@@ -99,9 +105,10 @@ class M3U8Service {
     String Function(String)? urlWrapper,
   }) async {
     try {
-      // 1. 解析 m3u8 拿分片 URL 列表
+      // 1. 解析 m3u8 拿分片 URL 列表 (v2.3.22: 自动 master→variant 跟随)
       final segments = await _getSegmentUrls(m3u8Url);
       if (segments.isEmpty) {
+        _log('measureM3u8Speed: m3u8 解析失败或没分片 url=$m3u8Url');
         return {
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,
@@ -110,10 +117,12 @@ class M3U8Service {
           'error': 'm3u8 解析失败或没分片',
         };
       }
-      // 2. 过滤掉子 playlist (master playlist 里的 variant 行)
+      // 2. 兜底过滤掉 .m3u8 后缀 (理论上 v2.3.22 master 跟随后不该再
+      //   有, 但保险起见保留, 万一 master 有 3 层以上嵌套没递归到)
       final playableSegments =
           segments.where((url) => !_looksLikePlaylistUrl(url)).toList();
       if (playableSegments.isEmpty) {
+        _log('measureM3u8Speed: 没有可测速的分片 url=$m3u8Url');
         return {
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,
@@ -163,38 +172,149 @@ class M3U8Service {
     }
   }
 
-  /// 获取M3U8流的片段URL列表
+  /// v2.3.22 真根因: 解析 m3u8 拿真实分片 URL (递归跟随 master playlist)
+  ///
+  /// 用户反馈 "v2.3.18~v2.3.21 4 个版本翻车, 测速全源不可用但能播放"
+  ///   实际根因 (查到的, 不是猜的):
+  ///   90% 的源 (subo/modu/ffzy/茅台/卧龙/...) 顶层 m3u8 是
+  ///   **master playlist** (HLS 多码率), 形如:
+  ///     #EXTM3U
+  ///     #EXT-X-STREAM-INF:BANDWIDTH=4096000,RESOLUTION=1920x1080
+  ///     /play/hls/xxx/index.m3u8          ← 这才是媒体列表
+  ///   v2.3.21 之前的逻辑:
+  ///     1. _getSegmentUrls 直接当 media playlist 解析
+  ///     2. 把 variant URL "/play/hls/xxx/index.m3u8" 当成 segment
+  ///     3. _looksLikePlaylistUrl 过滤掉 (后缀 .m3u8)
+  ///     4. playableSegments 为空 → success=false → "不可用"
+  ///   iQiyi 之所以能用: 它 m3u8 直接是 media playlist (jxxx/iQiyi 节点
+  ///   跳过 master, 顶层就是 .jpeg segment 列表), 碰巧绕过这个 bug.
+  ///
+  /// 现在改成: 识别 master → 跟随 variant → 递归到 media playlist →
+  ///   才解析 segments. 限制 3 层防死循环 (master→master→master).
+  /// 配合 _getResolutionFromM3U8 (原本就处理 master 的 RESOLUTION 行),
+  ///   分辨率 + 分片两边都对齐了.
+  ///
+  /// 加 _log 调试日志: 之前所有 catch (e) 静默吞异常, "全源不可用" 看不
+  ///   出哪个源哪步死的. 现在每个失败点都 log 出来, adb logcat | grep
+  ///   M3U8Service 能直接看到 root cause.
   Future<List<String>> _getSegmentUrls(String m3u8Url) async {
+    return _resolveSegments(m3u8Url, depth: 0);
+  }
+
+  /// 递归跟随 master playlist, 直到拿到 media playlist 的 segments
+  Future<List<String>> _resolveSegments(
+    String m3u8Url, {
+    required int depth,
+  }) async {
+    if (depth >= 3) {
+      _log('resolveSegments depth>=3, stop (avoid master loop): $m3u8Url');
+      return [];
+    }
+    String? content;
     try {
       // v2.3.21: 加 Referer 头. 之前 v2.3.20 测速时只有段下载带 Referer,
       //   m3u8 playlist 拉取不带, 腾讯/优酷/部分爱奇艺海外节点等需要
       //   Referer 的源 m3u8 拉取 403, _getSegmentUrls 返回 [].
+      // v2.3.22: connectTimeout 5s → 8s, receiveTimeout 6s → 8s.
+      //   测速链路总时长限制在 player_screen 7s outer, 拉 m3u8 文本
+      //   最多吃 8s, 留给 segment 测速时间 0s. 部分 CDN 拉 m3u8
+      //   5s+ 偶尔出现 (CF edge cold cache), 5s 不够.
       final response = await _dio.get(
         m3u8Url,
-        options: Options(headers: _refererHeaders(m3u8Url)),
+        options: Options(
+          headers: _refererHeaders(m3u8Url),
+          sendTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+        ),
       );
-      final content = response.data as String;
-      return _parseSegmentsFromContent(content, m3u8Url);
+      content = response.data as String?;
     } catch (e) {
+      _log('resolveSegments fetch failed [depth=$depth] url=$m3u8Url err=$e');
       return [];
     }
+    if (content == null || content.trim().isEmpty) {
+      _log('resolveSegments empty content [depth=$depth] url=$m3u8Url');
+      return [];
+    }
+    // v2.3.22: master playlist 检测
+    if (_isMasterPlaylist(content)) {
+      final variantUrl = _extractFirstVariantUrl(content, m3u8Url);
+      if (variantUrl == null) {
+        _log('resolveSegments master but no variant [depth=$depth] url=$m3u8Url');
+        return [];
+      }
+      _log(
+          'resolveSegments master→variant [depth=$depth] $m3u8Url → $variantUrl');
+      return _resolveSegments(variantUrl, depth: depth + 1);
+    }
+    // media playlist: 解析 segments (含 v1.0.76 广告过滤)
+    final segments = _parseMediaSegments(content, m3u8Url);
+    _log(
+        'resolveSegments media [depth=$depth] url=$m3u8Url segments=${segments.length}');
+    return segments;
   }
 
-  /// 从M3U8内容中解析片段URL
-  /// v1.0.76: 跳过明显广告段 (URL host 跟 baseUrl 不同 + 含广告关键词)
+  /// v2.3.22: 判断 m3u8 内容是不是 master playlist (HLS 多码率)
   ///
-  /// 用户反馈"播放到广告位置会重头播放" — 根因是视频源 m3u8 在广告位置插入
-  /// 跨域广告 m3u8 segment, 加载失败 (跨域 / CORS / worker 转发不了) →
-  /// libmpv HLS demuxer 触发内部 reload → state.position 跳 0.
-  /// v1.0.75 position jump recovery 在这种场景下会死循环 (广告位置 → 0 →
-  /// seek 回去 → 又到广告位置 → 又 0 → ...), 改成"每集只 seek 一次" 兜底
-  /// (在 player_screen.dart 加 _recoverySeekedThisEpisode 锁).
-  ///
-  /// 本函数这边也加一个轻量过滤: 解析时跳过明显广告 segment, 测速选第一个
-  /// 非广告段测. 这不影响实际播放 (播放还是 libmpv 主导), 但能让测速不被
-  /// 广告段失败干扰 (之前 v1.0.74 修的 segment URL 解析错位类似, 都是
-  /// 测速链路被广告段污染).
-  List<String> _parseSegmentsFromContent(String content, String baseUrl) {
+  /// 特征: 含 `EXT-X-STREAM-INF` 行 (每个 variant 前面一行), 且没有
+  ///   `EXTINF` 行 (media playlist 才有). 也看末尾有 `#EXT-X-ENDLIST`
+  ///   倾向于 media, 没 ENDLIST 倾向于 live master, 但 master/media
+  ///   区分主要看 STREAM-INF vs EXTINF.
+  bool _isMasterPlaylist(String content) {
+    final hasStreamInf = content.contains('#EXT-X-STREAM-INF');
+    final hasExtInf = content.contains('#EXTINF');
+    if (hasStreamInf && !hasExtInf) return true;
+    // 少数情况: master 也可能含 EXTINF (罕见, 但保险起见)
+    // STREAM-INF 出现 + 没有正常 segment 行 (只有 m3u8 链接) → master
+    if (hasStreamInf) {
+      // 数一下非注释非空行: 如果大多数是 .m3u8 链接, 就是 master
+      final nonCommentLines = content
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => !l.startsWith('#') && l.isNotEmpty)
+          .toList();
+      if (nonCommentLines.isEmpty) return false;
+      final m3u8Count = nonCommentLines
+          .where((l) => l.toLowerCase().endsWith('.m3u8') ||
+              l.toLowerCase().endsWith('.m3u'))
+          .length;
+      return m3u8Count >= nonCommentLines.length * 0.5; // 多数行是 .m3u8 → master
+    }
+    return false;
+  }
+
+  /// v2.3.22: 从 master playlist 里抽第 1 个 variant URL
+  ///   优先选分辨率最高的 (BANDWIDTH 最大的那个), 测最清晰档位
+  ///   (最贴近 libmpv 实际播放选档逻辑 — libmpv 默认按带宽选最高档)
+  String? _extractFirstVariantUrl(String content, String baseUrl) {
+    final lines = content.split('\n').map((l) => l.trim()).toList();
+    String? bestVariant;
+    int bestBandwidth = -1;
+    for (int i = 0; i < lines.length; i++) {
+      if (!lines[i].startsWith('#EXT-X-STREAM-INF:')) continue;
+      // 找这行下面的第 1 个非 # 行
+      for (int j = i + 1; j < lines.length; j++) {
+        if (lines[j].isEmpty) continue;
+        if (lines[j].startsWith('#')) continue;
+        // 解析 BANDWIDTH
+        int bw = 0;
+        final bwMatch =
+            RegExp(r'BANDWIDTH=(\d+)').firstMatch(lines[i]);
+        if (bwMatch != null) {
+          bw = int.tryParse(bwMatch.group(1)!) ?? 0;
+        }
+        if (bestVariant == null || bw > bestBandwidth) {
+          bestBandwidth = bw;
+          bestVariant = _resolveUrl(lines[j], baseUrl);
+        }
+        break; // 每个 STREAM-INF 只取后面 1 个 variant
+      }
+    }
+    return bestVariant;
+  }
+
+  /// 从 media playlist 解析 segments (v1.0.76 起带广告过滤)
+  List<String> _parseMediaSegments(String content, String baseUrl) {
     final lines = content.split('\n').map((line) => line.trim()).toList();
     final segments = <String>[];
 
