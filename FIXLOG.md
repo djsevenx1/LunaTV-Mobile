@@ -6,6 +6,88 @@
 
 ---
 
+## v2.5.18 (2026-07-21) — 播放时调节音量弹系统音量条 (安卓 16)
+
+### 现象
+
+播放页按物理音量键 / 滑动调音量, 弹 Android 系统音量条遮挡视频画面。
+
+### 排查
+
+- v1.0.54 已经设了 `VolumeController().showSystemUI = false`, 软调不弹 ✓
+- 物理音量键仍弹 — logcat 看 `AudioManager.adjustStreamVolume` 是
+  Activity 层调的, 绕过 volume_controller
+- Android 16 新 horizontal volume slider 行为, 旧 `volume_controller 2.0.8`
+  showSystemUI=false 在 Android 16 上偶发失效
+
+### 根因 (两个独立 bug)
+
+**Bug A — 物理音量键走 Activity.dispatchKeyEvent**:
+系统默认收到 KEYCODE_VOLUME_UP/DOWN → AudioManager.adjustStreamVolume
+(STREAM_MUSIC, delta, FLAG_SHOW_UI) 弹音量条。 volume_controller 完全
+不知道, 没法拦。
+
+**Bug B — volume_controller 2.0.8 在 Android 16 失效**:
+2.0.8 (2022 年初) 用的是 `adjustStreamVolume` 旧 API, Android 14+
+改了默认 FLAG_SHOW_UI 行为, Android 16 又改了 SystemUI horizontal
+layout, 旧包的 showSystemUI=false 偶发失效。
+
+### 修复
+
+**升级 `volume_controller` 2.0.8 → 3.4.4** (选 3.4.4 是兼容 Dart 3.0+ 的 3.x 最新版):
+- 3.x 改 singleton → instance API, 私有构造 `VolumeController._()`,
+  必须 `VolumeController.instance.xxx`. 项目 5 处 `VolumeController()`
+  全改 `VolumeController.instance`.
+- 3.4.4 修复了 setStreamVolume 的 FLAG_SHOW_UI 行为, 软调不弹 ✓.
+
+**新增 `VolumeKeyChannel.kt` 物理键拦截**:
+- `MainActivity.dispatchKeyEvent` 拦截 KEYCODE_VOLUME_UP/DOWN/MUTE,
+  return true 消费事件, super.dispatchKeyEvent 不会被系统调
+  adjustStreamVolume, 不弹音量条.
+- 转发到 Dart 端 'onVolumeKey' (direction: up/down/mute).
+- setEnabled(false) 透传物理键, 让用户离开播放页时音量键走系统
+  默认 (弹音量条是合理的系统反馈).
+
+**PlayerScreen 端**:
+- 新增 `MethodChannel _volumeKeyChannel` + `_onVolumeKeyCall` handler.
+- initState: setMethodCallHandler + setEnabled(true).
+- dispose: setMethodCallHandler(null) + setEnabled(false).
+- 物理键步长 1/15 ≈ 0.067, 跟系统默认 adjustStreamVolume 步长
+  一致, 用户感觉跟原系统调节幅度一样.
+- 物理 mute: 缓存 `_volumeBeforeMute`, 静音切到 0 再次按 mute 恢复.
+
+### 时序
+
+```
+1. 播放页 initState → volume_controller.instance.setVolume 走
+   setStreamVolume(0,0) 不弹 + setEnabled(true) 开物理键拦截
+2. 用户按物理音量上键 → Activity.dispatchKeyEvent →
+   VolumeKeyChannel.onKeyEvent 拦截, return true →
+   channel.invokeMethod('onVolumeKey', 'up') →
+   Dart _onVolumeKeyCall 收到 → setState _currentVolume += 1/15
+   → VolumeController.instance.setVolume (showSystemUI=false 不弹)
+3. 用户离开播放页 → dispose → setMethodCallHandler(null) +
+   setEnabled(false) → 物理键透传 super, 走系统默认
+```
+
+### 影响
+
+- 软调 + 物理键 都不弹系统音量条. 视频右侧音量指示器变化,
+  没有 Android 那个大音量条浮在视频上挡画面.
+- 物理 mute 键完整, 跟系统默认一致.
+- 离开播放页后物理音量键走系统默认, 弹音量条正常 (没把系统
+  音量条屏蔽扩展到全局).
+
+### 修改文件
+
+- `pubspec.yaml`: `volume_controller: 2.0.8` → `3.4.4`, version 2.5.17+1 → 2.5.18+1
+- `android/.../VolumeKeyChannel.kt` (新增)
+- `android/.../MainActivity.kt`: 注册 channel + dispatchKeyEvent 拦截
+- `lib/screens/player_screen.dart`: API 改写 + 物理键回调 + 静音缓存
+- `.github/changelogs.json`: 头部插 v2.5.18 entry
+
+---
+
 ## v2.5.17 (2026-07-21) — 回滚到 v2.5.15 (用户「滚回」)
 
 ### 现象

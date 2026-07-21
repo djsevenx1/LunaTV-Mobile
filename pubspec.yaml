@@ -1,7 +1,7 @@
 name: luna_tv
 description: "LunaTV-inspired Flutter client"
 publish_to: 'none'
-version: 2.5.17+1
+version: 2.5.18+1
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -44,7 +44,13 @@ dependencies:
   # v2.3.14: 加回 video_player, 卸自研 CustomExoPlayer. 跟 v2.3.0 行为一致.
   video_player: ^2.10.1
   screen_brightness: 0.2.2+1
-  volume_controller: 2.0.8
+  # v2.5.18: 2.0.8 → 3.4.4. 3.x 改 singleton → instance API
+  #   (VolumeController() 仍兼容, 内部 .instance 拿单例), 修了
+  #   Android 14+ 的 setStreamVolume FLAG_SHOW_UI 默认行为 (旧
+  #   2.0.8 在 Android 16 上 showSystemUI=false 偶发失效, 3.4.4 修).
+  #   选 3.4.4 是因为 3.5.0+ 要 Dart 3.10, 项目 SDK 3.4.0-4.0.0
+  #   选 3.4.4 (Min Dart 3.0) 是 3.x 兼容范围内最新.
+  volume_controller: 3.4.4
   # macos_window_utils: ^1.0.4
   # bitsdojo_window: ^0.1.5
   # bs58check: ^1.0.0

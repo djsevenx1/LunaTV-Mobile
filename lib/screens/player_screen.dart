@@ -76,6 +76,13 @@ class _SourcePingItem {
 
 class _PlayerScreenState extends State<PlayerScreen>
     with WidgetsBindingObserver {
+  // v2.5.18: 物理音量键拦截 channel — 见 android/.../VolumeKeyChannel.kt.
+  //   initState 注册 setMethodCallHandler + setEnabled(true), dispose
+  //   关掉, 让用户离开播放页时物理音量键走系统默认 (弹系统音量条是
+  //   合理的系统反馈). channel 跟 MainActivity 生命周期一致, widget
+  //   销毁时 listener 也要清, 否则下一次 push 播放页会重复监听.
+  static const MethodChannel _volumeKeyChannel =
+      MethodChannel('org.moontechlab.lunatv/volume_key');
   // 播放器 — v2.2.0: 卸 libmpv 改 ExoPlayer (AndroidX Media3).
   //   v2.3.11: 卸 video_player, 改用自研 [CustomExoPlayer] (走
   //   CustomExoPlayerChannel.kt). 视频输出走 Flutter SurfaceTexture,
@@ -223,6 +230,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   // 亮度/音量手势 (v1.0.40 修复: 主播放器之前根本没接手势层)
   double _currentVolume = 0.5; // 0.0 ~ 1.0
+  // v2.5.18: 物理静音键缓存 — 静音切到 0 时缓存原音量, 再次按 mute
+  //   恢复. 跟系统默认 mute 行为一致.
+  double? _volumeBeforeMute;
   double _currentBrightness = 0.5;
   bool _showVolumeIndicator = false;
   bool _showBrightnessIndicator = false;
@@ -269,11 +279,20 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 默认 true, 每次 setVolume 都会弹系统音量窗口遮挡视频
     // mobile_player_controls.dart:110 同模板, 但 player_screen 是另一个 widget
     // 自己的 _onVolumeSwipeUpdate → setVolume 路径没人设过这个字段, 所以会弹
-    VolumeController().showSystemUI = false;
+    VolumeController.instance.showSystemUI = false;
+    // v2.5.18: 物理音量键拦截 — 物理 KEYCODE_VOLUME_UP/DOWN/MUTE 走
+    //   Activity.dispatchKeyEvent → AudioManager.adjustStreamVolume (默认
+    //   FLAG_SHOW_UI) 弹系统音量条, **绕过 volume_controller**. 必须在
+    //   Kotlin 层 (VolumeKeyChannel) 拦截, 转发到 Dart 端, Dart 端再走
+    //   volume_controller.instance.setVolume (showSystemUI=false 不弹).
+    //   initState 注册 setEnabled(true) 开启拦截, dispose 关掉, 让用户离
+    //   开播放页时物理音量键走系统默认 (弹音量条是合理的系统反馈).
+    _volumeKeyChannel.setMethodCallHandler(_onVolumeKeyCall);
+    unawaited(_volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': true}));
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
       try {
-        final vol = await VolumeController().getVolume();
+        final vol = await VolumeController.instance.getVolume();
         if (mounted && vol != null) setState(() => _currentVolume = vol);
       } catch (_) {}
       try {
@@ -409,7 +428,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     // initState 设了 false 屏蔽系统音量弹窗, dispose 要还原成 true
     // 跟 mobile_player_controls.dart:160 同模板, 否则其他场景 (detail 页面
     // 之类) 再调 setVolume 也不会弹系统 UI
-    VolumeController().showSystemUI = true;
+    VolumeController.instance.showSystemUI = true;
+    // v2.5.18: 关物理音量键拦截, 让用户离开播放页时物理音量键走系统
+    //   默认 (弹系统音量条). 同时清 MethodCallHandler, 避免下次 push
+    //   播放页重复监听. setEnabled(false) 是 fire-and-forget — dispose
+    //   路径不能 await, 走 unawaited 包一下让 lint 不告警.
+    _volumeKeyChannel.setMethodCallHandler(null);
+    unawaited(_volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': false}));
     // v2.3.0: 视频加速链路整个删了, 关本地代理 / 状态指示器 / 速度采样 timer
     //   全部删了. dispose 路径上不需要再 _videoProxy?.stop() / cancel timer.
     // v2.2.0+59: dispose 时关掉屏幕常亮. 即便 _phase 已经切到 'detail'
@@ -1198,10 +1223,16 @@ class _PlayerScreenState extends State<PlayerScreen>
           (_dragStartVolume! + normalized).clamp(0.0, 1.0);
       _showVolumeIndicator = true;
     });
-    // v1.0.44: v0.2.2 / 2.0.8 API 是 VolumeController() 实例
+    // v1.0.44: 走 VolumeController.instance.setVolume
     // v1.0.54: 走全局 showSystemUI=false (initState 开关), 不走方法参数,
     // 因为滑动频繁调 setVolume, 每次传参也累赘
-    VolumeController().setVolume(_currentVolume);
+    // v2.5.18: volume_controller 2.0.8 → 3.4.4, 改 singleton → instance API,
+    //   VolumeController() 私有构造, 必须 .instance. 3.4.4 内部会把
+    //   showSystemUI 值传给原生层, 走 adjustStreamVolume(..., 0) 不弹
+    //   FLAG_SHOW_UI. 但物理音量键仍走 Activity.dispatchKeyEvent →
+    //   AudioManager.adjustStreamVolume (默认 FLAG_SHOW_UI), 弹系统
+    //   音量条, 这部分由 VolumeKeyChannel 拦截 (见 initState).
+    VolumeController.instance.setVolume(_currentVolume);
   }
 
   void _onVolumeSwipeEnd(DragEndDetails details) {
@@ -1211,6 +1242,60 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (mounted) setState(() => _showVolumeIndicator = false);
     });
     _scheduleHideControls();
+  }
+
+  // v2.5.18: 物理音量键回调 — Kotlin VolumeKeyChannel.dispatchKeyEvent
+  //   拦截 KEYCODE_VOLUME_UP/DOWN/MUTE, 调 channel.invokeMethod
+  //   ('onVolumeKey', direction). Dart 端自己调
+  //   VolumeController.instance.setVolume (showSystemUI=false 不弹系统
+  //   音量条), 跟侧滑调音量走同一路径, 体验一致.
+  //
+  //   步长: 1/15 ≈ 0.067, 跟系统默认 adjustStreamVolume 步长一致
+  //   (系统 max=15 时一次 +1), 用户感觉跟原系统调节幅度一样.
+  Future<dynamic> _onVolumeKeyCall(MethodCall call) async {
+    if (call.method != 'onVolumeKey') return null;
+    final direction = call.arguments as String?;
+    if (direction == null) return null;
+
+    const step = 1.0 / 15.0;
+    double newVolume = _currentVolume;
+    switch (direction) {
+      case 'up':
+        newVolume = (_currentVolume + step).clamp(0.0, 1.0);
+        break;
+      case 'down':
+        newVolume = (_currentVolume - step).clamp(0.0, 1.0);
+        break;
+      case 'mute':
+        // v2.5.18: 物理静音键 — 静音切到 0, 再按一下恢复原音量.
+        //   用 _volumeBeforeMute 缓存, 跟系统默认行为一致.
+        if (_currentVolume > 0) {
+          _volumeBeforeMute = _currentVolume;
+          newVolume = 0.0;
+        } else if (_volumeBeforeMute != null && _volumeBeforeMute! > 0) {
+          newVolume = _volumeBeforeMute!;
+        }
+        break;
+    }
+
+    if (newVolume == _currentVolume) return null;
+
+    setState(() {
+      _currentVolume = newVolume;
+      _showVolumeIndicator = true;
+    });
+    // 走 volume_controller.instance.setVolume, showSystemUI=false (initState
+    // 设的) 已经传 0 flags 给原生层, 不弹系统音量条.
+    try {
+      await VolumeController.instance.setVolume(newVolume);
+    } catch (_) {}
+
+    // 2s 后自动隐藏指示器, 跟侧滑手势一致
+    _volumeHideTimer?.cancel();
+    _volumeHideTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showVolumeIndicator = false);
+    });
+    return null;
   }
 
   void _onBrightnessSwipeStart(DragStartDetails details) {
