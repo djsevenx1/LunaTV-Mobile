@@ -3,49 +3,63 @@ import 'package:http/http.dart' as http;
 import 'package:luna_tv/models/short_drama.dart';
 import 'package:luna_tv/models/raw_short_drama.dart';
 
-/// v2.5.3: 短剧直连 TVBox 源 service.
+/// v2.5.4: 短剧直连 TVBox 源 service (修复 擦边短剧没内容).
 ///
-/// 设计目标 (按用户 v2.5.3 决策):
+/// 设计目标 (v2.5.3 沿用, v2.5.4 修 type_id 映射):
 /// 1. **写死源** = 3 个 TVBox 源 URL, 不再依赖 serverUrl.
-/// 2. **写死分类关键字** = SHORT_DRAMA_KEYWORDS (含 7 个原 + 2 个新增:
-///    「AI 漫剧」 / 「漫剧」). 上游加了新分类看不到, 要发版才能加.
-/// 3. **只拉「短剧」主类 type_id** = 跟后端 `src/lib/shortdrama.server.ts` L46
-///    `cat.type_name === '短剧'` 优先选父分类的策略 1:1.
+/// 2. **写死分类关键字** = SHORT_DRAMA_KEYWORDS (含 7 个原 + 2 个 AI 漫剧).
+/// 3. **每源声明自己提供的 type_id 列表** (`_DirectSource.categories`),
+///    v2.5.4 起: 不再假设「短剧」主类在所有源都有数据, 而是按源实际
+///    可用 type_id 拉. 这样 tyyszy 子分类 64-69 + wujin 41/62/63 +
+///    lzi 46/52 都能稳定拉数据.
 /// 4. **只暴露 数据/图片/分类** = 不暴露 parseEpisode(). 播放仍走
-///    [ShortDramaService.parseEpisode] 走后端解析 (LunaTV 后端自己有
-///    反爬/代理/CDN 缓存, 客户端裸奔不安全).
+///    [ShortDramaService.parseEpisode] 走后端解析.
 ///
-/// 兼容性: 返回的 [ShortDrama] model 跟老 [ShortDramaService] 返的 model
-/// 字段名 1:1 ([ShortDrama.fromJson] 可以复用), 但 **id 跟后端 vod_id
-/// 是同一种 ID** (后端 `parseShortDramaEpisode(videoId, ...)` 接受 int,
-/// 跟 `vod_id` 一致), 所以直连拿到的 `ShortDrama.id` 可以直接调
-/// `ShortDramaService.parseEpisode(id, episode)` 走后端解析.
+/// v2.5.4 bug fix: v2.5.3 硬编码 `tyyszyapi 短剧主类=54 + 擦边=73`,
+/// 但 2026-07-21 实测 tyyszyapi 这 2 个 type_id 实际都返回 0 条,
+/// 导致「擦边短剧」tab 进不去. 现在改成:
+///   - 擦边短剧 → wujinapi 62 (118 部) ✓
+///   - 短剧主类 → wujinapi 41 (763) + lziapi 46 (21,684) ✓
+///   - 6 个子分类 → tyyszyapi 64-69 (有数据)
+///   - 漫剧 → wujinapi 63 (3127) ✓
+///   - AI 漫剧 → lziapi 52 (4858) ✓
 class ShortDramaDirectService {
   /// 3 个写死 TVBox 源 (按 2026-07-21 实测可用排序).
   ///
-  /// 1. tyyszyapi.com: 天翼影视资源, 8 短剧子分类, 68k 部, 响应快.
-  ///    短剧主类 type_id = 54. (默认)
-  /// 2. api.wujinapi.com: 无极, 8 短剧子分类 + 118 部擦边短剧, 116k 部.
-  ///    短剧主类 type_id = 41. AI 漫剧 type_id = 63 (3127 部).
-  /// 3. cj.lziapi.com: 量子, 1 短剧主类, 14w 部. AI 漫剧 type_id = 52 (4858 部).
+  /// 每个源声明自己**实测有数据**的 type_id 列表. v2.5.4 起不再
+  /// 假设「短剧主类在所有源都有」, 而是按各源实际情况.
   static const List<_DirectSource> _sources = [
+    // 天翼影视: 主类 54 / 擦边 73 当前 0, 改用其 6 个子分类
     _DirectSource(
       name: '天翼影视',
       apiUrl: 'https://tyyszyapi.com/api.php/provide/vod',
-      shortDramaTypeId: 54,
-      aiMangaTypeId: null, // 没 AI 漫剧分类
+      categories: [
+        _SourceCategory(64, '女频恋爱'),
+        _SourceCategory(65, '反转爽剧'),
+        _SourceCategory(66, '古装仙侠'),
+        _SourceCategory(67, '年代穿越'),
+        _SourceCategory(68, '脑洞悬疑'),
+        _SourceCategory(69, '现代都市'),
+      ],
     ),
+    // 无极: 主类 41 + 擦边 62 + 漫剧 63 (全有数据)
     _DirectSource(
       name: '无极',
       apiUrl: 'https://api.wujinapi.com/api.php/provide/vod',
-      shortDramaTypeId: 41,
-      aiMangaTypeId: 63, // 「漫剧」(本质 AI 漫剧) 3127 部
+      categories: [
+        _SourceCategory(41, '短剧'),
+        _SourceCategory(62, '擦边短剧'),
+        _SourceCategory(63, '漫剧'),
+      ],
     ),
+    // 量子: 主类 46 + AI 漫剧 52 (全有数据)
     _DirectSource(
       name: '量子',
       apiUrl: 'https://cj.lziapi.com/api.php/provide/vod',
-      shortDramaTypeId: 46,
-      aiMangaTypeId: 52, // 「AI 漫剧」 4858 部
+      categories: [
+        _SourceCategory(46, '短剧'),
+        _SourceCategory(52, 'AI 漫剧'),
+      ],
     ),
   ];
 
@@ -54,8 +68,7 @@ class ShortDramaDirectService {
   ///
   /// 注意: 用 `includes` 匹配 (跟后端 L41 一致), 「短剧」 关键字会同时
   /// 命中「短剧」/「擦边短剧」, 「漫剧」/「AI 漫剧」 各自只命中自己.
-  /// 实际拉剧只取「短剧」主类 (L82), 关键字只用于 filter 分类是否在
-  /// 短剧范围内 (给分类页展示用, 列表页直接用主类 type_id 拉).
+  /// 实际拉剧只取各源「实测有数据」的 type_id, 关键字只用于日志标注.
   static const List<String> SHORT_DRAMA_KEYWORDS = [
     '短剧', // 主类关键字 (含「擦边短剧」)
     '女频恋爱',
@@ -83,7 +96,7 @@ class ShortDramaDirectService {
     final url = '$apiUrl?$query';
     final resp = await http
         .get(Uri.parse(url), headers: {
-          'User-Agent': 'Mozilla/5.0 (LunaTV-Mobile/2.5.3)',
+          'User-Agent': 'Mozilla/5.0 (LunaTV-Mobile/2.5.4)',
           'Accept': 'application/json',
         })
         .timeout(_timeout);
@@ -99,7 +112,6 @@ class ShortDramaDirectService {
     _DirectSource src,
     int typeId,
     int page,
-    int size,
   ) async {
     try {
       final data = await _get(src.apiUrl, 'detail', {
@@ -118,24 +130,22 @@ class ShortDramaDirectService {
     }
   }
 
-  /// v2.5.3: 拉全量「短剧」列表 (含 AI 漫剧), 聚合 3 源 + 去重.
+  /// v2.5.4: 拉全量「短剧」列表 (含 AI 漫剧), 聚合 3 源 + 去重.
   ///
-  /// 策略 (跟后端 `src/lib/shortdrama.server.ts` L75-110 1:1):
-  /// 1. 每个源按自己的 `shortDramaTypeId` 拉第一页
-  /// 2. 带 `aiMangaTypeId` 的源同时拉 AI 漫剧第一页
-  /// 3. 合并所有结果
-  /// 4. 按 name 去重 (Map<name, item>)
-  /// 5. 按 update_time 降序
-  /// 6. 返回前 [size] 条
+  /// 策略:
+  /// 1. 每个源按自己声明的所有 type_id 拉第一页
+  /// 2. 合并所有结果
+  /// 3. 按 name 去重 (Map<name, item>)
+  /// 4. 按 update_time 降序
+  /// 5. 返回前 [size] 条
   static Future<List<ShortDrama>> getRecommend({int size = 20}) async {
     final allRaw = <RawShortDrama>[];
 
-    // 每个源并发拉 (Promise.allSettled 1:1)
+    // 每个源并发拉所有声明的 type_id
     final futures = <Future<List<RawShortDrama>>>[];
     for (final src in _sources) {
-      futures.add(_fetchFromSource(src, src.shortDramaTypeId, 1, size));
-      if (src.aiMangaTypeId != null) {
-        futures.add(_fetchFromSource(src, src.aiMangaTypeId!, 1, size));
+      for (final cat in src.categories) {
+        futures.add(_fetchFromSource(src, cat.typeId, 1));
       }
     }
     final results = await Future.wait(futures);
@@ -147,12 +157,11 @@ class ShortDramaDirectService {
     final unique = <String, RawShortDrama>{};
     for (final raw in allRaw) {
       if (raw.vodName.isEmpty) continue;
-      // 已有同名 → 保留先到的 (一般按 update_time 降序后, 先到的是新的)
       unique.putIfAbsent(raw.vodName, () => raw);
     }
     final uniqueList = unique.values.toList();
 
-    // 按 update_time 降序 (跟后端 L88 1:1)
+    // 按 update_time 降序
     uniqueList.sort((a, b) {
       final at = DateTime.tryParse(a.vodTime) ?? DateTime(1970);
       final bt = DateTime.tryParse(b.vodTime) ?? DateTime(1970);
@@ -165,13 +174,9 @@ class ShortDramaDirectService {
     return sliced.map(_toShortDrama).toList();
   }
 
-  /// v2.5.3: 拉单个 type_id 下的列表 (分页), 用于分类 tab 切换.
+  /// v2.5.4: 拉单个 type_id 下的列表 (分页), 用于分类 tab 切换.
   ///
-  /// 跟后端 `/api/shortdrama/list?categoryId=&page=&size=` 行为 1:1.
-  /// 但因为直连 TVBox, 多源数据没法按 type_id 精确切分 (一个 type_id
-  /// 在不同源 ID 不同), 暂时只拉第一个匹配该 type_id 的源.
-  /// 简单实现: 在 3 源中找 `shortDramaTypeId == typeId` 或
-  /// `aiMangaTypeId == typeId` 的源.
+  /// 在 3 源中找**首个**声明了该 type_id 的源, 用它拉数据.
   static Future<ShortDramaListResponse> getListByTypeId({
     required int typeId,
     int page = 1,
@@ -180,17 +185,19 @@ class ShortDramaDirectService {
     // 找匹配的源
     _DirectSource? matchSrc;
     for (final src in _sources) {
-      if (src.shortDramaTypeId == typeId ||
-          src.aiMangaTypeId == typeId) {
-        matchSrc = src;
-        break;
+      for (final cat in src.categories) {
+        if (cat.typeId == typeId) {
+          matchSrc = src;
+          break;
+        }
       }
+      if (matchSrc != null) break;
     }
 
     // 兜底: 没找到 (例如 type_id 来自其他源), 用第一个源
     matchSrc ??= _sources.first;
 
-    final rawList = await _fetchFromSource(matchSrc, typeId, page, size);
+    final rawList = await _fetchFromSource(matchSrc, typeId, page);
     final hasMore = rawList.length >= size;
     return ShortDramaListResponse(
       list: rawList.map(_toShortDrama).toList(),
@@ -198,33 +205,44 @@ class ShortDramaDirectService {
     );
   }
 
-  /// v2.5.3: 拉硬编码的分类列表.
+  /// v2.5.4: 拉硬编码的分类列表.
   ///
-  /// 跟后端不同: 不调用 `?ac=list` 实时拉 (太慢, 8s+), 直接写死 9 个
-  /// 分类 + 每个 type_id 绑定到具体源.
-  /// 这样:
-  /// - 启动 0 延迟 (无网络)
-  /// - 跟用户原话「分类写死到 app」 1:1
-  /// - 跟下游 getListByTypeId 配合, 点分类就能跳到对应 type_id 拉剧
+  /// 合并 3 源声明的所有 type_id → 去重 (按 name 保留首个出现的 typeId) →
+  /// 按 (主类优先, 漫剧/AI 漫剧殿后) 排序.
   static Future<List<ShortDramaCategory>> getCategories() async {
-    return const [
-      // 短剧 (主类, 3 源中任一都有)
-      ShortDramaCategory(typeId: 54, typeName: '短剧'),  // 天翼影视主类
-      // 短剧子分类
-      ShortDramaCategory(typeId: 64, typeName: '女频恋爱'),  // 天翼影视
-      ShortDramaCategory(typeId: 65, typeName: '反转爽剧'),  // 天翼影视
-      ShortDramaCategory(typeId: 66, typeName: '古装仙侠'),  // 天翼影视
-      ShortDramaCategory(typeId: 67, typeName: '年代穿越'),  // 天翼影视
-      ShortDramaCategory(typeId: 68, typeName: '脑洞悬疑'),  // 天翼影视
-      ShortDramaCategory(typeId: 69, typeName: '现代都市'),  // 天翼影视
-      ShortDramaCategory(typeId: 73, typeName: '擦边短剧'),  // 天翼影视
-      // AI 漫剧 / 漫剧 (v2.5.3 新增)
-      ShortDramaCategory(typeId: 63, typeName: '漫剧'),      // 无极
-      ShortDramaCategory(typeId: 52, typeName: 'AI 漫剧'),  // 量子
+    // 按源顺序收集 (天翼 → 无极 → 量子)
+    final seen = <String, _SourceCategory>{}; // name → first occurrence
+    for (final src in _sources) {
+      for (final cat in src.categories) {
+        seen.putIfAbsent(cat.typeName, () => cat);
+      }
+    }
+
+    // 排序: 短剧 (主类) 最前, 然后子分类, 然后 擦边/漫剧/AI 漫剧 殿后
+    const priorityNames = [
+      '短剧',
+      '女频恋爱',
+      '反转爽剧',
+      '古装仙侠',
+      '年代穿越',
+      '脑洞悬疑',
+      '现代都市',
+      '擦边短剧',
+      '漫剧',
+      'AI 漫剧',
     ];
+    final sorted = <_SourceCategory>[];
+    for (final name in priorityNames) {
+      final cat = seen[name];
+      if (cat != null) sorted.add(cat);
+    }
+
+    return sorted
+        .map((c) => ShortDramaCategory(typeId: c.typeId, typeName: c.typeName))
+        .toList();
   }
 
-  /// RawShortDrama → ShortDrama 映射, 跟后端 `shortdrama.server.ts` L62-66 1:1.
+  /// RawShortDrama → ShortDrama 映射.
   static ShortDrama _toShortDrama(RawShortDrama raw) {
     return ShortDrama(
       id: raw.vodId,
@@ -241,17 +259,24 @@ class ShortDramaDirectService {
   }
 }
 
-/// 写死的单个 TVBox 源配置.
+/// v2.5.4: 单个源声明的 type_id + name 配对.
+class _SourceCategory {
+  final int typeId;
+  final String typeName;
+  const _SourceCategory(this.typeId, this.typeName);
+}
+
+/// v2.5.4: 写死的单个 TVBox 源配置 — 用 `categories` 列表替代 v2.5.3
+/// 的 `shortDramaTypeId` + `aiMangaTypeId` 两个固定字段. 这样可以
+/// 准确声明「这个源实际有数据的 type_id 集合」.
 class _DirectSource {
   final String name;
   final String apiUrl;
-  final int shortDramaTypeId;
-  final int? aiMangaTypeId; // null = 没 AI 漫剧分类
+  final List<_SourceCategory> categories;
 
   const _DirectSource({
     required this.name,
     required this.apiUrl,
-    required this.shortDramaTypeId,
-    this.aiMangaTypeId,
+    required this.categories,
   });
 }
