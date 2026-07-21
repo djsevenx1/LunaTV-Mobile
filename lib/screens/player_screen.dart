@@ -1109,7 +1109,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 失败回滚 UI
         setState(() => _isFavorite = wasFavorite);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.message ?? '收藏操作失败')),
+          SnackBar(content: Text(result.errorMessage ?? '收藏操作失败')),
         );
       } else {
         // 成功后通知收藏页 / 历史页刷新
