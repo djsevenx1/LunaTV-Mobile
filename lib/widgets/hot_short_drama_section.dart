@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:luna_tv/models/play_record.dart';
 import 'package:luna_tv/models/short_drama.dart';
 import 'package:luna_tv/models/video_info.dart';
-import 'package:luna_tv/services/short_drama_service.dart';
+// v2.5.3: 首页"热门短剧"也走 ShortDramaDirectService (直连 3 源, 不依赖
+//   serverUrl). 跟 ShortDramaScreen 用同一份代码, 数据一致.
+import 'package:luna_tv/services/short_drama_direct_service.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
 import 'package:luna_tv/widgets/recommendation_section.dart';
 import 'package:luna_tv/widgets/section_title.dart';
@@ -53,8 +55,11 @@ class _HotShortDramaSectionState extends State<HotShortDramaSection> {
     });
 
     try {
-      // 策略1（推荐）: 直接调用 recommend 接口,适合首页"热门"
-      final recommended = await ShortDramaService.getRecommend(size: 12);
+      // v2.5.3: 直连 3 源, 拿 3 源「短剧」主类 + AI 漫剧, 聚合去重.
+      // 之前用 ShortDramaService.getRecommend / getCategories / getList 走
+      // serverUrl 后端, 太慢 (后端 → 爬虫 → TVBox, 3 个 hop). 直连省 2 个 hop.
+      final recommended =
+          await ShortDramaDirectService.getRecommend(size: 12);
       if (!mounted) return;
 
       if (recommended.isNotEmpty) {
@@ -65,36 +70,11 @@ class _HotShortDramaSectionState extends State<HotShortDramaSection> {
         return;
       }
 
-      // 策略2（兜底）: recommend 失败/为空时,回退到 categories + list
-      final categories = await ShortDramaService.getCategories();
-      if (!mounted) return;
-
-      if (categories.isEmpty) {
-        setState(() {
-          _hasError = true;
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final result = await ShortDramaService.getList(
-        categoryId: categories.first.typeId,
-        page: 1,
-        size: 12,
-      );
-      if (!mounted) return;
-
-      if (result.list.isNotEmpty) {
-        setState(() {
-          _dramas = result.list;
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _hasError = true;
-          _isLoading = false;
-        });
-      }
+      // 兜底: 3 源都失败 (极少见, 除非 3 个 TVBox 同时挂)
+      setState(() {
+        _hasError = true;
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
       // ignore: avoid_print

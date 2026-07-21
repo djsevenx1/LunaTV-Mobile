@@ -3,6 +3,10 @@ import 'package:provider/provider.dart';
 import 'package:luna_tv/models/short_drama.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/screens/player_screen.dart';
+// v2.5.3: 列表/分类/图片走 ShortDramaDirectService (直连 3 源, 不依赖
+//   serverUrl). 播放解析仍走 ShortDramaService.parseEpisode (serverUrl
+//   后端代理, 含反爬/防盗链/CDN 缓存).
+import 'package:luna_tv/services/short_drama_direct_service.dart';
 import 'package:luna_tv/services/short_drama_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/short_drama_card.dart';
@@ -50,9 +54,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     super.dispose();
   }
 
-  /// 加载分类列表
+  /// v2.5.3: 加载分类列表 — 走 ShortDramaDirectService (写死分类, 0 延迟).
   Future<void> _loadCategories() async {
-    final categories = await ShortDramaService.getCategories();
+    final categories = await ShortDramaDirectService.getCategories();
     if (!mounted) return;
 
     // 过滤掉"全部"、"短剧"这些不需要的项
@@ -105,7 +109,10 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     }
   }
 
-  /// 根据当前筛选拉取数据
+  /// v2.5.3: 根据当前筛选拉取数据 — 走 ShortDramaDirectService.
+  /// - 选中"短剧"父分类 (typeId=54/41/46) → 3 源全拉 + 去重 (getRecommend)
+  /// - 选中具体子类 (typeId=64-69/73/63/52) → 该源按 type_id 拉
+  /// - 选中空 (即"全部"等) → getRecommend 全拉
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
 
@@ -120,11 +127,18 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     });
 
     final selectedTypeId = _typeToCategoryId[_selectedTypeTab];
-    final result = await ShortDramaService.getList(
-      categoryId: selectedTypeId ?? -1,
-      page: _page,
-      size: 20,
-    );
+    ShortDramaListResponse result;
+    if (selectedTypeId == null || selectedTypeId <= 0) {
+      // 没具体分类: 3 源聚合推荐
+      final recommend = await ShortDramaDirectService.getRecommend(size: 20);
+      result = ShortDramaListResponse(list: recommend, hasMore: false);
+    } else {
+      result = await ShortDramaDirectService.getListByTypeId(
+        typeId: selectedTypeId,
+        page: _page,
+        size: 20,
+      );
+    }
 
     if (!mounted) return;
 
@@ -147,11 +161,18 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     _page++;
 
     final selectedTypeId = _typeToCategoryId[_selectedTypeTab];
-    final result = await ShortDramaService.getList(
-      categoryId: selectedTypeId ?? -1,
-      page: _page,
-      size: 20,
-    );
+    ShortDramaListResponse result;
+    if (selectedTypeId == null || selectedTypeId <= 0) {
+      // 聚合模式不分页, 一次拿全
+      final recommend = await ShortDramaDirectService.getRecommend(size: 20);
+      result = ShortDramaListResponse(list: recommend, hasMore: false);
+    } else {
+      result = await ShortDramaDirectService.getListByTypeId(
+        typeId: selectedTypeId,
+        page: _page,
+        size: 20,
+      );
+    }
 
     if (!mounted) return;
     setState(() {
