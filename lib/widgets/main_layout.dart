@@ -284,118 +284,78 @@ class _MainLayoutState extends State<MainLayout> {
                 ? const Color(0xFF000000)
                 : Colors.transparent,
             resizeToAvoidBottomInset: !widget.isSearchMode,
-            // v2.5.11: Android / iOS 用 SafeArea(top: true, bottom: false)
-            //   替代手算顶部 padding. 之前 v2.5.10 用 `max(40, viewPadding.top) + 8`
-            //   在某些 Android 设备 (Android 13+/15+, 特定 ROM) 仍被状态栏
-            //   挡, 因为 `MediaQuery.padding.top` 和 `viewPadding.top` 都
-            //   返回 0 (Android 13+ 透明状态栏 + Flutter view flags 不匹配).
-            //   SafeArea 会从系统 WindowInsets 拿真实状态栏高度, 不依赖
-            //   MediaQuery. 跨设备 / 跨 ROM / 异形屏 / 灵动岛 都能正确避开.
-            //   bottom: false — 底部 nav 已经有 MediaQuery.padding.bottom 处理.
-            //
-            //   桌面平台 (macOS / Windows / Linux) 没手机状态栏, 仍走
-            //   _buildHeader 内部按平台分支手算 (Windows 8dp 自定义标题栏,
-            //   macOS mediaTop + 32 透明标题栏). 所以 SafeArea 只对移动端
-            //   生效: 用 `!Platform.isAndroid && !Platform.isIOS` 时不包
-            //   SafeArea, 让桌面走原路径; 反之包 SafeArea + topPaddingOverride
-            //   = 0.0 让 _buildHeader 顶部 padding 由 SafeArea 负责.
-            body: _buildScaffoldBody(context, themeService),
+            body: Container(
+              decoration: BoxDecoration(
+                color: themeService.isDarkMode
+                    ? const Color(0xFF000000)
+                    : null,
+                gradient: themeService.isDarkMode
+                    ? null
+                    : const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0xFFe6f3fb),
+                          Color(0xFFeaf3f7),
+                          Color(0xFFf7f7f3),
+                          Color(0xFFe9ecef),
+                          Color(0xFFdbe3ea),
+                          Color(0xFFd3dde6),
+                        ],
+                        stops: [0.0, 0.18, 0.38, 0.60, 0.80, 1.0],
+                      ),
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    children: [
+                      // Windows 自定义标题栏
+                      _buildHeader(context, themeService),
+                      // 主要内容区域
+                      Expanded(
+                        child: widget.content,
+                      ),
+                      // 底部导航栏（可选）
+                      if (widget.showBottomNav)
+                        _buildBottomNavBar(themeService),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildScaffoldBody(BuildContext context, ThemeService themeService) {
-    // 移动端 (Android / iOS): 用 SafeArea(top: true) 拿真实状态栏
-    // 高度. SafeArea 从 WindowInsets 拿值, 不依赖 MediaQuery.padding.top
-    // / viewPadding.top (这俩在某些 Android 13+ 透明状态栏设备返回 0).
-    // header 用 topPaddingOverride: 0.0, 不再加自己的 top padding.
-    //
-    // 桌面端 (macOS / Windows / Linux): 没手机状态栏, 不包 SafeArea,
-    // 让 _buildHeader 走原平台分支手算 (Windows 8dp / macOS 透明标题栏).
-    final isMobile = Platform.isAndroid || Platform.isIOS;
-
-    final inner = Container(
-      decoration: BoxDecoration(
-        color: themeService.isDarkMode
-            ? const Color(0xFF000000)
-            : null,
-        gradient: themeService.isDarkMode
-            ? null
-            : const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0xFFe6f3fb),
-                  Color(0xFFeaf3f7),
-                  Color(0xFFf7f7f3),
-                  Color(0xFFe9ecef),
-                  Color(0xFFdbe3ea),
-                  Color(0xFFd3dde6),
-                ],
-                stops: [0.0, 0.18, 0.38, 0.60, 0.80, 1.0],
-              ),
-      ),
-      child: Stack(
-        children: [
-          Column(
-            children: [
-              _buildHeader(
-                context,
-                themeService,
-                // 移动端由 SafeArea 负责顶部, header 自己不再加 padding
-                topPaddingOverride: isMobile ? 0.0 : null,
-              ),
-              Expanded(child: widget.content),
-              if (widget.showBottomNav) _buildBottomNavBar(themeService),
-            ],
-          ),
-        ],
-      ),
-    );
-
-    if (isMobile) {
-      return SafeArea(
-        top: true,
-        bottom: false,
-        child: inner,
-      );
-    }
-    return inner;
-  }
-
-  Widget _buildHeader(
-      BuildContext context, ThemeService themeService,
-      {double? topPaddingOverride}) {
+  Widget _buildHeader(BuildContext context, ThemeService themeService) {
     final isTablet = DeviceUtils.isTablet(context);
 
     // macOS 下需要额外的顶部 padding 来避免与透明标题栏重叠
     // Windows 下不需要额外 padding，因为自定义标题栏已经占据了空间
     //
-    // v2.5.11: 整 Scaffold body 用 SafeArea(top: true, bottom: false)
-    //   包住, topPaddingOverride = 0.0 让 _buildHeader 顶部 padding 由
-    //   SafeArea 处理. Windows 上 SafeArea 也包, 但 Windows 在桌面上
-    //   没有系统状态栏, SafeArea 自动给 0, 仍是 0. macOS 走 macOS
-    //   分支 (mediaTop + 32), 用 viewPadding.top (含 macOS 透明标题栏
-    //   32dp). 旧 v2.5.9 / v2.5.10 手动算 `max(padding.top, 24/40) + 8`
-    //   在某些 Android 15 / 异形屏 上 padding.top / viewPadding.top
-    //   都返回 0, 失效.
+    // v2.5.10: 在 v2.5.9 基础上加 `viewPadding.top` + 8dp 缓冲. 旧
+    //   `padding.top` 在某些 Android 异形屏 (挖孔/水滴/灵动岛) 不算
+    //   切口高度, header 仍被挡住. viewPadding 含切口.
+    //
+    //   同时, 用户在 v2.5.9 仍反馈「还是挡着」, 说明 v2.5.9 的 24dp
+    //   兜底不够. 异形屏/折叠屏/平板的状态栏实际可能 28~44dp. 现在
+    //   兜底提到 **40dp + 8dp 视觉缓冲 (48dp)**, 跨设备能稳定避开.
     final mediaQuery = MediaQuery.of(context);
     final mediaTop = mediaQuery.padding.top;
     final viewTop = mediaQuery.viewPadding.top;
+    // 用 viewPadding.top 优先 (含挖孔/灵动岛); 兜底最小 40
+    final baseTop = viewTop > mediaTop ? viewTop : mediaTop;
+    final safeTop = baseTop < 40.0 ? 40.0 : baseTop;
     final double topPadding;
-    if (topPaddingOverride != null) {
-      // 调用方已用 SafeArea 处理了顶部, header 不再加 padding
-      topPadding = topPaddingOverride;
-    } else if (DeviceUtils.isMacOS()) {
+    if (DeviceUtils.isMacOS()) {
       topPadding = mediaTop + 32;
     } else if (Platform.isWindows) {
       topPadding = 8.0;
     } else {
-      // Android / iOS 兜底路径 (实际不会走, 因为上面 SafeArea 已处理)
-      final baseTop = viewTop > mediaTop ? viewTop : mediaTop;
-      final safeTop = baseTop < 40.0 ? 40.0 : baseTop;
+      // Android / iOS: safeTop 强制 ≥ 40 (避开状态栏 + 挖孔/灵动岛)
+      // + 8dp 视觉缓冲 = 48dp 兜底
       topPadding = safeTop + 8;
     }
 
