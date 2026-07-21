@@ -6,7 +6,81 @@
 
 ---
 
-## v2.5.15 (2026-07-21) — 短剧切 tab 串内容 (v2.5.14 没修好) + 打开 app 就开始加载短剧
+## v2.5.17 (2026-07-21) — 回滚到 v2.5.15 (用户「滚回」)
+
+### 现象
+
+v2.5.16 装上后还有问题, 用户「滚回」回滚到 v2.5.15 状态。
+
+### 排查
+
+不用排查, 直接回滚。
+
+### 回滚方式
+
+`git revert 0a0173e` (v2.5.16 commit), 生成 revert commit `9cb7326`,
+5 个文件回滚 (-262 / +68), 代码状态跟 v2.5.15 一致:
+- `PageView.builder` + `KeepAlive` (短剧 tab 不预加载, 切到才 initState)
+- 无 per-tab 缓存 (切 tab 重新拉)
+
+revert commit 保留 v2.5.16 在 git history 里, 以后还可以 cherry-pick
+回来 (e.g. 找到具体 bug 后用 `git revert 9cb7326` 反向 revert, 或
+`git cherry-pick 0a0173e` 单独抽 v2.5.16 改动)。
+
+### v2.5.15 / v2.5.16 / v2.5.17 三者区别
+
+| 版本 | PageView | 短剧预加载 | tab 缓存 | 备注 |
+|---|---|---|---|---|
+| v2.5.15 | builder + KeepAlive | 不预加载 | 无 | 装上后仍复现 v2.5.14 的 race condition (没修) |
+| v2.5.16 | children (eager) | 启动就拉 | 有 (per-tab 缓存) | 用户「滚回」前最后版本 |
+| **v2.5.17** (= v2.5.15) | builder + KeepAlive | 不预加载 | 无 | 跟 v2.5.15 一样 |
+
+### 教训
+
+两次反向需求 (v2.5.15 改 PageView.builder, v2.5.16 改回) 各装一版, 都
+没解决用户的实际问题 (「切 tab 串内容」/ 「启动不预加载」). 说明:
+- 用户自己可能也没完全想清楚需求
+- 修这种"开关型"bug (预加载 vs lazy / 缓存 vs 不缓存) 没有银弹,
+  要看具体设备 + 网络 + 用户使用模式
+- revert 比"再次覆盖" 更安全 — 保留历史, 以后 cherry-pick 比从零
+  再写一遍省力
+
+### 修改文件
+
+- (revert 自动) `lib/screens/home_screen.dart`, `lib/screens/short_drama_screen.dart`, `pubspec.yaml`, `.github/changelogs.json`, `FIXLOG.md`
+- (手动) `pubspec.yaml`: 2.5.15+1 → 2.5.17+1
+- (手动) `.github/changelogs.json`: 头部插 v2.5.17 entry
+- revert commit: `9cb7326` 「Revert v2.5.16」
+
+---
+
+## v2.5.15 (2026-07-21) — 短剧切 tab 串内容 (v2.5.14 没修好) + 打开 app 就开始加载短剧 (已回滚, 见 v2.5.17)
+
+> 完整内容已回滚, 不在最终代码里. git history 保留 commit `7f69d71`,
+> 改回 v2.5.15 状态用 `git revert 7f69d71` (反向) 或参考 v2.5.17 章节.
+
+### 现象
+
+1. v2.5.14 装上后**「全部」tab loading 中切到「其他」tab, 内容变成「全部」内容**
+2. **App 一打开就开始加载短剧内容**,即使用户根本没切到短剧 tab
+
+### 修复 (已回滚)
+
+**Bug A — `_loadCategories` 完成时强制覆盖 `_selectedTypeTab = '全部'`**:
+- `_loadCategories` setState 只在 `_selectedTypeTab.isEmpty` 时设回「全部」
+- 完成后只在 `_dramaList.isEmpty && !_isLoading` 时调 `_fetchDramaList`
+
+**Bug B — PageView 一次性 build 所有 6 个 child**:
+- `PageView` → `PageView.builder` + 新加 `_KeepAliveTab` widget (`AutomaticKeepAliveClientMixin`)
+
+**回滚原因**: v2.5.15 把 v2.5.14 之前的「启动预加载」行为改没了, 用户
+反馈「启动app时就要开始加载短剧类容图片数据等不是我点击才开始加载」—
+方向反了. v2.5.16 改回 eager build + 加 tab 缓存, 仍然不对. v2.5.17
+直接 revert v2.5.16 (回到 v2.5.15 = PageView.builder 状态).
+
+---
+
+## v2.5.16 (2026-07-21) — 启动时不预加载短剧 (回退 v2.5.15) + 加 tab 缓存
 
 ### 现象
 
