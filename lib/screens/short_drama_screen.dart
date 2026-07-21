@@ -44,6 +44,12 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   // v2.5.6: 「全部」tab 用的 page 状态 (跟子分类 tab 的 _page 共享).
   // 已展示的剧名集合, 翻页去重用.
   final Set<String> _shownNames = {};
+  // v2.5.14: 切 tab 竞态保护 — generation 计数. 每次 _fetchDramaList /
+  //   _loadMoreDramaList 启动前 +1, await 完成时若 generation 已不匹配
+  //   (说明用户又切了 tab / 触发新的拉取), 就丢弃这次结果, 不 setState
+  //   写入 _dramaList. 否则旧 tab 的请求会后到, 把新 tab 的列表覆盖
+  //   掉 (用户反馈: 「在全部然后点到ai漫剧, 概率会显示全部分类内容」).
+  int _fetchGeneration = 0;
 
   @override
   void initState() {
@@ -116,8 +122,16 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   /// - 选中「全部」tab (selectedTypeTab == _kAllTabKey) → 3 源全聚合
   ///   + 去重 (getRecommendResponse, size=60 一次性, 但可翻页拉更多)
   /// - 选中具体子类 (typeId=64-69/62/63/52) → 该源按 type_id 拉 + 分页
+  ///
+  /// v2.5.14: 切 tab race condition 修复. 老逻辑: setState 改
+  ///   _selectedTypeTab 后启动 await, 但若旧 tab 的请求后到, 会把
+  ///   新 tab 的列表覆盖掉. 修法: 启动时 _fetchGeneration++, 记下
+  ///   自己的 gen, await 完成后比对 — 不匹配就丢弃结果, 不 setState.
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
+
+    // v2.5.14: 占一个 gen, 老请求会落在旧 gen 上被丢弃
+    final myGen = ++_fetchGeneration;
 
     setState(() {
       _isLoading = true;
@@ -148,6 +162,8 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     }
 
     if (!mounted) return;
+    // v2.5.14: 切 tab / 新的 _loadMore 启动后, 本次结果已过期, 丢弃
+    if (myGen != _fetchGeneration) return;
 
     setState(() {
       _dramaList.addAll(result.list);
@@ -164,6 +180,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   Future<void> _loadMoreDramaList() async {
     if (!mounted) return;
     if (_isLoading || _isLoadingMore || !_hasMore) return;
+
+    // v2.5.14: 翻页也占 gen, 防止切 tab 时旧 page increment 撞上
+    final myGen = ++_fetchGeneration;
 
     setState(() {
       _isLoadingMore = true;
@@ -189,6 +208,12 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     }
 
     if (!mounted) return;
+    // v2.5.14: 切 tab 后, 本次 page increment 已过期, 丢弃
+    if (myGen != _fetchGeneration) {
+      // 还原 _page, 不影响新 tab 的起始页 (新 tab 会自己 _page=1)
+      _page--;
+      return;
+    }
     setState(() {
       _dramaList.addAll(result.list);
       for (final d in result.list) {
