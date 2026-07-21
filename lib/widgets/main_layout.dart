@@ -334,22 +334,11 @@ class _MainLayoutState extends State<MainLayout> {
 
     // macOS 下需要额外的顶部 padding 来避免与透明标题栏重叠
     // Windows 下不需要额外 padding，因为自定义标题栏已经占据了空间
-    // v2.5.9: Android / iOS 用 `max(padding.top, 24) + 8` 兜底.
-    //   老逻辑 `padding.top + 8` 在某些 Android ROM (MIUI/EMUI/ColorOS)
-    //   状态栏真实高度偏小 (~18dp) 时, header 会被状态栏挡住 (跟
-    //   用户反馈的「状态栏有点挡住了」一致). 强制最小 24dp 状态栏
-    //   空间 + 8dp 缓冲, 共 32dp, 跨设备一致.
-    final mediaTop = MediaQuery.of(context).padding.top;
-    final safeTop = mediaTop < 24.0 ? 24.0 : mediaTop;
-    final double topPadding;
-    if (DeviceUtils.isMacOS()) {
-      topPadding = mediaTop + 32;
-    } else if (Platform.isWindows) {
-      topPadding = 8.0;
-    } else {
-      // Android / iOS
-      topPadding = safeTop + 8;
-    }
+    final topPadding = DeviceUtils.isMacOS()
+        ? MediaQuery.of(context).padding.top + 32
+        : Platform.isWindows
+            ? 8.0
+            : MediaQuery.of(context).padding.top + 8;
 
     return Container(
       padding: EdgeInsets.only(
