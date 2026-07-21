@@ -1826,6 +1826,25 @@ class _UserMenuState extends State<UserMenu> {
           _buildSectionHeader('其他'),
           _buildCard(
             children: [
+              // v2.5.1: 源浏览器提到 "其他" section 的第 1 位 (无条件显示),
+              //   之前在 "本地搜索" / "清除豆瓣缓存" 之后, 用户找入口要滑一段.
+              //   源浏览器是高频导航, 放最顶. 跟 web LunaTV 顶部 nav 1:1.
+              //   v2.3.31: 源浏览器 — 跟 web LunaTV /source-browser 1:1 对齐
+              //   配色 emerald→teal 渐变跟 web 一致. 图标 LucideIcons.layers
+              //   (web 也是 layers).
+              _buildActionItem(
+                title: '源浏览器',
+                icon: LucideIcons.layers,
+                iconColor: const Color(0xFF10b981),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SourceBrowserScreen(),
+                    ),
+                  );
+                },
+              ),
+              _buildDivider(),
               // 本地搜索选项（本地模式下不显示）
               if (!_isLocalMode)
                 _buildToggleOption(
@@ -1848,23 +1867,6 @@ class _UserMenuState extends State<UserMenu> {
                 icon: LucideIcons.trash2,
                 iconColor: const Color(0xFFf59e0b),
                 onTap: _handleClearDoubanCache,
-              ),
-              _buildDivider(),
-              // v2.3.31: 源浏览器 — 跟 web LunaTV /source-browser 1:1 对齐
-              //   入口放在 "其他" section 的 清除豆瓣缓存 之后, 跟 "日记" 同级
-              //   (都是导航型 action, 不是 toggle). 配色 emerald→teal 渐变跟
-              //   web 一致. 图标 LucideIcons.layers (web 也是 layers).
-              _buildActionItem(
-                title: '源浏览器',
-                icon: LucideIcons.layers,
-                iconColor: const Color(0xFF10b981),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const SourceBrowserScreen(),
-                    ),
-                  );
-                },
               ),
               _buildDivider(),
               // v2.0.99.2: 日记 — 跳到 DiaryScreen, 看全流程运行日志

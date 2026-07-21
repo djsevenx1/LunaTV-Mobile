@@ -499,13 +499,17 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     return Scaffold(
-      // v2.4.10: 背景跟 app 主题背景一致 (lightBackground/darkBackground),
-      //   去掉之前 web 渐变 (grey.shade50/white/grey.shade50 ↔ grey.shade900/800/900).
-      //   用户反馈「源浏览器 背景改成和 app 背景一个颜色」, 用 theme.scaffoldBackgroundColor
-      //   自动跟随浅色/深色主题, 跟其他页面 1:1.
-      backgroundColor: theme.scaffoldBackgroundColor,
+      // v2.5.1: 背景跟 LOMI 源浏览器一样 (浅色: 冷灰白 #F5F7F8;
+      //   深色: 保持主题纯黑). 之前 v2.5.0 用的 theme.scaffoldBackgroundColor
+      //   在浅色模式是纯白 #FFFFFF, 太白太刺眼, 跟 LOMI 那种冷淡灰白调不一致.
+      //   v2.5.1 只改源浏览器这一个页面, 不动 theme_service (避免影响其他页面).
+      backgroundColor: isDark
+          ? theme.scaffoldBackgroundColor
+          : const Color(0xFFF5F7F8),
       body: Container(
-        color: theme.scaffoldBackgroundColor,
+        color: isDark
+            ? theme.scaffoldBackgroundColor
+            : const Color(0xFFF5F7F8),
         child: CustomScrollView(
           controller: _scrollController,
           slivers: [
@@ -653,29 +657,11 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
   // -------- Source card (1:1 web source section) --------
 
   Widget _buildSourceCard(ThemeData theme, bool isDark) {
-    // v2.4.8: 卡片上下间距 8 → 16 (跟 web space-y-6 1:1, 之前卡片黏在一起)
+    // v2.5.1: 跟 LOMI 源浏览器一致, 外层容器去掉白渐变 + 20 圆角 + 边框
+    //   + boxShadow, 跟 page 背景融为一体 (没有「白卡漂浮在灰底」 的割裂感).
+    //   v2.4.8: 卡片上下间距 8 → 16 (跟 web space-y-6 1:1, 之前卡片黏在一起)
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [Colors.grey.shade800, Colors.teal.withOpacity(0.05), Colors.grey.shade800]
-              : [Colors.white, Color(0xFF10B981).withOpacity(0.05), Colors.white],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -802,53 +788,80 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
         ),
       );
     }
-    // v2.3.32.1: 1:1 web source button: border-2 + 渐变选中 + 2xl 圆角 + shadow + blur 光晕
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: _resources.map((r) {
+    // v2.5.1: 改成 3 列 GridView (跟 LOMI 源浏览器一致),
+    //   之前 v2.4.9 用 Wrap 自动换行, 1 行能塞 5-6 个 chip 太挤,
+    //   用户反馈「我要 3 列」. 选中态保留 v2.3.32.1 渐变 + 阴影.
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        // 卡片宽度 / 高度: 名字长度 2-4 字居多, 1:1 偏方, 1.4 偏扁
+        // 跟 LOMI 截图里卡片「占屏幕 ~46% 宽 × ~50px 高」 比例接近
+        childAspectRatio: 1.4,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+      ),
+      itemCount: _resources.length,
+      itemBuilder: (_, idx) {
+        final r = _resources[idx];
         final selected = _selectedSourceKey == r.key;
         return GestureDetector(
           onTap: () => _onSourceTap(r.key),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              // 选中态: emerald → green 渐变
+              // 选中态: emerald → green 渐变 (跟 LOMI 选中态 1:1)
               gradient: selected
                   ? const LinearGradient(
-                      colors: [const Color(0xFF10B981), Colors.green],
+                      colors: [Color(0xFF10B981), Colors.green],
                     )
                   : null,
-              color: selected ? null : (isDark ? Colors.grey.shade800 : Colors.white),
-              borderRadius: BorderRadius.circular(12),
+              color: selected
+                  ? null
+                  : (isDark ? Colors.grey.shade800 : Colors.white),
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: selected
                     ? Colors.transparent
-                    : (isDark ? Colors.grey.shade600 : Colors.grey.shade400),
-                width: 2,
+                    : (isDark ? Colors.grey.shade700 : Colors.grey.shade300),
+                width: 1.5,
               ),
               boxShadow: selected
                   ? [
                       BoxShadow(
-                        color: Color(0xFF10B981).withOpacity(0.4),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+                        color: const Color(0xFF10B981).withOpacity(0.35),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
                       ),
                     ]
-                  : null,
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(isDark ? 0.15 : 0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
             ),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
             child: Text(
               r.name, // v2.3.32.1: 不 strip emoji, 跟 web 1:1
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 12,
                 fontWeight: FontWeight.w500,
-                color: selected ? Colors.white : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+                color: selected
+                    ? Colors.white
+                    : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
               ),
             ),
           ),
         );
-      }).toList(),
+      },
     );
   }
 
