@@ -506,32 +506,55 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
       backgroundColor: isDark
           ? theme.scaffoldBackgroundColor
           : const Color(0xFFF5F7F8),
-      body: Container(
-        color: isDark
-            ? theme.scaffoldBackgroundColor
-            : const Color(0xFFF5F7F8),
-        child: CustomScrollView(
-          controller: _scrollController,
-          slivers: [
-            // Hero header (v2.5.12 自身已含 status bar top padding)
-            SliverToBoxAdapter(child: _buildHeroHeader(context, theme, isDark)),
-            // Source card
-            SliverToBoxAdapter(child: _buildSourceCard(theme, isDark)),
-            // Query & Sort card (源选了才显示)
-            if (_selectedSourceKey != null)
-              SliverToBoxAdapter(child: _buildQuerySortCard(theme, isDark)),
-            // Categories & Items card (源选了才显示)
-            if (_selectedSourceKey != null)
-              SliverToBoxAdapter(
-                child: _buildCategoriesItemsCard(theme, isDark),
+      // v2.5.13: SafeArea(top: true) 兜底状态栏 / 灵动岛 / 刘海
+      //   之前 v2.5.12 在 hero header 内部用 `MediaQuery.padding.top`
+      //   算 safeTop 兜底 24dp, 但用户装上 v2.5.12 后反馈「源浏览器继续修啊」
+      //   仍被切到 — 根因:
+      //     1. Android 某些设备 (尤其挖孔/灵动岛) `padding.top` 报告 0,
+      //        只 `viewPadding.top` 报告真值, v2.5.12 用了 `max(viewTop, mediaTop)`,
+      //        这块 OK; 但 `SafeArea` 是 Flutter 官方实现, 内部已经处理
+      //        挖孔/手势条/系统 bar 透明/沉浸模式 所有边界 case, 比手算稳.
+      //     2. v2.5.12 hero header 顶部是 `safeTop + 16`, 用户看到的是
+      //        内部 Container 的渐变 + 20dp 圆角 + 20dp padding, 视觉上
+      //        标题离状态栏很近 (尤其窄屏).
+      //   改法: Scaffold body 用 SafeArea(top: true, bottom: false) 包,
+      //     status bar 整段让出; hero header 顶部 padding 改成纯视觉
+      //     8dp 间距, 内部 Container 20dp padding 不变. 最终 icon 离屏顶
+      //     = statusBarHeight (>=24) + 8 + 20 = >= 52dp, 任何 Android
+      //     设备都不会切.
+      //   bottom: false — 页面自带 bottom nav, 不要 SafeArea 给底部留
+      //     navigation bar 区域, 否则 120dp 留底 + 系统 nav bar 区域会
+      //     把内容推太高.
+      body: SafeArea(
+        top: true,
+        bottom: false,
+        child: Container(
+          color: isDark
+              ? theme.scaffoldBackgroundColor
+              : const Color(0xFFF5F7F8),
+          child: CustomScrollView(
+            controller: _scrollController,
+            slivers: [
+              // Hero header (v2.5.13 顶部让 SafeArea 兜, 自身只加 8dp 视觉间距)
+              SliverToBoxAdapter(child: _buildHeroHeader(theme, isDark)),
+              // Source card
+              SliverToBoxAdapter(child: _buildSourceCard(theme, isDark)),
+              // Query & Sort card (源选了才显示)
+              if (_selectedSourceKey != null)
+                SliverToBoxAdapter(child: _buildQuerySortCard(theme, isDark)),
+              // Categories & Items card (源选了才显示)
+              if (_selectedSourceKey != null)
+                SliverToBoxAdapter(
+                  child: _buildCategoriesItemsCard(theme, isDark),
+                ),
+              // 留底 padding
+              //   v2.4.8: 40 → 120 (跟 web pb-40 1:1). 之前 40 太小,
+              //   内容贴近底部 nav bar, 最后两行 card 被 nav bar 挡住一半.
+              const SliverToBoxAdapter(
+                child: SizedBox(height: 120),
               ),
-            // 留底 padding
-            //   v2.4.8: 40 → 120 (跟 web pb-40 1:1). 之前 40 太小,
-            //   内容贴近底部 nav bar, 最后两行 card 被 nav bar 挡住一半.
-            const SliverToBoxAdapter(
-              child: SizedBox(height: 120),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -539,28 +562,21 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
 
   // -------- Hero header (1:1 web 顶部渐变 icon + 标题) --------
 
-  Widget _buildHeroHeader(BuildContext context, ThemeData theme, bool isDark) {
+  Widget _buildHeroHeader(ThemeData theme, bool isDark) {
     // v2.4.9: 移除 BackdropFilter. 之前用 BackdropFilter + Stack(Positioned.fill)
     //   包裹 hero header, 在 CustomScrollView 滚动时会引起渲染异常 —
     //   滑动到顶时整个 hero header 区域 + 下方 items card 都被 BackdropFilter
     //   捕获 backdrop, 视觉上「模糊一片」. 改成纯 Container + 渐变背景,
     //   不再用 BackdropFilter, 跟 web 端 hero header 1:1 (web 也没用 backdrop-blur).
     //
-    // v2.5.12: 把 status bar 顶部 inset 加到 hero header 的 top padding.
-    //   之前 hero header 的 `fromLTRB(16, 16, 16, 8)` 只有 16dp 顶部
-    //   padding, 但源浏览器页面用独立 Scaffold (不被 main_layout 的
-    //   SafeArea 包住), 状态栏下方紧贴 hero header, 视觉上被「切到」.
-    //   加上 viewPadding.top (含挖孔/灵动岛切口) 兜底 24dp + 16dp 缓冲.
-    //   用户反馈「整个界面往下挪一点或加一点空白」 — 用 16dp 缓冲让
-    //   hero header 明显避开状态栏, 视觉上「挪下去」, 下面 source
-    //   grid 等也跟着下移, 满足用户「整个界面」要求.
-    final mediaQuery = MediaQuery.of(context);
-    final mediaTop = mediaQuery.padding.top;
-    final viewTop = mediaQuery.viewPadding.top;
-    final baseTop = viewTop > mediaTop ? viewTop : mediaTop;
-    final safeTop = baseTop < 24.0 ? 24.0 : baseTop;
+    // v2.5.12 (废): 之前在 hero header 内部用 `MediaQuery.padding.top`
+    //   算 safeTop 兜底 24dp, 但用户装上后仍反馈「源浏览器继续修啊」, 标题
+    //   离状态栏太近. v2.5.13 改用 Scaffold body SafeArea 兜 status bar,
+    //   hero header 自身只加 8dp 视觉间距 (status bar 让 SafeArea 走了).
+    //   内部 Container 的 20dp padding 不变 — icon 离屏顶
+    //   = statusBarHeight (>=24) + 8 + 20 = >= 52dp, 视觉宽松, 不会再切.
     return Container(
-      padding: EdgeInsets.fromLTRB(16, safeTop + 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
