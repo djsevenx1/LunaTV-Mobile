@@ -651,7 +651,6 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               ],
             ),
           ),
-      ),
     );
   }
 
