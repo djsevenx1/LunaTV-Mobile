@@ -32,6 +32,7 @@ import 'package:luna_tv/services/luna_cache_manager.dart';
 import 'package:luna_tv/utils/image_url.dart';
 import 'package:luna_tv/widgets/douban_detail_header.dart';
 import 'package:luna_tv/widgets/dlna_device_dialog.dart';
+import 'package:luna_tv/widgets/favorites_grid.dart';
 import 'package:luna_tv/widgets/exo_player_view.dart';
 // v2.3.14: 卸弹幕系统 (v2.3.12 移植自 Selene-TV, 用户反馈 UX 太差: 要求
 //   手动输 B站 cid, 违背 "TV 客户端" 一键体验原则, 整个删了).
@@ -1063,28 +1064,86 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
+  // v2.5.7: 用 PageCacheService 维护收藏. 之前用 SharedPreferences
+  // 单独写一个 `fav_<source>_<id>` bool, 但 PageCacheService 维护的
+  // 收藏列表是后端权威源 (走 ApiService.favorite / unfavorite +
+  // 本地缓存), 这个孤立的 bool 不在收藏列表里, 所以收藏页永远看不到.
+  // 修: _loadFavorite 改用 isFavoritedSync 同步查, _toggleFavorite 改
+  // 用 PageCacheService.toggleFavorite 走真收藏 API.
+  //
+  // 短剧页 (ShortDramaScreen._onDramaTap) 跳播放器时 source 传 ''.
+  // 用 '__shortdrama__' 作为 source 名, 避免空字符串 key 冲突.
+  String _favoriteSourceKey() {
+    final s = widget.videoInfo.source;
+    return s.isEmpty ? '__shortdrama__' : s;
+  }
+
+  Map<String, dynamic> _favoriteData() {
+    final v = widget.videoInfo;
+    return {
+      'title': v.title,
+      'source_name': v.sourceName,
+      'year': v.year,
+      'cover': v.cover,
+      'total_episodes': v.totalEpisodes,
+      'save_time': DateTime.now().millisecondsSinceEpoch,
+    };
+  }
+
   /// 切换收藏
-  void _toggleFavorite() {
+  void _toggleFavorite() async {
+    final wasFavorite = _isFavorite;
     setState(() => _isFavorite = !_isFavorite);
-    SharedPreferences.getInstance().then((prefs) {
-      final key = 'fav_${widget.videoInfo.source}_${widget.videoInfo.id}';
-      if (_isFavorite) {
-        prefs.setBool(key, true);
+
+    final source = _favoriteSourceKey();
+    final id = widget.videoInfo.id;
+    try {
+      final result = await PageCacheService().toggleFavorite(
+        source,
+        id,
+        _favoriteData(),
+        context,
+      );
+      if (!mounted) return;
+      if (!result.success) {
+        // 失败回滚 UI
+        setState(() => _isFavorite = wasFavorite);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.message ?? '收藏操作失败')),
+        );
       } else {
-        prefs.remove(key);
+        // 成功后通知收藏页 / 历史页刷新
+        await FavoritesGrid.refreshFavorites();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_isFavorite ? '已加入收藏' : '已取消收藏'),
+              duration: const Duration(seconds: 1),
+            ),
+          );
+        }
       }
-    });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isFavorite = wasFavorite);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('收藏异常: $e')),
+      );
+    }
   }
 
   /// 加载收藏状态
   Future<void> _loadFavorite() async {
+    if (!mounted) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final key = 'fav_${widget.videoInfo.source}_${widget.videoInfo.id}';
+      final isFav = PageCacheService()
+          .isFavoritedSync(_favoriteSourceKey(), widget.videoInfo.id);
       if (mounted) {
-        setState(() => _isFavorite = prefs.getBool(key) ?? false);
+        setState(() => _isFavorite = isFav);
       }
-    } catch (_) {}
+    } catch (_) {
+      // 静默失败, 保持默认 false
+    }
   }
 
   /// 显示控制栏并启动自动隐藏定时器

@@ -629,7 +629,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 处理顶部标签切换
-  void _onTopTabChanged(String tab) async {
+  void _onTopTabChanged(String tab) {
     if (!mounted) return;
 
     // 防止重复点击同一个标签
@@ -658,50 +658,22 @@ class _HomeScreenState extends State<HomeScreen> {
         pageIndex = 0;
         break;
       case '播放历史':
-        // 独立页面
-        if (mounted) {
-          await Navigator.of(context, rootNavigator: true).pushNamed('/history');
-          // 从独立页面返回时，重置顶部 Tab 到首页
-          if (!mounted) return;
-          if (_selectedTopTab == '播放历史') {
-            setState(() {
-              _selectedTopTab = '首页';
-            });
-            if (_pageController.hasClients) {
-              _pageController.animateToPage(
-                0,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
-          }
-        }
+        // v2.5.7: 跟「图一」样式一致, 历史 tab 走 HomeScreen 内部
+        // PageView 切换 (pageIndex=1), 不再 push 独立 HistoryScreen
+        // 路由. 老逻辑: await Navigator.pushNamed('/history'), 用户
+        // 反馈「应该和图一一样不用改调用新的页面」.
+        pageIndex = 1;
         break;
       case '收藏夹':
-        // 独立页面
-        if (mounted) {
-          await Navigator.of(context, rootNavigator: true).pushNamed('/favorites');
-          // 从独立页面返回时，重置顶部 Tab 到首页
-          if (!mounted) return;
-          if (_selectedTopTab == '收藏夹') {
-            setState(() {
-              _selectedTopTab = '首页';
-            });
-            if (_pageController.hasClients) {
-              _pageController.animateToPage(
-                0,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
-          }
-        }
+        // v2.5.7: 同上, 收藏 tab 走 PageView 切换 (pageIndex=2),
+        // 不再 push 独立 FavoritesScreen 路由.
+        pageIndex = 2;
         break;
       default:
         pageIndex = 0;
     }
 
-    // 使用动画切换到对应页面（仅首页）
+    // 使用动画切换到对应页面 (首页/历史/收藏 全部在 HomeScreen 内部 PageView)
     if (pageIndex != null && _pageController.hasClients) {
       _pageController.animateToPage(
         pageIndex,
