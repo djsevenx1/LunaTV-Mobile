@@ -334,28 +334,20 @@ class _MainLayoutState extends State<MainLayout> {
 
     // macOS 下需要额外的顶部 padding 来避免与透明标题栏重叠
     // Windows 下不需要额外 padding，因为自定义标题栏已经占据了空间
-    //
-    // v2.5.10: 在 v2.5.9 基础上加 `viewPadding.top` + 8dp 缓冲. 旧
-    //   `padding.top` 在某些 Android 异形屏 (挖孔/水滴/灵动岛) 不算
-    //   切口高度, header 仍被挡住. viewPadding 含切口.
-    //
-    //   同时, 用户在 v2.5.9 仍反馈「还是挡着」, 说明 v2.5.9 的 24dp
-    //   兜底不够. 异形屏/折叠屏/平板的状态栏实际可能 28~44dp. 现在
-    //   兜底提到 **40dp + 8dp 视觉缓冲 (48dp)**, 跨设备能稳定避开.
-    final mediaQuery = MediaQuery.of(context);
-    final mediaTop = mediaQuery.padding.top;
-    final viewTop = mediaQuery.viewPadding.top;
-    // 用 viewPadding.top 优先 (含挖孔/灵动岛); 兜底最小 40
-    final baseTop = viewTop > mediaTop ? viewTop : mediaTop;
-    final safeTop = baseTop < 40.0 ? 40.0 : baseTop;
+    // v2.5.9: Android / iOS 用 `max(padding.top, 24) + 8` 兜底.
+    //   老逻辑 `padding.top + 8` 在某些 Android ROM (MIUI/EMUI/ColorOS)
+    //   状态栏真实高度偏小 (~18dp) 时, header 会被状态栏挡住 (跟
+    //   用户反馈的「状态栏有点挡住了」一致). 强制最小 24dp 状态栏
+    //   空间 + 8dp 缓冲, 共 32dp, 跨设备一致.
+    final mediaTop = MediaQuery.of(context).padding.top;
+    final safeTop = mediaTop < 24.0 ? 24.0 : mediaTop;
     final double topPadding;
     if (DeviceUtils.isMacOS()) {
       topPadding = mediaTop + 32;
     } else if (Platform.isWindows) {
       topPadding = 8.0;
     } else {
-      // Android / iOS: safeTop 强制 ≥ 40 (避开状态栏 + 挖孔/灵动岛)
-      // + 8dp 视觉缓冲 = 48dp 兜底
+      // Android / iOS
       topPadding = safeTop + 8;
     }
 
