@@ -499,17 +499,13 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     return Scaffold(
+      // v2.4.10: 背景跟 app 主题背景一致 (lightBackground/darkBackground),
+      //   去掉之前 web 渐变 (grey.shade50/white/grey.shade50 ↔ grey.shade900/800/900).
+      //   用户反馈「源浏览器 背景改成和 app 背景一个颜色」, 用 theme.scaffoldBackgroundColor
+      //   自动跟随浅色/深色主题, 跟其他页面 1:1.
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Container(
-        // v2.3.32.1: 1:1 web 渐变背景 (emerald/green/teal 模糊光晕)
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [Colors.grey.shade900, Colors.grey.shade800, Colors.grey.shade900]
-                : [Colors.grey.shade50, Colors.white, Colors.grey.shade50],
-          ),
-        ),
+        color: theme.scaffoldBackgroundColor,
         child: CustomScrollView(
           controller: _scrollController,
           slivers: [
@@ -1365,9 +1361,10 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
             //   平板上一行只有 3 个 card 浪费空间. 用户反馈「能放三排吗不行按钮小点」
             //   — 手机保持 3 排, 平板自动 6-8 排 (按钮/card 自然变小).
             crossAxisCount: DeviceUtils.getTabletColumnCount(context),
-            // v2.4.9: childAspectRatio 0.55 → 0.5 跟主页 douban_movies_grid.dart L202 1:1
-            //   主页 itemWidth / (itemWidth * 2.0) = 0.5
-            childAspectRatio: 0.5,
+          // v2.4.10: childAspectRatio 0.5 → 0.45 让 card 更扁/更小,
+          //   配合下面 placeholder icon 28→20 / 标题 12→11 / 角标 12→11,
+          //   用户反馈「图标小一点」, 现在每行视觉密度更接近主页 VideoCard.
+          childAspectRatio: 0.45,
             // v2.4.9: mainAxisSpacing 12 → 6 (手机) / 0 (平板) 跟主页 L204 1:1
             //   crossAxisSpacing 保持 12
             crossAxisSpacing: 12,
@@ -1467,16 +1464,16 @@ class _ItemCardState extends State<_ItemCard> {
                               fit: BoxFit.cover,
                               placeholder: (_, __) => Container(
                                 color: isDark ? Colors.grey.shade700 : Colors.grey.shade100,
-                                child: Icon(Icons.movie, size: 28, color: Colors.grey.shade400),
+                                child: Icon(Icons.movie, size: 20, color: Colors.grey.shade400),
                               ),
                               errorWidget: (_, __, ___) => Container(
                                 color: isDark ? Colors.grey.shade700 : Colors.grey.shade100,
-                                child: Icon(Icons.broken_image, size: 28, color: Colors.grey.shade400),
+                                child: Icon(Icons.broken_image, size: 20, color: Colors.grey.shade400),
                               ),
                             )
                           : Container(
                               color: isDark ? Colors.grey.shade700 : Colors.grey.shade100,
-                              child: Icon(Icons.tv, size: 28, color: Colors.grey.shade400),
+                              child: Icon(Icons.tv, size: 20, color: Colors.grey.shade400),
                             ),
                     ),
                     // hover 渐变遮罩 (跟主页 video_card.dart L155-164 1:1, 黑色渐变)
@@ -1500,16 +1497,16 @@ class _ItemCardState extends State<_ItemCard> {
                         top: 4,
                         right: 4,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(0.7),
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             item.year,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12,
+                              fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1521,16 +1518,16 @@ class _ItemCardState extends State<_ItemCard> {
                         bottom: 4,
                         left: 4,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
                             color: Colors.blue.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             item.typeName,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12,
+                              fontSize: 11,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1551,7 +1548,7 @@ class _ItemCardState extends State<_ItemCard> {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.w500,
                   color: _hovering
                       ? Colors.blue
