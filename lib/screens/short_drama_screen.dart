@@ -41,6 +41,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   bool _isLoadingMore = false;
   bool _hasMore = true;
   String? _errorMessage;
+  // v2.5.6: 「全部」tab 用的 page 状态 (跟子分类 tab 的 _page 共享).
+  // 已展示的剧名集合, 翻页去重用.
+  final Set<String> _shownNames = {};
 
   @override
   void initState() {
@@ -109,11 +112,10 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     }
   }
 
-  /// v2.5.5: 根据当前筛选拉取数据 — 走 ShortDramaDirectService.
+  /// v2.5.6: 根据当前筛选拉取数据 — 走 ShortDramaDirectService.
   /// - 选中「全部」tab (selectedTypeTab == _kAllTabKey) → 3 源全聚合
-  ///   + 去重 (getRecommend, size=20 一次拿全, 不分页)
+  ///   + 去重 (getRecommendResponse, size=60 一次性, 但可翻页拉更多)
   /// - 选中具体子类 (typeId=64-69/62/63/52) → 该源按 type_id 拉 + 分页
-  /// - 选中空 → 兜底走 getRecommend
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
 
@@ -123,6 +125,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         _dramaList.clear();
         _page = 1;
         _hasMore = true;
+        _shownNames.clear(); // v2.5.6: 切 tab / 刷新时清空去重 set
       }
       _errorMessage = null;
     });
@@ -131,8 +134,11 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     ShortDramaListResponse result;
     if (selectedTypeId == null) {
       // 「全部」tab: 3 源聚合推荐
-      final recommend = await ShortDramaDirectService.getRecommend(size: 20);
-      result = ShortDramaListResponse(list: recommend, hasMore: false);
+      result = await ShortDramaDirectService.getRecommendResponse(
+        page: 1,
+        size: 60,
+        excludeNames: isRefresh ? null : _shownNames,
+      );
     } else {
       result = await ShortDramaDirectService.getListByTypeId(
         typeId: selectedTypeId,
@@ -145,6 +151,10 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
 
     setState(() {
       _dramaList.addAll(result.list);
+      // v2.5.6: 把新拉的剧名加入 _shownNames (下次翻页排除)
+      for (final d in result.list) {
+        if (d.name.isNotEmpty) _shownNames.add(d.name);
+      }
       _hasMore = result.hasMore;
       _isLoading = false;
     });
@@ -164,9 +174,12 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     final selectedTypeId = _currentSelectedTypeId();
     ShortDramaListResponse result;
     if (selectedTypeId == null) {
-      // 聚合模式不分页, 一次拿全
-      final recommend = await ShortDramaDirectService.getRecommend(size: 20);
-      result = ShortDramaListResponse(list: recommend, hasMore: false);
+      // 「全部」tab 翻页: 拉下一页
+      result = await ShortDramaDirectService.getRecommendResponse(
+        page: _page,
+        size: 60,
+        excludeNames: _shownNames,
+      );
     } else {
       result = await ShortDramaDirectService.getListByTypeId(
         typeId: selectedTypeId,
@@ -178,6 +191,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     if (!mounted) return;
     setState(() {
       _dramaList.addAll(result.list);
+      for (final d in result.list) {
+        if (d.name.isNotEmpty) _shownNames.add(d.name);
+      }
       _hasMore = result.hasMore;
       _isLoadingMore = false;
     });
@@ -201,6 +217,9 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     if (_selectedTypeTab == tab) return;
     setState(() {
       _selectedTypeTab = tab;
+      // v2.5.6: 切 tab 时清空去重 set (「全部」和子分类的去重不能混)
+      _shownNames.clear();
+      _page = 1;
     });
     _fetchDramaList(isRefresh: true);
   }
