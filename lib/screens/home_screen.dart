@@ -591,26 +591,13 @@ class _HomeScreenState extends State<HomeScreen> {
   ///     2. 短剧 tab 立刻发 ~9 个 HTTP 请求拉分类/全部数据
   ///   用户反馈: 「打开app就开始加载短剧里面的内容二不是打开短剧以后加载」.
   ///   PageView.builder 只 build viewport 内的 child (默认 viewport 1 页 +
-  ///   左右各 1 页预览), 远离 viewport 的 child 不会 build, 数据不会
+  ///   左右各 1 页预览), 远离 viewport 的 child 不会 initState, 数据不会
   ///   提前拉. 配合 AutomaticKeepAliveClientMixin 保持已访问过的 child
   ///   state (避免切走再切回丢失滚动位置 / 加载状态).
-  ///
-  /// v2.5.16: 改回 `PageView(children: [...])` — v2.5.15 的 PageView.builder
-  ///   + KeepAlive 让短剧 tab 在 app 启动时不 initState / 不拉数据, 但用户
-  ///   实际想要的是:
-  ///     1. 「启动app时就要开始加载短剧类容图片数据等不是我点击才开始加载」—
-  ///        app 启动时短剧 tab 就要预加载, 切到时图片已缓存好
-  ///     2. 「比如我打开短剧ai分类后切换到其他分类在切换回来应该是加载好
-  ///        的状态不应该再次加载」— 分类切来切去, 已加载好的 tab 不应该
-  ///        重新拉
-  ///   改法: 改回 PageView.children 让 6 个 child 启动时全部 initState,
-  ///   短剧 tab 立刻发请求拉分类 + 全部推荐; 切到其他 tab 再切回时,
-  ///   short drama State 没被 dispose, _tabCache 缓存每 tab 拉到的
-  ///   (list, shownNames, page, hasMore), 切回 tab 时直接 restore, 不
-  ///   重新请求. 切 tab 走缓存, 启动时预加载, 缓存命中不重复拉.
   Widget _buildBottomNavPageView() {
-    return PageView(
+    return PageView.builder(
       controller: _bottomNavPageController,
+      itemCount: 6,
       onPageChanged: (index) {
         if (!mounted) return;
         if (_currentBottomNavIndex != index) {
@@ -619,14 +606,31 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
       },
-      children: [
-        _buildHomeContentWithPageView(),
-        const MovieScreen(),
-        const TvScreen(),
-        const AnimeScreen(),
-        const ShortDramaScreen(),
-        const ShowScreen(),
-      ],
+      itemBuilder: (context, index) {
+        Widget child;
+        switch (index) {
+          case 0:
+            child = _buildHomeContentWithPageView();
+            break;
+          case 1:
+            child = const MovieScreen();
+            break;
+          case 2:
+            child = const TvScreen();
+            break;
+          case 3:
+            child = const AnimeScreen();
+            break;
+          case 4:
+            child = const ShortDramaScreen();
+            break;
+          case 5:
+          default:
+            child = const ShowScreen();
+            break;
+        }
+        return _KeepAliveTab(child: child);
+      },
     );
   }
 
@@ -1081,5 +1085,43 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       // 错误处理，静默处理
     }
+  }
+}
+
+/// v2.5.15: KeepAlive wrapper for PageView.builder children.
+///
+///   之前用 `PageView(children: [6 个 Screen])` 时, 6 个 child 都会立即
+///   initState — 即使远离 viewport (用户没切到的 tab) 也会发 HTTP 请求拉
+///   数据, 浪费流量 + 拉慢 App 启动.
+///
+///   `PageView.builder` 默认只 build viewport 内 (当前页 + 左右各 1 页)
+///   的 child, 远离的 child 不会被 build, 不会 initState, 不会触发数据
+///   加载. 但有副作用: 切走再切回, 之前 build 过的 child 会被 dispose,
+///   滚动位置 / 加载状态 / 已展示列表 全部丢失.
+///
+///   `AutomaticKeepAliveClientMixin` 让已被 build 过的 child 在 viewport
+///   之外仍 keep alive, 切回来时 State 还在, 数据还在. 这是 Flutter 官方
+///   推荐配合 `PageView.builder` 用的模式 (e.g. `flutter_swiper` 内部
+///   同样用 `AutomaticKeepAliveClientMixin`).
+class _KeepAliveTab extends StatefulWidget {
+  final Widget child;
+  const _KeepAliveTab({required this.child});
+
+  @override
+  State<_KeepAliveTab> createState() => _KeepAliveTabState();
+}
+
+class _KeepAliveTabState extends State<_KeepAliveTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    // AutomaticKeepAliveClientMixin 要求 build 内先调 super.build, 否则
+    // 会 warn "AutomaticKeepAliveClientMixin requires super.build" 并
+    // 跳过 keep alive (导致 keep alive 失效).
+    super.build(context);
+    return widget.child;
   }
 }

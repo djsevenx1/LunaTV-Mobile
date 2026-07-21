@@ -51,20 +51,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   //   掉 (用户反馈: 「在全部然后点到ai漫剧, 概率会显示全部分类内容」).
   int _fetchGeneration = 0;
 
-  // v2.5.16: 每 tab 缓存 — 用户反馈「打开短剧ai分类后切换到其他分类
-  //   在切换回来应该是加载好的状态不应该再次加载」. 切 tab 时把当前
-  //   tab 的 (list, shownNames, page, hasMore) 存到 _tabCache, 切回
-  //   时检查 _tabCache 有就直接 restore, 不重新发 HTTP. 等于「按 tab
-  //   维度做 in-memory cache」, 类似浏览器历史栈.
-  //
-  // Key: tab 名 (e.g. '全部', 'ai 漫剧', '擦边短剧', '反转爽剧' 等)
-  // Value: 拉过的数据 + 翻页去重 set + 当前页 + 是否还有更多
-  //
-  // 注意: 缓存的是「已展示的列表」, 不缓存「加载中状态」. 切走 tab 时
-  // _isLoading 永远是 false (在当前 tab), 切回来时也直接展示 list, 不
-  // 进入 loading. 下拉刷新会绕过缓存 (isRefresh: true 时清掉对应 tab).
-  final Map<String, _TabCacheEntry> _tabCache = {};
-
   @override
   void initState() {
     super.initState();
@@ -163,12 +149,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   ///   _selectedTypeTab 后启动 await, 但若旧 tab 的请求后到, 会把
   ///   新 tab 的列表覆盖掉. 修法: 启动时 _fetchGeneration++, 记下
   ///   自己的 gen, await 完成后比对 — 不匹配就丢弃结果, 不 setState.
-  ///
-  /// v2.5.16: isRefresh=true 时同时清掉 _tabCache 中当前 tab 的缓存.
-  ///   下拉刷新 = 「强制重新拉, 不走缓存」, 跟切 tab 走缓存语义不同.
-  ///   setState 写入 _dramaList 后, 顺便把当前 tab 的 (list, shownNames,
-  ///   page, hasMore) save 到 _tabCache — 等下次切走再切回时直接命中
-  ///   缓存, 不重新发 HTTP.
   Future<void> _fetchDramaList({bool isRefresh = false}) async {
     if (!mounted) return;
 
@@ -182,8 +162,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
         _page = 1;
         _hasMore = true;
         _shownNames.clear(); // v2.5.6: 切 tab / 刷新时清空去重 set
-        // v2.5.16: 下拉刷新 = 强制重新拉, 绕开 tab 缓存
-        _tabCache.remove(_selectedTypeTab);
       }
       _errorMessage = null;
     });
@@ -218,16 +196,6 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       _hasMore = result.hasMore;
       _isLoading = false;
     });
-
-    // v2.5.16: 写入成功后 save 当前 tab 到 _tabCache — 切走再切回时
-    //   命中缓存, 不重新发 HTTP. save 在 setState 之后确保 list /
-    //   shownNames / hasMore 是最新的.
-    _tabCache[_selectedTypeTab] = _TabCacheEntry(
-      list: List<ShortDrama>.from(_dramaList),
-      shownNames: Set<String>.from(_shownNames),
-      page: _page,
-      hasMore: _hasMore,
-    );
   }
 
   /// 加载更多
@@ -292,56 +260,8 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
   }
 
   /// 切换类型
-  ///
-  /// v2.5.16: 加 tab 缓存. 切走时把当前 tab 的 (list, shownNames, page,
-  ///   hasMore) 存到 _tabCache; 切回时检查 _tabCache:
-  ///   - 命中 → setState restore, 不调 _fetchDramaList, 不发 HTTP
-  ///   - 未命中 (新 tab / 切回后下拉刷新) → 调 _fetchDramaList 拉
-  /// 时序:
-  ///   1. App 启动 → _loadCategories 完成 → _fetchDramaList 拉「全部」
-  ///      (缓存到 _tabCache['全部'])
-  ///   2. 用户切「ai 漫剧」→ save「全部」to cache, restore「ai 漫剧」
-  ///      from cache (首次无缓存 → 调 _fetchDramaList, 拉完缓存)
-  ///   3. 用户切「擦边」→ save「ai 漫剧」to cache, restore「擦边」
-  ///      from cache (首次 → 拉)
-  ///   4. 用户切回「ai 漫剧」→ save「擦边」to cache, restore「ai 漫剧」
-  ///      from cache (**命中, 直接展示, 不发 HTTP**)
   void _onTypeTabChanged(String tab) {
     if (_selectedTypeTab == tab) return;
-
-    // v2.5.16: 切走前 save 当前 tab 的状态到 _tabCache
-    if (_selectedTypeTab.isNotEmpty) {
-      _tabCache[_selectedTypeTab] = _TabCacheEntry(
-        list: List<ShortDrama>.from(_dramaList),
-        shownNames: Set<String>.from(_shownNames),
-        page: _page,
-        hasMore: _hasMore,
-      );
-    }
-
-    // v2.5.16: 切回时检查 _tabCache, 命中就 restore, 不发 HTTP
-    final cached = _tabCache[tab];
-
-    if (cached != null) {
-      // 命中缓存, 直接 setState restore — 无 loading, 无 HTTP
-      setState(() {
-        _selectedTypeTab = tab;
-        _dramaList
-          ..clear()
-          ..addAll(cached.list);
-        _shownNames
-          ..clear()
-          ..addAll(cached.shownNames);
-        _page = cached.page;
-        _hasMore = cached.hasMore;
-        _isLoading = false;
-        _isLoadingMore = false;
-        _errorMessage = null;
-      });
-      return;
-    }
-
-    // 未命中, 按原逻辑清空 + 调 _fetchDramaList
     setState(() {
       _selectedTypeTab = tab;
       // v2.5.6: 切 tab 时清空去重 set (「全部」和子分类的去重不能混)
@@ -708,24 +628,4 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
 
     return const SizedBox(height: 50);
   }
-}
-/// v2.5.16: per-tab 缓存条目 — 切走时把当前 tab 的状态存到 _tabCache,
-///   切回时 restore. 走 Dart 浅拷贝 (List.from / Set.from), 不影响原
-///   _dramaList / _shownNames 引用, 切回时直接 setState restore 即可.
-///
-/// 为什么不缓存 _isLoading / _isLoadingMore: 切回时希望直接展示已加载
-///   的列表, 不应该再进入 loading 状态. 下拉刷新会绕开缓存 (见
-///   _fetchDramaList isRefresh: true 时 _tabCache.remove).
-class _TabCacheEntry {
-  final List<ShortDrama> list;
-  final Set<String> shownNames;
-  final int page;
-  final bool hasMore;
-
-  const _TabCacheEntry({
-    required this.list,
-    required this.shownNames,
-    required this.page,
-    required this.hasMore,
-  });
 }
