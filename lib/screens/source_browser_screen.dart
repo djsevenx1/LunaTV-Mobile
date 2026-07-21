@@ -791,15 +791,24 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
     // v2.5.1: 改成 3 列 GridView (跟 LOMI 源浏览器一致),
     //   之前 v2.4.9 用 Wrap 自动换行, 1 行能塞 5-6 个 chip 太挤,
     //   用户反馈「我要 3 列」. 选中态保留 v2.3.32.1 渐变 + 阴影.
+    // v2.5.2: 源选择区 3 列 grid 改成 DeviceUtils.getTabletColumnCount 控制,
+    //   手机 3 列 (跟 v2.5.1 一致), 平板 6-8 列 (跟主页 douban_movies_grid
+    //   1:1). 之前 v2.5.1 写死 3 列, 平板上一行只有 3 个大卡, 图标/名字视觉
+    //   偏大, 用户反馈「源图标改小一点, 尤其平板」. 平板自动 6-8 列 → 卡片
+    //   视觉变小, 字号也同步缩.
+    final isTablet = DeviceUtils.isTablet(context);
+    final int columnCount = isTablet
+        ? DeviceUtils.getTabletColumnCount(context)
+        : 3;
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        // 卡片宽度 / 高度: 名字长度 2-4 字居多, 1:1 偏方, 1.4 偏扁
-        // 跟 LOMI 截图里卡片「占屏幕 ~46% 宽 × ~50px 高」 比例接近
-        childAspectRatio: 1.4,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columnCount,
+        // 手机: 1.4 (跟 v2.5.1 偏扁, 名字 2-4 字) /
+        //   平板: 2.0 (更扁, 6-8 列下卡片本身已经很小, 再扁一点更协调)
+        childAspectRatio: isTablet ? 2.0 : 1.4,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
@@ -852,7 +861,9 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12,
+                // 手机 12 / 平板 10: 6-8 列下名字变小一档,
+                //   避免 4 字名字在窄卡里被截断成 "...".
+                fontSize: isTablet ? 10 : 12,
                 fontWeight: FontWeight.w500,
                 color: selected
                     ? Colors.white
@@ -1097,28 +1108,13 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
   // -------- Categories & Items card (1:1 web 第三段) --------
 
   Widget _buildCategoriesItemsCard(ThemeData theme, bool isDark) {
+    // v2.5.2: 分类区背景跟 page 背景 (冷灰白 #F5F7F8) 1:1, 去掉白渐变 +
+    //   20 圆角 + 边框 + 阴影. 之前 v2.5.1 page 改冷灰白了, 但分类区还是
+    //   白渐变, 看起来是「白卡飘在灰底」, 跟截图里「整片冷灰白」 不一致.
+    //   用户反馈「截图背景改成和源背景一样」 = 分类区底色跟 page 底色统一.
+    //   跟 v2.5.1 改 _buildSourceCard 容器 1:1 思路.
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [Colors.grey.shade800, Colors.blue.withOpacity(0.05), Colors.grey.shade800]
-              : [Colors.white, Colors.blue.withOpacity(0.03), Colors.white],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
