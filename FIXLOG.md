@@ -6,6 +6,141 @@
 
 ---
 
+## v2.5.16 (2026-07-21) — 启动时不预加载短剧 (回退 v2.5.15) + 加 tab 缓存
+
+### 现象
+
+1. v2.5.15 装上后, **App 启动不预加载短剧**, 要切到底栏「短剧」tab 才开始拉
+2. **「打开短剧 ai 分类后切换到其他分类再切换回来」重新加载, 不是加载好的状态**
+
+### 排查
+
+- 现象 1: logcat 看 0 HTTP 请求来自 short drama 模块, 直到切到短剧 tab 才看到
+- 现象 2: 切回「ai 漫剧」tab, logcat 看到 1 个 `getListByTypeId` HTTP 请求, 重新拉
+
+### 根因 (v2.5.15 改错方向)
+
+v2.5.15 改 `PageView` → `PageView.builder` + KeepAlive 是为了「app 启动时不预加载短剧」(以为这是用户想要的), 但用户**实际想要的是相反的**:
+
+> 「启动app时就要开始加载短剧类容图片数据等不是我点击才开始加载」
+
+并且用户**还**想要切 tab 不重新拉:
+
+> 「我打开短剧ai分类后切换到其他分类在切换回来应该是加载好的状态不应该再次加载」
+
+v2.5.15 改完后变成:
+- 启动不预加载 ❌ (用户要预加载)
+- 切 tab 重新拉 ❌ (用户要切回走缓存)
+
+两个核心需求都没满足。
+
+### 修复
+
+#### 1. 回退 v2.5.15 PageView 改动
+
+`home_screen.dart` `_buildBottomNavPageView` 改回 `PageView(children: [6 Screen])`:
+- 6 个 child 的 initState 在 app 启动时全部跑
+- 短剧 tab 立刻发 ~9 个 HTTP 请求拉分类 + 全部推荐
+- 切到短剧 tab 时数据已经在路上 / 已到, 图片已 cache 到磁盘, 直接显示
+- 删除 v2.5.15 加的 `_KeepAliveTab` widget
+
+#### 2. 加 per-tab 缓存
+
+`short_drama_screen.dart`:
+
+**字段**:
+```dart
+final Map<String, _TabCacheEntry> _tabCache = {};
+```
+
+**`_onTypeTabChanged` 切走 save / 切回 restore**:
+```dart
+// 切走前 save 当前 tab 状态
+if (_selectedTypeTab.isNotEmpty) {
+  _tabCache[_selectedTypeTab] = _TabCacheEntry(
+    list: List.from(_dramaList),
+    shownNames: Set.from(_shownNames),
+    page: _page,
+    hasMore: _hasMore,
+  );
+}
+
+// 切回时检查 cache, 命中直接 restore, 不发 HTTP
+final cached = _tabCache[tab];
+if (cached != null) {
+  setState(() {
+    _selectedTypeTab = tab;
+    _dramaList..clear()..addAll(cached.list);
+    _shownNames..clear()..addAll(cached.shownNames);
+    _page = cached.page;
+    _hasMore = cached.hasMore;
+    _isLoading = false;
+    _isLoadingMore = false;
+    _errorMessage = null;
+  });
+  return;
+}
+
+// 未命中, 调 _fetchDramaList
+```
+
+**`_fetchDramaList` 写入后 save + 下拉刷新时清 cache**:
+```dart
+// isRefresh (下拉刷新) 时清掉缓存 — 强制重新拉, 不走缓存
+if (isRefresh) {
+  _tabCache.remove(_selectedTypeTab);
+}
+
+// ... setState 写入 _dramaList ...
+
+// 写入成功后 save 当前 tab 到 _tabCache
+_tabCache[_selectedTypeTab] = _TabCacheEntry(
+  list: List.from(_dramaList),
+  shownNames: Set.from(_shownNames),
+  page: _page,
+  hasMore: _hasMore,
+);
+```
+
+**新增 class** (文件末尾):
+```dart
+class _TabCacheEntry {
+  final List<ShortDrama> list;
+  final Set<String> shownNames;
+  final int page;
+  final bool hasMore;
+  const _TabCacheEntry({required ...});
+}
+```
+
+### 教训
+
+v2.5.15 把用户「打开 app 就开始加载短剧」误读成「别在 app 启动时加载短剧」(因为旧版本 v2.5.14 之前的行为是「启动加载」, v2.5.15 改成「点击才加载」, 我以为这是优化), 实际用户**原话**是反过来的。
+
+接到需求变更时, **先把用户原话抄到 todo**, 再列对比表 (旧行为 / 新行为 / 用户原话), 确认方向正确再改代码. v2.5.15 的方向错在没回头看「为什么 v2.5.14 之前要 eager build」 — 因为用户一直就是想要启动预加载的, 我以为是 bug 改成了 lazy, 实际改完把正确行为干掉了。
+
+### 影响
+
+- App 启动时短剧 tab 立刻发请求拉分类 + 全部推荐 (跟 v2.5.14 之前行为一致)
+- 切 tab 走 cache: 切回时直接展示已加载的列表, **不发 HTTP, 不显示 loading**
+- 下拉刷新强制重新拉, 不受 cache 影响 — 缓存不会导致用户看不到最新数据
+- 切 tab race condition 仍由 v2.5.14 generation + v2.5.15 `_loadCategories` 覆盖守卫双层防护
+
+### 修改文件
+
+- `lib/screens/home_screen.dart`:
+  - `_buildBottomNavPageView` 改回 `PageView(children: [6 Screen])`
+  - 删除 `_KeepAliveTab` widget
+- `lib/screens/short_drama_screen.dart`:
+  - 新增 `Map<String, _TabCacheEntry> _tabCache` 字段
+  - `_onTypeTabChanged` 切走 save / 切回 restore from cache
+  - `_fetchDramaList` 写入成功后 save to cache; isRefresh 时 `_tabCache.remove`
+  - 新增 `class _TabCacheEntry` 在文件末尾
+- `pubspec.yaml`: 2.5.15+1 → 2.5.16+1
+- `.github/changelogs.json`: 头部插 v2.5.16 entry
+
+---
+
 ## v2.5.15 (2026-07-21) — 短剧切 tab 串内容 (v2.5.14 没修好) + 打开 app 就开始加载短剧
 
 ### 现象
