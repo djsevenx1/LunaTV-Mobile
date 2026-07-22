@@ -215,6 +215,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   double _playbackRate = 1.0;
   // 用户拖动进度条时的临时值(避免 stream 把进度覆盖回去)
   double? _scrubbingValue;
+  // v2.5.20: widget 正在销毁中, 阻止所有 stream listener 的副作用 (切集 / autoPlay / setState)
+  bool _isDisposing = false;
+  // v2.5.20: 中间区域水平拖动的 seek 节流 (最多 100ms 调一次, 防止 ExoPlayer message queue 堆积)
+  Timer? _centerSwipeSeekThrottle;
+  // v2.5.20: playingStream / completedStream / bufferingStream 的 subscription 字段
+  //   之前 v2.3.14 ~ v2.5.19 这 3 个 listener 没存字段, dispose 时没法 cancel,
+  //   切集 / 退出时残留 listener 触发业务逻辑 (_autoPlayNextEpisode) 跟新 episode 打架
+  StreamSubscription<bool>? _playingSub;
+  StreamSubscription<bool>? _bufferingSub;
+  StreamSubscription<bool>? _completedSub;
   // 控制栏自动隐藏定时器
   Timer? _hideControlsTimer;
 
@@ -348,8 +358,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     // v2.2.0: 订阅 backend 的所有 stream. libmpv 时代是 _player!.XStream,
     //   现在统一走 _player!.XStream. 注意所有 stream listener 都要判
-    //   !mounted 提前 return, 防止 setState 在 widget 销毁后触发.
+    //   !mounted 或 _isDisposing 提前 return, 防止 setState 在 widget 销毁后触发.
+    // v2.5.20: 之前 3 个 listener (playingStream / completedStream / bufferingStream)
+    //   没存字段, dispose 时无法 cancel. 现在存到 _playingSub / _completedSub /
+    //   _bufferingSub, dispose 统一 cancel.
     _positionSub = _player!.positionStream.listen((pos) {
+      if (_isDisposing) return;
       if (!mounted) return;
       if (_scrubbingValue == null) {
         _currentPosition = pos;
@@ -373,14 +387,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
     });
     _durationSub = _player!.durationStream.listen((dur) {
+      if (_isDisposing) return;
       if (!mounted) return;
       _currentDuration = dur;
     });
     // v2.2.0: completedStream 替代 streams.completed
-    _player!.completedStream.listen((_) {
+    // v2.5.20: 存到 _completedSub, dispose 时 cancel; 业务逻辑 _autoPlayNextEpisode
+    //   加 _isDisposing 守门, 防止 widget 销毁后还在切下一集
+    _completedSub = _player!.completedStream.listen((_) {
+      if (_isDisposing) return;
       _autoPlayNextEpisode();
     });
-    _player!.playingStream.listen((playing) {
+    // v2.5.20: 存到 _playingSub + 业务逻辑加 _isDisposing 守门
+    _playingSub = _player!.playingStream.listen((playing) {
+      if (_isDisposing) return;
       if (!mounted) return;
       setState(() {
         _isPlaying = playing;
@@ -392,7 +412,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
     });
     // v2.2.0: bufferingStream — Media3 缓冲状态变化, 给 UI 决定是否显示 spinner
-    _player!.bufferingStream.listen((b) {
+    // v2.5.20: 存到 _bufferingSub + _isDisposing 守门
+    _bufferingSub = _player!.bufferingStream.listen((b) {
+      if (_isDisposing) return;
       if (!mounted) return;
       setState(() {
         _isBuffering = b;
@@ -402,6 +424,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    // v2.5.20: 守门 flag 第一时间置位, 阻止所有 stream listener 的副作用
+    //   (autoPlay / setState / _maybeAutoPlayNext). 之前只判 !mounted,
+    //   但 _autoPlayNextEpisode 没判 mounted, 切集时残留 completedStream
+    //   listener 触发 autoPlay, 跟新 episode 打架导致诡异 bug
+    //   (进度条乱跳 + 播放/暂停图标闪烁 + 退出后 audio 还在播)
+    _isDisposing = true;
     // v1.0.50: 退出时最后一次保存, 改成 await 真的完成再 dispose _player
     // 之前是 fire-and-forget, _player!.stop() 同步把 state.position 重置成 0,
     // saveCurrentProgress 那个 fire-and-forget 没机会拿到正确 position 就被 super.dispose 切断
@@ -413,8 +441,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     _progressTimer?.cancel();
     _hideControlsTimer?.cancel();
     _seekHintTimer?.cancel();
+    _centerSwipeSeekThrottle?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
+    // v2.5.20: 之前 dispose 漏 cancel 这 3 个 listener, 切集 / 退出时残留
+    //   listener 还在跑, completedStream 触发 _autoPlayNextEpisode 跟新 episode
+    //   打架 (诡异 bug 根因). 现在统一 cancel
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
+    _completedSub?.cancel();
     // v2.0.51: 释放选集 PageView 控制器
     _episodesPageController.dispose();
     _pageControllerNotifier.dispose();
@@ -1061,10 +1096,16 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   /// 切换播放/暂停
   void _togglePlayPause() {
-    if (_isPlaying) {
-      _player!.pause();
+    if (_isDisposing) return;
+    // v2.5.20: 立即乐观更新 _isPlaying, 避免 stream 延迟导致 UI 跟点击不同步
+    //   (之前完全靠 playingStream 推, 网络抖动 / ExoPlayer message queue 忙时
+    //    stream 推迟发射, 用户连点暂停/播放, 状态错乱, 进度条 / 播放按钮闪烁)
+    final wantPlay = !_isPlaying;
+    setState(() => _isPlaying = wantPlay);
+    if (wantPlay) {
+      unawaited(_player!.play());
     } else {
-      _player!.play();
+      unawaited(_player!.pause());
     }
   }
 
@@ -1336,22 +1377,55 @@ class _PlayerScreenState extends State<PlayerScreen>
     _toggleControls();
   }
 
+  // v2.5.20: 水平拖动开始 — 取消未触发的 seek 节流, 防止 stale timer 在 drag 中
+  //   突然 fire 把当前位置 seek 走
+  void _onCenterSwipeStart(DragStartDetails details) {
+    if (_isDisposing) return;
+    _centerSwipeSeekThrottle?.cancel();
+    _centerSwipeSeekThrottle = null;
+  }
+
+  // v2.5.20: 水平拖动结束 — flush pending seek 节流, 确保最后 drag 位置 seek 到
+  //   player 上 (drag 中节流可能让最后一次位置还没 seek, 玩家还在旧位置)
+  void _onCenterSwipeEnd(DragEndDetails details) {
+    if (_isDisposing) return;
+    _centerSwipeSeekThrottle?.cancel();
+    _centerSwipeSeekThrottle = null;
+    unawaited(_player!.seek(_currentPosition));
+  }
+
   // 中间区域水平拖动 = 快进快退
+  // v2.5.20: 加 100ms 节流. 之前每帧 DragUpdateDetails (60-120 次/秒) 都直接
+  //   _player!.seek(), ExoPlayer message queue 堆积多个 seek, 完成顺序不固定,
+  //   导致 position stream 发射的 position 乱跳 (进度条来回乱跳), ExoPlayer
+  //   进入内部 state 不一致 (再点暂停/退出 audio 还在播).
+  //   现在 100ms 最多调一次 seek, drag 过程中只更新 _currentPosition 跟
+  //   _seekHintText (UI 反馈), drag 结束时 _onCenterSwipeEnd 调一次最终 seek.
   void _onCenterSwipeUpdate(DragUpdateDetails details) {
+    if (_isDisposing) return;
     final screenWidth = MediaQuery.of(context).size.width;
     // 整屏 1:1 映射, 60s/半屏
     final deltaMs = (details.delta.dx / screenWidth * 60000).round();
     final newMs = (_currentPosition.inMilliseconds + deltaMs)
         .clamp(0, _currentDuration.inMilliseconds)
         .toInt();
-    _player!.seek(Duration(milliseconds: newMs));
     final isForward = deltaMs >= 0;
     setState(() {
-      _seekHintText = isForward ? '快进${(deltaMs / 1000).round()}s' : '快退${(-deltaMs / 1000).round()}s';
+      _currentPosition = Duration(milliseconds: newMs);
+      _seekHintText =
+          isForward ? '快进${(deltaMs / 1000).round()}s' : '快退${(-deltaMs / 1000).round()}s';
     });
     _seekHintTimer?.cancel();
     _seekHintTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _seekHintText = null);
+      if (mounted && !_isDisposing) {
+        setState(() => _seekHintText = null);
+      }
+    });
+    // 100ms 节流: 同一个 timer 多次 cancel + restart, 只在最后一次 100ms 后调 seek
+    _centerSwipeSeekThrottle?.cancel();
+    _centerSwipeSeekThrottle = Timer(const Duration(milliseconds: 100), () {
+      if (_isDisposing) return;
+      unawaited(_player!.seek(Duration(milliseconds: newMs)));
     });
   }
 
@@ -4819,7 +4893,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 flex: 2,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
+                  onHorizontalDragStart: _onCenterSwipeStart,
                   onHorizontalDragUpdate: _onCenterSwipeUpdate,
+                  onHorizontalDragEnd: _onCenterSwipeEnd,
                 ),
               ),
               // 右: 音量

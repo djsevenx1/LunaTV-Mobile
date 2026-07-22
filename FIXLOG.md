@@ -6,6 +6,238 @@
 
 ---
 
+## v2.5.20 (2026-07-22) — 播放器诡异 bug (进度条乱跳 + 按钮闪烁 + 退出 audio 还在播)
+
+### 现象
+
+出现概率非常小, 一旦出现就是「全套餐」同时爆发:
+1. 播放/暂停按钮 icon 闪烁 (连点时状态错乱)
+2. 进度条来回乱跳 (不是平滑前进, 是前后反复)
+3. 点暂停 / 退出 app 还能听到声音继续播放
+4. 唯一恢复方式: 杀 app 重新打开
+
+用户原话: 「除非退出app重新打开」, 说明 player 内部 state 已 corrupted, 任何 UI 操作 / setState 都无效。
+
+### 排查
+
+按现象反推:
+- 进度条乱跳 → 跟 stream 发射的 position 有关
+- 按钮闪烁 → `_isPlaying` 跟 `_player!.isPlaying` 不一致
+- audio 还在播 → `pause()` 没生效, 或 `dispose()` 没生效
+
+逐项看代码:
+
+**1. `_onCenterSwipeUpdate` 频繁调 seek()** (player_screen.dart:1340-1356):
+```dart
+void _onCenterSwipeUpdate(DragUpdateDetails details) {
+  // ...
+  _player!.seek(Duration(milliseconds: newMs));  // 每帧调一次
+}
+```
+`DragUpdateDetails` 60-120 次/秒触发, 每次直接调 `seek()`. ExoPlayer
+的 seek 是异步的, 多个 seek 在 message queue 排队, 完成顺序不固定
+(后入先出 / FIFO 取决于 ExoPlayer 内部策略).
+
+**2. `dispose()` 漏 cancel 3 个 stream listener** (player_screen.dart:380-399):
+```dart
+_player!.completedStream.listen((_) {  // 没存字段
+  _autoPlayNextEpisode();
+});
+_player!.playingStream.listen((playing) {...});  // 没存字段
+_player!.bufferingStream.listen((b) {...});  // 没存字段
+
+// dispose:
+_positionSub?.cancel();
+_durationSub?.cancel();
+// 没 cancel 上面的 3 个
+```
+3 个 listener 永远活着, widget 销毁后还能被触发, 调
+`_autoPlayNextEpisode` 业务逻辑.
+
+**3. `_togglePlayPause` 完全靠 stream 推** (player_screen.dart:1063):
+```dart
+void _togglePlayPause() {
+  if (_isPlaying) {
+    _player!.pause();  // 不 await, 立即返回
+  } else {
+    _player!.play();
+  }
+}
+```
+`_isPlaying` 完全靠 `playingStream` 推, ExoPlayer 内部状态机转换有
+延迟 + 上面 1. 的 message queue 阻塞, stream 推迟发射, 用户连点
+暂停/播放, 状态错乱.
+
+### 根因 (3 个独立 bug 同时出现才导致这个诡异现象)
+
+**根因 A — Drag 期间每帧调 seek(), ExoPlayer message queue 堆积**
+
+```
+T0  用户开始水平拖动
+T1  DragUpdate #1 → _player!.seek(posA) (排队, 慢, 200ms 后完成)
+T2  DragUpdate #2 → _player!.seek(posB) (排队)
+T3  DragUpdate #3 → _player!.seek(posC) (排队)
+T4  用户松开手 → _player!.seek(posD) (排队, 但用户认为 seek 已完成)
+T5  ExoPlayer 内部按某种顺序处理, posA 200ms 后先回, position stream
+     发射 posA, 进度条突然回退到 posA
+T6  posB / posC / posD 依次回, 进度条反复跳 posA → posB → posC → posD
+```
+
+进度条乱跳 ✓. 关键: 这期间 ExoPlayer 内部 state 跟 audio 线程 position
+已经不同步, 再点暂停时 pause() 走 message queue 但被前面 seek 阻塞,
+audio 线程继续播放.
+
+**根因 B — completedStream 残留 listener 触发 _autoPlayNextEpisode**
+
+切集时:
+```
+T0  用户点下一集
+T1  setState _currentEpisodeIndex = newIndex
+T2  _player!.stop() (排队)
+T3  widget 即将 dispose (Navigator pop)
+T4  dispose 跑 → cancel _positionSub / _durationSub
+                → 没 cancel _playingSub / _bufferingSub / _completedSub
+T5  _player?.dispose() (await, 内部释放 ExoPlayer)
+T6  (期间) completedStream 还触发了一次 (旧 episode 结束事件延迟)
+T7  _autoPlayNextEpisode() → open(下一集) → 跟正在 dispose 的
+     controller 打架 → player 进入诡异 state
+```
+
+切集残留 listener 跟新 episode 打架 ✓. 进度条乱跳 / 按钮闪烁 / audio
+还在播都是这个 race condition 衍生.
+
+**根因 C — pause() 不 await, 跟 stream 推不同步**
+
+用户点暂停:
+```
+T0  _togglePlayPause → _player!.pause() (Future 不 await, 立即返回)
+T1  200ms 后 ExoPlayer 真正暂停, playingStream 发射 false
+T2  setState _isPlaying = false, 按钮 icon 变 play_arrow
+T3  但这 200ms 期间用户又点了一次暂停 (看到 icon 还是 pause 想点成 play)
+T4  _togglePlayPause → 此时 _isPlaying 还是 true (stream 还没推)
+     → _player!.pause() 又调一次 (幂等, 但 message queue 又排队)
+T5  第一个 pause 完成, 第二个 pause 也完成, 但用户预期是「play 一下」
+```
+
+按钮闪烁 ✓. 这本身不是 bug, 但跟 A + B 叠加就是灾难.
+
+### 修复
+
+**修根因 A — `_onCenterSwipeUpdate` 加 100ms 节流 + swipe start/end 完整周期**
+
+```dart
+void _onCenterSwipeUpdate(DragUpdateDetails details) {
+  // ... 计算 newMs ...
+  // 立即更新 _currentPosition + _seekHintText (UI 反馈)
+  setState(() {
+    _currentPosition = Duration(milliseconds: newMs);
+    _seekHintText = ...;
+  });
+  // 100ms 节流: cancel + restart timer, 只在最后一次 100ms 后调 seek
+  _centerSwipeSeekThrottle?.cancel();
+  _centerSwipeSeekThrottle = Timer(Duration(milliseconds: 100), () {
+    if (_isDisposing) return;
+    unawaited(_player!.seek(Duration(milliseconds: newMs)));
+  });
+}
+
+void _onCenterSwipeStart(DragStartDetails details) {
+  _centerSwipeSeekThrottle?.cancel();  // 取消 stale timer
+  _centerSwipeSeekThrottle = null;
+}
+
+void _onCenterSwipeEnd(DragEndDetails details) {
+  _centerSwipeSeekThrottle?.cancel();  // 取消 pending timer
+  _centerSwipeSeekThrottle = null;
+  unawaited(_player!.seek(_currentPosition));  // 立即 seek 一次到 final
+}
+```
+
+100ms 节流 + drag 结束 flush = 一次 drag 最多调 1-3 次 seek(), ExoPlayer
+message queue 不会堆积, position stream 顺序正常, 进度条不乱跳.
+
+**修根因 B — 3 个 listener 存字段 + dispose cancel**
+
+```dart
+StreamSubscription<bool>? _playingSub;
+StreamSubscription<bool>? _bufferingSub;
+StreamSubscription<bool>? _completedSub;
+
+// _initPlayerAsync:
+_completedSub = _player!.completedStream.listen((_) {
+  if (_isDisposing) return;  // 守门
+  _autoPlayNextEpisode();
+});
+_playingSub = _player!.playingStream.listen(...);
+_bufferingSub = _player!.bufferingStream.listen(...);
+
+// dispose:
+_playingSub?.cancel();
+_bufferingSub?.cancel();
+_completedSub?.cancel();
+```
+
+切集 / 退出时残留 listener 立即 cancel, 不会再触发 `_autoPlayNextEpisode`
+跟新 episode 打架. 同时所有 listener 加 `_isDisposing` 守门, 防止
+dispose 跟 listener 触发之间的 race condition (cancel 是异步的, 期间
+可能还有一次事件触发).
+
+**修根因 C — `_togglePlayPause` 乐观更新 + unawaited**
+
+```dart
+void _togglePlayPause() {
+  if (_isDisposing) return;
+  final wantPlay = !_isPlaying;
+  setState(() => _isPlaying = wantPlay);  // 立即更新 UI
+  if (wantPlay) {
+    unawaited(_player!.play());
+  } else {
+    unawaited(_player!.pause());
+  }
+}
+```
+
+立即更新 `_isPlaying` + `setState`, 避免 stream 延迟导致 UI 跟点击
+不同步. playingStream 后续发射会跟这个状态对账 (不会错位, 因为都是
+单向推: stream 推 false 跟 wantPlay=false 一致).
+
+**附 — `_isDisposing` 守门 flag**
+
+`dispose()` 第一行置 `_isDisposing = true`, 所有 stream listener 跟
+手势 callback 都先判这个 flag 提前 return. 配合 listener cancel 防止
+dispose 跟 listener 触发之间的 race condition (cancel 是异步的, 期间
+可能还有一次事件触发).
+
+### 影响
+
+- 进度条乱跳 (drag 期间): 修. ExoPlayer message queue 不再堆积, position
+  stream 顺序正常
+- 播放/暂停按钮闪烁 (连点): 修. 立即乐观更新 _isPlaying, 不再单纯依赖
+  stream 推
+- 暂停 / 退出后 audio 还在播: 修. message queue 不再堆积 seek, pause()
+  立即生效; dispose 取消所有 listener 防止残留业务逻辑
+- 切集残留 listener 触发 _autoPlayNextEpisode 跟新 episode 打架: 修. 3
+  个 listener 存字段 + dispose cancel
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`:
+  - 新增字段 `_isDisposing` / `_centerSwipeSeekThrottle` / `_playingSub` /
+    `_bufferingSub` / `_completedSub`
+  - `_initPlayerAsync` 把 3 个 listener 存到字段, 所有 listener 加
+    `_isDisposing` 守门
+  - `dispose()` 第一行置 `_isDisposing = true`, 取消 3 个新字段, 取消
+    `_centerSwipeSeekThrottle`
+  - `_togglePlayPause` 改乐观更新 + unawaited play/pause
+  - 新增 `_onCenterSwipeStart` (cancel stale timer) + `_onCenterSwipeEnd`
+    (flush pending seek)
+  - `_onCenterSwipeUpdate` 改 100ms 节流, drag 过程中只更新 UI 不调 seek
+  - 中心 GestureDetector 加 `onHorizontalDragStart` / `onHorizontalDragEnd`
+- `pubspec.yaml`: 2.5.19+1 → 2.5.20+1
+- `.github/changelogs.json`: 头部插 v2.5.20 entry
+
+---
+
 ## v2.5.19 (2026-07-22) — 竖屏全屏时播放器中央暂停/快退6s/快进6s 三个按钮重叠
 
 ### 现象
