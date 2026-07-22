@@ -60,6 +60,15 @@ class ExoPlayerBackend implements PlayerBackend {
 
   // ── 内部辅助 ────────────────────────────────────────
   bool _disposed = false;
+  // v2.5.24: Generation guard — prevents the "dual audio" bug.
+  //   open() is re-entrant (fire-and-forget _playEpisode callers,
+  //   DLNA stop-cast + episode tap overlap, etc). Without this,
+  //   two concurrent open() calls each create a VideoPlayerController,
+  //   one becomes an orphan that keeps playing audio but can never be
+  //   paused/disposed (pause/stop/dispose only touch _controller).
+  //   Each open() increments this counter; after initialize() completes,
+  //   the loser checks gen != _openGeneration and disposes its controller.
+  int _openGeneration = 0;
 
   ExoPlayerBackend();
 
@@ -158,20 +167,12 @@ class ExoPlayerBackend implements PlayerBackend {
     _isCompleted = false;
     _safeAdd(_completedCtl, false);
 
-    // 释放旧 controller (切集 / 重新打开)
-    final old = _controller;
-    if (old != null) {
-      try {
-        final listener = _valueListener;
-        if (listener != null) {
-          old.removeListener(listener);
-        }
-        _valueListener = null;
-        await old.pause();
-        await old.dispose();
-      } catch (_) {}
-      _controller = null;
-    }
+    // v2.5.24: Generation guard. Each open() gets a unique generation
+    //   number. After initialize() (multi-second network op), if a newer
+    //   open() was called, we dispose our controller and bail — the newer
+    //   one wins. This prevents orphan VideoPlayerControllers that produce
+    //   "dual audio" (zombie audio that pause/stop/dispose can't reach).
+    final myGen = ++_openGeneration;
 
     final c = VideoPlayerController.networkUrl(
       Uri.parse(url),
@@ -191,12 +192,52 @@ class ExoPlayerBackend implements PlayerBackend {
       } catch (_) {}
       rethrow;
     }
-    if (_disposed) {
+
+    // Superseded by a newer open() or disposed during initialize → abandon.
+    if (_disposed || myGen != _openGeneration) {
       try {
         await c.dispose();
       } catch (_) {}
-      throw StateError('ExoPlayerBackend disposed during initialize');
+      if (_disposed) {
+        throw StateError('ExoPlayerBackend disposed during initialize');
+      }
+      DiaryService.add(
+          '[ExoPlayer] open(gen=$myGen) superseded by gen=$_openGeneration, abandoning controller');
+      return;
     }
+
+    // We won the generation race. Dispose the old controller.
+    // (Moved here from before create — old controller stays alive
+    //  during initialize, which is fine: it's paused from stop() or
+    //  still playing for DLNA resume, better UX than a black gap.)
+    final old = _controller;
+    if (old != null) {
+      try {
+        final listener = _valueListener;
+        if (listener != null) {
+          old.removeListener(listener);
+        }
+      } catch (_) {}
+      _valueListener = null;
+      try {
+        await old.pause();
+      } catch (_) {}
+      try {
+        await old.dispose();
+      } catch (_) {}
+    }
+
+    // Re-check after dispose awaits — a newer open() may have
+    // assigned its own controller during our old-dispose.
+    if (myGen != _openGeneration) {
+      try {
+        await c.dispose();
+      } catch (_) {}
+      DiaryService.add(
+          '[ExoPlayer] open(gen=$myGen) superseded during old-dispose, abandoning');
+      return;
+    }
+
     _controller = c;
     _width = c.value.size.width.round();
     _height = c.value.size.height.round();
