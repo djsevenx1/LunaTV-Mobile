@@ -118,6 +118,11 @@ Future<String> getImageUrl(
   if (source == 'tmdb' && originalUrl.isNotEmpty) {
     return UserDataService.buildTmdbImageUrl(originalUrl);
   }
+  // v2.5.28: 短剧图片走 worker /sd-img?url= 代理 (复用 TMDB proxy worker URL).
+  //   没配 worker URL → 1:1 返原 URL (直连 TVBox 源图床).
+  if (source == 'shortdrama' && originalUrl.isNotEmpty) {
+    return UserDataService.buildShortDramaImageUrl(originalUrl);
+  }
   return originalUrl;
 }
 

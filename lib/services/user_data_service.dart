@@ -976,6 +976,29 @@ class UserDataService {
     return originalUrl;
   }
 
+  // v2.5.28: 短剧 TVBox API + 图片代理 — 复用同一个 TMDB proxy worker URL.
+  //   worker 端新增 /sd-api/{src} + /sd-img?url= 两个路由 (见 tmdb-proxy repo).
+  //   没配 worker URL → 返 null / 原始 URL, 调用方走直连 (跟 TMDB/Bangumi 一致).
+
+  /// 构建短剧 TVBox API 代理 URL.
+  /// [srcKey]: tyyszy / wujin / lzi (对应 ShortDramaDirectService 的 3 个源).
+  /// 返回 ${workerUrl}/sd-api/${srcKey} 或 null (没配 worker → 直连).
+  static String? buildShortDramaApiUrl(String srcKey) {
+    final proxy = getTmdbProxyDomainSync();
+    if (proxy.isEmpty) return null;
+    return '$proxy/sd-api/$srcKey';
+  }
+
+  /// 构建短剧图片代理 URL.
+  /// 短剧封面来自 TVBox 源各自的图床, 域名不固定, 走 worker /sd-img?url= 透传.
+  /// 没配 worker URL → 返原 URL (直连).
+  static String buildShortDramaImageUrl(String originalUrl) {
+    if (originalUrl.isEmpty) return originalUrl;
+    final proxy = getTmdbProxyDomainSync();
+    if (proxy.isEmpty) return originalUrl;
+    return '$proxy/sd-img?url=${Uri.encodeComponent(originalUrl)}';
+  }
+
   // v2.1.43: 一次性 hint flag (跟 data source hint 平行)
   static bool _bangumiImageSourceNoProxyHinted = false;
 

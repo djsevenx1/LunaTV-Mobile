@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:luna_tv/models/short_drama.dart';
 import 'package:luna_tv/models/raw_short_drama.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 
 /// v2.5.4: 短剧直连 TVBox 源 service (修复 擦边短剧没内容).
 ///
@@ -37,6 +38,7 @@ class ShortDramaDirectService {
     _DirectSource(
       name: '天翼影视',
       apiUrl: 'https://tyyszyapi.com/api.php/provide/vod',
+      srcKey: 'tyyszy', // v2.5.28: CF Worker /sd-api/ 的 source key
       pages: 3, // 每 type 拉 3 页
       categories: [
         _SourceCategory(64, '女频恋爱'),
@@ -51,6 +53,7 @@ class ShortDramaDirectService {
     _DirectSource(
       name: '无极',
       apiUrl: 'https://api.wujinapi.com/api.php/provide/vod',
+      srcKey: 'wujin',
       pages: 3,
       categories: [
         _SourceCategory(41, '短剧'),
@@ -62,6 +65,7 @@ class ShortDramaDirectService {
     _DirectSource(
       name: '量子',
       apiUrl: 'https://cj.lziapi.com/api.php/provide/vod',
+      srcKey: 'lzi',
       pages: 3,
       categories: [
         _SourceCategory(46, '短剧'),
@@ -126,9 +130,12 @@ class ShortDramaDirectService {
     int pages = 1,
   }) async {
     final allRaw = <RawShortDrama>[];
+    // v2.5.28: 配了 CF Worker URL 时走 /sd-api/{srcKey} 代理 (5 分钟边缘缓存).
+    //   没配 → 1:1 直连原 apiUrl (跟之前行为一致).
+    final apiBase = UserDataService.buildShortDramaApiUrl(src.srcKey) ?? src.apiUrl;
     for (int p = startPage; p < startPage + pages; p++) {
       try {
-        final data = await _get(src.apiUrl, 'detail', {
+        final data = await _get(apiBase, 'detail', {
           't': typeId.toString(),
           'pg': p.toString(),
         });
@@ -378,12 +385,14 @@ class _SourceCategory {
 class _DirectSource {
   final String name;
   final String apiUrl;
+  final String srcKey; // v2.5.28: CF Worker /sd-api/ 的 source key (tyyszy/wujin/lzi)
   final int pages; // 每 type 拉几页, 每页 20 条
   final List<_SourceCategory> categories;
 
   const _DirectSource({
     required this.name,
     required this.apiUrl,
+    required this.srcKey,
     this.pages = 3,
     required this.categories,
   });
