@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/screens/login_screen.dart';
+import 'package:luna_tv/services/local_search_cache_service.dart';
 import 'package:luna_tv/models/favorite_item.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/play_record.dart';
@@ -42,6 +43,11 @@ class ApiResponse<T> {
 
 /// 通用API请求服务
 class ApiService {
+  // v2.5.26: 复用 HTTP 客户端, 启用 keep-alive 连接池.
+  //   之前每次 http.get/post 都新建 IOClient → 新 TLS 握手 (200-1000ms/次).
+  //   复用后同 host 的请求走同一个连接池, 省掉 TLS 握手开销.
+  static final http.Client _httpClient = http.Client();
+
   // v2.5.25: 分场景超时 — 之前全部 30s, 列表/搜索卡住时用户等太久.
   //   - 普通 GET/POST (列表/收藏/历史): 15s
   //   - 搜索 (fetchSourcesData): 20s (后端聚合多源, 需要更久)
@@ -213,7 +219,7 @@ class ApiService {
         url = newUri.toString();
       }
 
-      final response = await http
+      final response = await _httpClient
           .get(
             Uri.parse(url),
             headers: requestHeaders,
@@ -244,7 +250,7 @@ class ApiService {
       final url = results[0] as String;
       final requestHeaders = results[1] as Map<String, String>;
 
-      final response = await http
+      final response = await _httpClient
           .post(
             Uri.parse(url),
             headers: requestHeaders,
@@ -373,7 +379,7 @@ class ApiService {
         return ApiResponse.error('用户未登录');
       }
 
-      final response = await http.get(
+      final response = await _httpClient.get(
         Uri.parse('$baseUrl/api/favorites'),
         headers: {
           'Accept': 'application/json',
@@ -585,7 +591,7 @@ class ApiService {
       final baseUrl = await _getBaseUrl();
       if (baseUrl == null) return false;
 
-      final response = await http.get(
+      final response = await _httpClient.get(
         Uri.parse('$baseUrl/api/health'),
         headers: {'Accept': 'application/json'},
       ).timeout(const Duration(seconds: 5));
@@ -616,7 +622,7 @@ class ApiService {
       String loginUrl = '$baseUrl/api/login';
 
       // 发送登录请求
-      final response = await http
+      final response = await _httpClient
           .post(
             Uri.parse(loginUrl),
             headers: {
@@ -681,12 +687,33 @@ class ApiService {
   /// 搜索视频源数据
   /// 同一 source key 出现多次时,只保留集数最多的那一条
   /// (修复后端注册多个同 key 资源导致前端显示重复源的问题)
+  ///
+  /// v2.5.26: 接入 LocalSearchCacheService 10 分钟 TTL 缓存.
+  ///   - 重复搜索同关键词直接命中内存, 零网络延迟.
+  ///   - 缓存存的是已去重的 List<SearchResult>, 避免重复解析 JSON.
+  ///   - sourceKey 用 'server_aggregated' 表示这是后端聚合结果.
   static Future<List<SearchResult>> fetchSourcesData(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return [];
+
+    // v2.5.26: 缓存命中直接返回, 跳过网络请求
+    const sourceKey = 'server_aggregated';
+    final cache = LocalSearchCacheService();
+    final cached = cache.getCachedSearchPage(sourceKey, trimmed, 1);
+    if (cached != null && cached.status == CachedPageStatus.ok) {
+      // 缓存里存的就是 List<SearchResult>, 直接 cast 返回
+      try {
+        return (cached.data as List).cast<SearchResult>();
+      } catch (_) {
+        // cast 失败说明缓存类型异常, 走网络重写
+      }
+    }
+
     try {
       final response = await get<Map<String, dynamic>>(
         '/api/search',
         queryParameters: {
-          'q': query.trim(),
+          'q': trimmed,
         },
         fromJson: (data) => data as Map<String, dynamic>,
         timeout: _timeoutSearch,
@@ -700,7 +727,19 @@ class ApiService {
         final parsed = results
             .map((item) => SearchResult.fromJson(item as Map<String, dynamic>))
             .toList();
-        return _dedupeBySourceKey(parsed);
+        final deduped = _dedupeBySourceKey(parsed);
+
+        // v2.5.26: 命中网络后写缓存 (只缓存非空结果, 避免空结果被缓存 10 分钟)
+        if (deduped.isNotEmpty) {
+          cache.setCachedSearchPage(
+            sourceKey,
+            trimmed,
+            1,
+            CachedPageStatus.ok,
+            deduped,
+          );
+        }
+        return deduped;
       } else {
         print('搜索失败: ${response.message}');
         return [];

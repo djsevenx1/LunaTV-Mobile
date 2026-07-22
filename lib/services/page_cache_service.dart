@@ -21,6 +21,12 @@ class PageCacheService
   // 缓存数据
   final Map<String, dynamic> _cache = {};
 
+  // v2.5.26: 收藏键 Set, isFavoritedSync O(1) 查询.
+  //   之前 isFavoritedSync 用 List.any O(F) 遍历, 搜索结果列表每个 item
+  //   都会调一次 (渲染收藏按钮状态), 500 条结果 × 500 收藏 = 25 万次比较.
+  //   改 Set 后每个查询 1 次哈希, 大幅减少渲染时的 CPU 占用.
+  final Set<String> _favoriteKeys = {};
+
   /// 获取缓存数据
   T? getCache<T>(String key) {
     return _cache[key] as T?;
@@ -29,16 +35,32 @@ class PageCacheService
   /// 设置缓存数据
   void setCache<T>(String key, T data) {
     _cache[key] = data;
+    // v2.5.26: favorites 缓存被替换时同步重建 Set
+    if (key == 'favorites' && data is List<FavoriteItem>) {
+      _syncFavoriteKeys(data);
+    }
   }
 
   /// 清除指定缓存
   void clearCache(String key) {
     _cache.remove(key);
+    // v2.5.26: favorites 被清空时同步清 Set
+    if (key == 'favorites') {
+      _favoriteKeys.clear();
+    }
   }
 
   /// 清除所有缓存
   void clearAllCache() {
     _cache.clear();
+    _favoriteKeys.clear();
+  }
+
+  /// v2.5.26: 同步重建收藏键集合
+  void _syncFavoriteKeys(List<FavoriteItem>? favorites) {
+    _favoriteKeys
+      ..clear()
+      ..addAll(favorites?.map((f) => '${f.source}+${f.id}') ?? const <String>[]);
   }
 
   // ==================== PlayRecordOperationInterface 实现 ====================
@@ -418,10 +440,13 @@ class PageCacheService
       return LocalModeStorageService.isFavoriteSync(source, id);
     }
     try {
+      // v2.5.26: 优先用 Set 查询 O(1)
+      if (_favoriteKeys.isNotEmpty) {
+        return _favoriteKeys.contains('$source+$id');
+      }
+      // fallback: Set 还没初始化时 (cold start) 走 List 遍历
       final favorites = _getCachedFavorites();
       if (favorites == null || favorites.isEmpty) return false;
-
-      // 根据 source+id 检查是否在收藏列表中
       final key = '$source+$id';
       return favorites
           .any((favorite) => '${favorite.source}+${favorite.id}' == key);
@@ -441,7 +466,7 @@ class PageCacheService
               (favorite) => !(favorite.source == source && favorite.id == id))
           .toList();
 
-      // 更新缓存
+      // 更新缓存 (setCache 内部会重建 Set)
       setCache(cacheKey, updatedFavorites);
     }
   }
@@ -473,6 +498,7 @@ class PageCacheService
 
         // 添加到列表开头，保持按save_time降序排列
         final updatedFavorites = [newFavorite, ...cachedData];
+        // 更新缓存 (setCache 内部会重建 Set)
         setCache(cacheKey, updatedFavorites);
       }
     }
