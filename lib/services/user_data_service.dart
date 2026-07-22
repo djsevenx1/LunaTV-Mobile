@@ -79,6 +79,11 @@ class UserDataService {
   static String? _tmdbDataSourceCache;
   // v2.1.41
   static String? _tmdbProxyDomainCache;
+  // v2.5.25: serverUrl + cookies 内存缓存 — 之前每次 API 请求都读 2 次
+  //   SharedPreferences (异步磁盘 IO), 启动 warmup 后改同步内存读.
+  //   跟 TMDB/douban/bangumi 的 cache 模式一致.
+  static String? _serverUrlCache;
+  static String? _cookiesCache;
   // v2.1.49 改: 删了 v2.1.46 的 _githubProxyDomainCache 独立字段,
   //   GitHub 路由在 buildGithubApiUrl / buildGithubReleaseAssetUrl
   //   内部读 _tmdbProxyDomainCache (worker 同一份, 一份 URL 服务
@@ -96,13 +101,25 @@ class UserDataService {
     await prefs.setString(_usernameKey, username);
     await prefs.setString(_passwordKey, password);
     await prefs.setString(_cookiesKey, cookies);
+    // v2.5.25: 同步更新内存缓存
+    _serverUrlCache = serverUrl;
+    _cookiesCache = cookies;
   }
 
   // 获取服务器地址
   static Future<String?> getServerUrl() async {
+    // v2.5.25: warmup 后走内存缓存, 避免每次请求都读 SharedPreferences
+    if (_serverUrlCache != null) return _serverUrlCache;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_serverUrlKey);
+    final v = prefs.getString(_serverUrlKey);
+    _serverUrlCache = (v == null || v.isEmpty) ? null : v;
+    return _serverUrlCache;
   }
+
+  /// v2.5.25: 同步读 — warmup 后直接返回内存缓存, 无 async/await 开销.
+  ///   ApiService._buildUrl / HttpShared.getViaServer 等高频路径用这个.
+  ///   未 warmup (老路径) 返回 null, 调用方应 fallback 到 async 版.
+  static String? getServerUrlSync() => _serverUrlCache;
 
   // 获取用户名
   static Future<String?> getUsername() async {
@@ -118,9 +135,16 @@ class UserDataService {
 
   // 获取cookies
   static Future<String?> getCookies() async {
+    // v2.5.25: warmup 后走内存缓存
+    if (_cookiesCache != null) return _cookiesCache;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_cookiesKey);
+    final v = prefs.getString(_cookiesKey);
+    _cookiesCache = (v == null || v.isEmpty) ? null : v;
+    return _cookiesCache;
   }
+
+  /// v2.5.25: 同步读 — warmup 后直接返回内存缓存.
+  static String? getCookiesSync() => _cookiesCache;
 
   // 检查是否已登录
   static Future<bool> isLoggedIn() async {
@@ -135,6 +159,9 @@ class UserDataService {
     await prefs.remove(_usernameKey);
     await prefs.remove(_passwordKey);
     await prefs.remove(_cookiesKey);
+    // v2.5.25: 清内存缓存
+    _serverUrlCache = null;
+    _cookiesCache = null;
   }
 
   // 只清除密码和cookies，保留服务器地址和用户名
@@ -142,6 +169,8 @@ class UserDataService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_passwordKey);
     await prefs.remove(_cookiesKey);
+    // v2.5.25: 清内存缓存
+    _cookiesCache = null;
   }
 
   // 获取所有用户数据
@@ -320,6 +349,8 @@ class UserDataService {
   static Future<void> saveServerUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_serverUrlKey, url);
+    // v2.5.25: 同步更新内存缓存
+    _serverUrlCache = url;
   }
 
   // 兼容旧接口:获取豆瓣数据源
@@ -1219,6 +1250,19 @@ class UserDataService {
     if (_tmdbProxyDomainCache == null) {
       final prefs = await SharedPreferences.getInstance();
       _tmdbProxyDomainCache = prefs.getString(_tmdbProxyDomainKey) ?? '';
+    }
+    // v2.5.25: 缓存 serverUrl + cookies — 之前每次 API 请求都异步读
+    //   SharedPreferences 2 次, 现在 warmup 一次, 后续全走同步内存读.
+    //   这两个是 ApiService / HttpShared 最高频读的字段.
+    if (_serverUrlCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getString(_serverUrlKey);
+      _serverUrlCache = (v == null || v.isEmpty) ? null : v;
+    }
+    if (_cookiesCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getString(_cookiesKey);
+      _cookiesCache = (v == null || v.isEmpty) ? null : v;
     }
   }
 }

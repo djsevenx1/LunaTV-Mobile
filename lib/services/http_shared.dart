@@ -161,7 +161,8 @@ class HttpShared {
   static Future<Map<String, dynamic>?> getViaServer(String endpoint,
       {Duration? timeout}) async {
     try {
-      final baseUrl = await UserDataService.getServerUrl();
+      // v2.5.25: 优先同步内存读, 避免每次都 async SharedPreferences
+      final baseUrl = UserDataService.getServerUrlSync();
       if (baseUrl == null || baseUrl.isEmpty) return null;
       final cleanBase = baseUrl.endsWith('/')
           ? baseUrl.substring(0, baseUrl.length - 1)
@@ -170,7 +171,7 @@ class HttpShared {
           endpoint.startsWith('/') ? endpoint : '/$endpoint';
       final url = '$cleanBase$cleanEndpoint';
 
-      final cookies = await UserDataService.getCookies();
+      final cookies = UserDataService.getCookiesSync();
       final headers = <String, String>{
         'Accept': 'application/json',
         if (cookies != null && cookies.isNotEmpty) 'Cookie': cookies,

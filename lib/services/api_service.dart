@@ -42,15 +42,26 @@ class ApiResponse<T> {
 
 /// 通用API请求服务
 class ApiService {
-  static const Duration _timeout = Duration(seconds: 30);
+  // v2.5.25: 分场景超时 — 之前全部 30s, 列表/搜索卡住时用户等太久.
+  //   - 普通 GET/POST (列表/收藏/历史): 15s
+  //   - 搜索 (fetchSourcesData): 20s (后端聚合多源, 需要更久)
+  //   - 登录/autoLogin: 10s (快速失败, 让用户早看到错误)
+  static const Duration _timeoutDefault = Duration(seconds: 15);
+  static const Duration _timeoutSearch = Duration(seconds: 20);
+  static const Duration _timeoutAuth = Duration(seconds: 10);
 
-  /// 获取基础URL
+  /// 获取基础URL (优先同步内存缓存, fallback async)
   static Future<String?> _getBaseUrl() async {
+    // v2.5.25: warmup 后走同步内存读, 避免每次请求都 async/await
+    final cached = UserDataService.getServerUrlSync();
+    if (cached != null) return cached;
     return await UserDataService.getServerUrl();
   }
 
-  /// 获取认证cookies
+  /// 获取认证cookies (优先同步内存缓存, fallback async)
   static Future<String?> _getCookies() async {
+    final cached = UserDataService.getCookiesSync();
+    if (cached != null) return cached;
     return await UserDataService.getCookies();
   }
 
@@ -184,9 +195,16 @@ class ApiService {
     Map<String, String>? headers,
     T Function(dynamic)? fromJson,
     BuildContext? context,
+    Duration? timeout,
   }) async {
     try {
-      String url = await _buildUrl(endpoint);
+      // v2.5.25: 并行构建 URL 和 headers (之前串行 await 2 次)
+      final results = await Future.wait([
+        _buildUrl(endpoint),
+        _buildHeaders(additionalHeaders: headers),
+      ]);
+      String url = results[0] as String;
+      final requestHeaders = results[1] as Map<String, String>;
 
       // 添加查询参数
       if (queryParameters != null && queryParameters.isNotEmpty) {
@@ -195,14 +213,12 @@ class ApiService {
         url = newUri.toString();
       }
 
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
-
       final response = await http
           .get(
             Uri.parse(url),
             headers: requestHeaders,
           )
-          .timeout(_timeout);
+          .timeout(timeout ?? _timeoutDefault);
 
       return await _handleResponse(response, fromJson, context);
     } catch (e) {
@@ -217,10 +233,16 @@ class ApiService {
     Map<String, String>? headers,
     T Function(dynamic)? fromJson,
     BuildContext? context,
+    Duration? timeout,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
+      // v2.5.25: 并行构建 URL 和 headers
+      final results = await Future.wait([
+        _buildUrl(endpoint),
+        _buildHeaders(additionalHeaders: headers),
+      ]);
+      final url = results[0] as String;
+      final requestHeaders = results[1] as Map<String, String>;
 
       final response = await http
           .post(
@@ -228,7 +250,7 @@ class ApiService {
             headers: requestHeaders,
             body: body != null ? json.encode(body) : null,
           )
-          .timeout(_timeout);
+          .timeout(timeout ?? _timeoutDefault);
 
       return await _handleResponse(response, fromJson, context);
     } catch (e) {
@@ -243,10 +265,16 @@ class ApiService {
     Map<String, String>? headers,
     T Function(dynamic)? fromJson,
     BuildContext? context,
+    Duration? timeout,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
+      // v2.5.25: 并行构建 URL 和 headers
+      final results = await Future.wait([
+        _buildUrl(endpoint),
+        _buildHeaders(additionalHeaders: headers),
+      ]);
+      final url = results[0] as String;
+      final requestHeaders = results[1] as Map<String, String>;
 
       final response = await http
           .put(
@@ -254,7 +282,7 @@ class ApiService {
             headers: requestHeaders,
             body: body != null ? json.encode(body) : null,
           )
-          .timeout(_timeout);
+          .timeout(timeout ?? _timeoutDefault);
 
       return await _handleResponse(response, fromJson, context);
     } catch (e) {
@@ -268,17 +296,23 @@ class ApiService {
     Map<String, String>? headers,
     T Function(dynamic)? fromJson,
     BuildContext? context,
+    Duration? timeout,
   }) async {
     try {
-      final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
+      // v2.5.25: 并行构建 URL 和 headers
+      final results = await Future.wait([
+        _buildUrl(endpoint),
+        _buildHeaders(additionalHeaders: headers),
+      ]);
+      final url = results[0] as String;
+      final requestHeaders = results[1] as Map<String, String>;
 
       final response = await http
           .delete(
             Uri.parse(url),
             headers: requestHeaders,
           )
-          .timeout(_timeout);
+          .timeout(timeout ?? _timeoutDefault);
 
       return await _handleResponse(response, fromJson, context);
     } catch (e) {
@@ -316,7 +350,7 @@ class ApiService {
         request.fields.addAll(fields);
       }
 
-      final streamedResponse = await request.send().timeout(_timeout);
+      final streamedResponse = await request.send().timeout(_timeoutDefault);
       final response = await http.Response.fromStream(streamedResponse);
 
       return await _handleResponse(response, fromJson, context);
@@ -345,7 +379,7 @@ class ApiService {
           'Accept': 'application/json',
           'Cookie': cookies,
         },
-      ).timeout(_timeout);
+      ).timeout(_timeoutDefault);
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
@@ -593,7 +627,7 @@ class ApiService {
               'password': password,
             }),
           )
-          .timeout(_timeout);
+          .timeout(_timeoutAuth);
 
       if (response.statusCode == 200) {
         // 解析并保存 cookies
@@ -655,6 +689,7 @@ class ApiService {
           'q': query.trim(),
         },
         fromJson: (data) => data as Map<String, dynamic>,
+        timeout: _timeoutSearch,
       );
 
       if (response.success && response.data != null) {
