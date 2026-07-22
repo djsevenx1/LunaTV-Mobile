@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/models/netdisk_result.dart';
 import 'package:luna_tv/services/netdisk_service.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 
@@ -99,6 +100,7 @@ class _NetdiskSearchScreenState extends State<NetdiskSearchScreen> {
                 child: TextField(
                   controller: _searchController,
                   focusNode: _focusNode,
+                  contextMenuBuilder: chineseTextSelectionToolbarBuilder,
                   decoration: InputDecoration(
                     hintText: '搜索网盘资源...',
                     hintStyle: FontUtils.poppins(context,

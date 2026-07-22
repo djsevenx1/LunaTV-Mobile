@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:luna_tv/services/content_filter_service.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 
 class FilterSettingsScreen extends StatefulWidget {
   const FilterSettingsScreen({super.key});
@@ -76,6 +77,7 @@ class _FilterSettingsScreenState extends State<FilterSettingsScreen> {
                       Expanded(
                         child: TextField(
                           controller: _controller,
+                          contextMenuBuilder: chineseTextSelectionToolbarBuilder,
                           decoration: const InputDecoration(
                             labelText: '添加关键词',
                             border: OutlineInputBorder(),

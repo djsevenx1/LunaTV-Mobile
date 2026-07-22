@@ -16,6 +16,7 @@ import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:luna_tv/services/version_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:luna_tv/widgets/update_dialog.dart';
 
 class UserMenu extends StatefulWidget {
@@ -216,6 +217,7 @@ class _UserMenuState extends State<UserMenu> {
               controller: controller,
               maxLines: 4,
               minLines: 2,
+              contextMenuBuilder: chineseTextSelectionToolbarBuilder,
               style: FontUtils.sourceCodePro(
                 ctx,
                 fontSize: 12,
@@ -405,6 +407,7 @@ class _UserMenuState extends State<UserMenu> {
             TextField(
               controller: controller,
               maxLines: 1,
+              contextMenuBuilder: chineseTextSelectionToolbarBuilder,
               style: FontUtils.sourceCodePro(
                 ctx,
                 fontSize: 13,
@@ -584,6 +587,7 @@ class _UserMenuState extends State<UserMenu> {
             TextField(
               controller: controller,
               maxLines: 1,
+              contextMenuBuilder: chineseTextSelectionToolbarBuilder,
               keyboardType: TextInputType.url,
               autocorrect: false,
               style: FontUtils.sourceCodePro(

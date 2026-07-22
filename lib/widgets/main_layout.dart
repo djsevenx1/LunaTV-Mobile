@@ -10,6 +10,7 @@ import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:luna_tv/widgets/user_menu.dart';
 
 class MainLayout extends StatefulWidget {
@@ -505,6 +506,7 @@ class _MainLayoutState extends State<MainLayout> {
           child: TextField(
             controller: widget.searchController,
             focusNode: widget.searchFocusNode,
+            contextMenuBuilder: chineseTextSelectionToolbarBuilder,
             autofocus: false,
             textInputAction: TextInputAction.search,
             keyboardType: TextInputType.text,

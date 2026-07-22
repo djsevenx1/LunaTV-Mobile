@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:luna_tv/services/user_data_service.dart';
@@ -654,6 +655,7 @@ class _LoginScreenState extends State<LoginScreen>
     final focusedBorderColor = AppColors.primary;
     return TextFormField(
       controller: controller,
+      contextMenuBuilder: chineseTextSelectionToolbarBuilder,
       obscureText: isPassword && !isPasswordVisible,
       style: TextStyle(
         fontSize: 15,

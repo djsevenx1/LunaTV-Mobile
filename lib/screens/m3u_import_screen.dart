@@ -3,6 +3,7 @@ import 'package:luna_tv/services/user_data_service.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -104,6 +105,7 @@ class _M3uImportScreenState extends State<M3uImportScreen> {
           const SizedBox(height: 16),
           TextField(
             controller: _controller,
+            contextMenuBuilder: chineseTextSelectionToolbarBuilder,
             decoration: InputDecoration(
               labelText: '订阅 / M3U 地址',
               hintText: 'https://example.com/subscribe.m3u',

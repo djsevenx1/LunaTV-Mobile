@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/models/youtube_video.dart';
 import 'package:luna_tv/services/youtube_service.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -239,6 +240,7 @@ class _YouTubeScreenState extends State<YouTubeScreen> {
         child: TextField(
           controller: _searchController,
           focusNode: _searchFocusNode,
+          contextMenuBuilder: chineseTextSelectionToolbarBuilder,
           style: FontUtils.poppins(context,
             fontSize: 14,
             color: themeService.isDarkMode

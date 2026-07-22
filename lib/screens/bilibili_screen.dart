@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/models/bilibili_video.dart';
 import 'package:luna_tv/services/bilibili_service.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -237,6 +238,7 @@ class _BilibiliScreenState extends State<BilibiliScreen> {
         child: TextField(
           controller: _searchController,
           focusNode: _searchFocusNode,
+          contextMenuBuilder: chineseTextSelectionToolbarBuilder,
           style: FontUtils.poppins(context,
             fontSize: 14,
             color: themeService.isDarkMode

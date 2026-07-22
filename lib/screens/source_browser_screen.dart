@@ -60,6 +60,7 @@ import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/search_service.dart';
 import 'package:luna_tv/services/source_browser_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
+import 'package:luna_tv/utils/text_context_menu.dart';
 
 /// v2.3.32.1: 排序选项, 跟 web <select> 5 个 option 1:1
 enum _SortBy {
@@ -936,6 +937,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   child: TextField(
                     controller: _searchController,
                     onChanged: _onSearchChanged,
+                    contextMenuBuilder: chineseTextSelectionToolbarBuilder,
                     decoration: InputDecoration(
                       hintText: '输入关键词并回车进行搜索；清空回车恢复分类',
                       hintStyle: const TextStyle(fontSize: 12),
@@ -1020,6 +1022,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               child: TextField(
                 controller: _filterKeywordController,
                 onChanged: (v) => setState(() => _filterKeyword = v),
+                contextMenuBuilder: chineseTextSelectionToolbarBuilder,
                 decoration: InputDecoration(
                   hintText: '地区/关键词',
                   hintStyle: const TextStyle(fontSize: 12),
