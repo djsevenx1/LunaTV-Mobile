@@ -40,6 +40,8 @@ class _UserMenuState extends State<UserMenu> {
   //   UI 显示时调 [getBangumiDataSourceDisplayName] 转. v2.1.40 这里存的是
   //   显示名 ('直连'), 跟新模式不一致, 这次改回 key.
   String _bangumiDataSource = 'direct';
+  // v2.5.31: Bangumi 图片源 跟数据源合并成 1 个 selector, 这里保留字段跟数据源同步
+  //   (内部仍存 SharedPreferences 兼容老用户数据, UI 不再独立显示)
   String _bangumiImageSource = 'direct';
   // v2.5.29: 短剧 + GitHub 数据源选择项 (跟 TMDB/Bangumi 同 UX)
   String _shortDramaDataSource = 'direct';
@@ -1646,11 +1648,11 @@ class _UserMenuState extends State<UserMenu> {
                     : const Color(0xFF9ca3af),
               ),
               _buildDivider(),
-              // v2.1.42: Bangumi 数据源 selector (跟 v2.1.41 TMDB 同 UX).
-              //   v2.1.40 整个删了, 这次跟 TMDB 一起加回.
-              //   2 选 1: 'Bangumi Worker 加速' / '直连'. 配了 worker
-              //   URL 但选 'bangumi_proxy' 没配 → 弹 SnackBar 警告 + 落
-              //   '直连' (跟 TMDB 同行为, 复用 _tmdbProxyDomain).
+              // v2.5.31: Bangumi 数据源 + 图片源合并成 1 个 selector.
+              //   之前 v2.1.42 是 2 个独立开关 (数据走 worker 但图片直连), 用户反馈太碎
+              //   "bangumi 合并成一个显示bangumi数据源就行". 现在 1 个 selector 控制
+              //   2 个 key, 选 bangumi_proxy → 数据 + 图片都走 worker, 选 direct → 都直连.
+              //   保留 2 个 SharedPreferences key 兼容 v2.1.42-v2.5.30 老用户数据.
               _buildOptionSelector(
                 title: 'Bangumi 数据源',
                 currentValue: UserDataService.getBangumiDataSourceDisplayName(
@@ -1676,57 +1678,20 @@ class _UserMenuState extends State<UserMenu> {
                     if (!mounted) return;
                     setState(() {
                       _bangumiDataSource = 'direct';
-                    });
-                    return;
-                  }
-                  await UserDataService.saveBangumiDataSource(key);
-                  if (!mounted) return;
-                  setState(() {
-                    _bangumiDataSource = key;
-                  });
-                },
-                icon: LucideIcons.calendar,
-                iconColor: _tmdbProxyDomain.isEmpty
-                    ? const Color(0xFF9ca3af)
-                    : const Color(0xFF22C55E),
-              ),
-              _buildDivider(),
-              // v2.1.42: Bangumi 图片源 selector (跟数据源是 2 个独立开关).
-              _buildOptionSelector(
-                title: 'Bangumi 图片源',
-                currentValue: UserDataService.getBangumiImageSourceDisplayName(
-                    _bangumiImageSource),
-                options: const [
-                  'Bangumi Worker 加速',
-                  '直连',
-                ],
-                onChanged: (value) async {
-                  final key = UserDataService
-                      .getBangumiImageSourceKeyFromDisplayName(value);
-                  if (key == 'bangumi_proxy' && _tmdbProxyDomain.isEmpty) {
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          '请先在「TMDB / Bangumi 代理 URL」输入 worker 地址, 已自动回落「直连」',
-                        ),
-                        duration: Duration(seconds: 3),
-                      ),
-                    );
-                    await UserDataService.saveBangumiImageSource('direct');
-                    if (!mounted) return;
-                    setState(() {
                       _bangumiImageSource = 'direct';
                     });
                     return;
                   }
+                  // v2.5.31: 合并成 1 个 selector, 数据 + 图片 同步切
+                  await UserDataService.saveBangumiDataSource(key);
                   await UserDataService.saveBangumiImageSource(key);
                   if (!mounted) return;
                   setState(() {
+                    _bangumiDataSource = key;
                     _bangumiImageSource = key;
                   });
                 },
-                icon: LucideIcons.image,
+                icon: LucideIcons.calendar,
                 iconColor: _tmdbProxyDomain.isEmpty
                     ? const Color(0xFF9ca3af)
                     : const Color(0xFF22C55E),
