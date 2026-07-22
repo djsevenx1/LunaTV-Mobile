@@ -1813,7 +1813,7 @@ class _UserMenuState extends State<UserMenu> {
                     _githubDataSource = key;
                   });
                 },
-                icon: LucideIcons.github,
+                icon: LucideIcons.cloud,
                 iconColor: _tmdbProxyDomain.isEmpty
                     ? const Color(0xFF9ca3af)
                     : const Color(0xFF22C55E),
