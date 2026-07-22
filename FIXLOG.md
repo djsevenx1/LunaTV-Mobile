@@ -6,6 +6,101 @@
 
 ---
 
+## v2.5.22 (2026-07-22) — 测速 fallback 链路裸 GET 无 header → 误报「不可用」
+
+### 现象
+
+v2.5.21 之后用户再反馈「还有很多不可用」截图 (5/9 源显示「不可用」, 极速/新浪/最大/无尽/豪华, 全部单集). 用户实测这些源**播放正常**.
+
+### 排查
+
+v2.5.21 重新启用 fallback 时, 加了 3 个底层函数:
+- `_fallbackMeasureLatency`
+- `_fallbackMeasureDownloadSpeed`
+- `_fallbackMeasureM3u8Speed`
+
+**全都没带任何 header**: 裸 `http.Request('GET', ...)` 只有
+`Range: bytes=0-N`, 没有 User-Agent / Referer / Accept.
+
+但播放能正常播的原因: ExoPlayer 自带完整浏览器 User-Agent +
+DefaultHttpDataSource 自带 anti-bot 通过逻辑, 跟测速的裸 GET
+header 不一致, 导致测速跟播放走两套 anti-bot 校验, 测速误报.
+
+部分 CDN (腾讯/优酷/爱奇艺海外节点/飞飞通用 模板) 拦非浏览器请求
+直接返 403, fallback 链路全失败 → `_SourceSpeedInfo.unavailable()`
+→ UI 显示「不可用」.
+
+### 根因
+
+**v2.5.21 重新启用 fallback 时, 3 个底层函数没补回 v2.3.7 之前的 header**:
+
+```dart
+// v2.5.21 实际 (player_screen.dart 调 3 个 fallback 函数):
+final req = http.Request('GET', Uri.parse(url))
+  ..followRedirects = true
+  ..maxRedirects = 2
+  ..headers['Range'] = 'bytes=0-0';  // 只有 Range, 没 User-Agent / Referer
+```
+
+**测速跟播放走两套 anti-bot 校验**:
+- 测速: 裸 GET 没 UA → CDN 403 → fallback 全失败
+- 播放: ExoPlayer User-Agent → CDN 200 → 正常播
+
+### 修复
+
+**抽 `_browserHeaders` + `_refererHeaderFor` helper (player_screen.dart:95-114)**:
+
+```dart
+static const Map<String, String> _browserHeaders = {
+  'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 ...) Safari/604.1',
+  'Accept': 'text/html,application/xhtml+xml,...',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+};
+
+static Map<String, String> _refererHeaderFor(String url) {
+  // 从 URL host 自动拼 base referer (跟 m3u8_service._refererHeaders 一致)
+  final parsed = Uri.parse(url);
+  return {'Referer': '${parsed.scheme}://${parsed.host}/'};
+}
+```
+
+**3 个 fallback 函数加 header + 调长 timeout**:
+- `_fallbackMeasureLatency` timeout 2s → 3s, 加 _browserHeaders +
+  _refererHeaderFor
+- `_fallbackMeasureDownloadSpeed` timeout 1.5s → 2.5s, 加 _browserHeaders +
+  _refererHeaderFor
+- `_fallbackMeasureM3u8Speed` playlist 2s → 3s, segment 1.5s → 2.5s, 全
+  链路加 _browserHeaders + _refererHeaderFor (m3u8 URL + segment URL
+  分别算 referer, 跨域时 base 不同)
+
+**`_testOneUrl` fallback outer 3s → 5s**:
+调长 fallback 内部 timeout 后, v2.5.21 的 3s outer 反而把调长后的
+链路重新砍掉, 走不到 success 分支. 现在 5s outer 跟调长后内部
+timeout 对齐 (实际 Future.wait 是并发, 端到端 max(3s, 2.5s)=3s, 5s
+outer 留 2s 余量).
+
+### 影响
+
+- 之前测速跟播放 header 不一致 → 测速误报「不可用」但实际能播的源
+  (极速/新浪/最大/无尽/豪华这种), 现在 fallback 能拿到 ms + KB/s
+- 测速单源总预算 13s (v2.5.21) → 15s (v2.5.22), 6 源 3 并发 30s
+  内测完, 用户体验几乎无感
+- 慢网下 1.5s/2s 内部 timeout 经常截断, 现在 2.5s/3s 跟 m3u8_service
+  主链路 timeout 对齐, 慢网下也能拿到测速结果
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`:
+  - 新增 `_browserHeaders` (User-Agent + Accept + Accept-Language) 跟
+    `_refererHeaderFor` (从 URL host 算 base referer) helper
+  - 3 个 fallback 函数加 _browserHeaders + _refererHeaderFor +
+    调长内部 timeout
+  - `_testOneUrl` fallback outer 3s → 5s 跟新内部 timeout 对齐
+- `pubspec.yaml`: 2.5.21+1 → 2.5.22+1
+- `.github/changelogs.json`: 头部插 v2.5.22 entry
+
+---
+
 ## v2.5.21 (2026-07-22) — 测速太多源显示「不可用」
 
 ### 现象

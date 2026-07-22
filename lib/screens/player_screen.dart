@@ -83,6 +83,35 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   销毁时 listener 也要清, 否则下一次 push 播放页会重复监听.
   static const MethodChannel _volumeKeyChannel =
       MethodChannel('org.moontechlab.lunatv/volume_key');
+
+  // v2.5.22: fallback 测速用的浏览器 headers — User-Agent + Referer +
+  //   Accept. 之前 3 个 fallback 函数 (_fallbackMeasureLatency /
+  //   _fallbackMeasureDownloadSpeed / _fallbackMeasureM3u8Speed) 裸 GET,
+  //   没有任何 header, 部分 CDN 拦非浏览器请求直接返 403, fallback 全失败
+  //   → "不可用". 但用户实测这些源播放正常 (ExoPlayer 自带 User-Agent),
+  //   说明是测速链路跟播放链路 header 不一致导致.
+  // 现在统一加浏览器 header, 跟 web LunaTV / ExoPlayer 行为一致, 让
+  // 测速跟播放走同一套 anti-bot 校验.
+  static const Map<String, String> _browserHeaders = {
+    'User-Agent':
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    'Accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,application/javascript,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  };
+
+  // v2.5.22: 给测速 URL 加 Referer 头 (跟 m3u8_service._refererHeaders 一致).
+  //   部分 CDN (腾讯 / 优酷 / 部分爱奇艺海外节点) 不带 Referer 返 403.
+  //   从 URL host 自动取 base referer.
+  static Map<String, String> _refererHeaderFor(String url) {
+    try {
+      final parsed = Uri.parse(url);
+      if (parsed.scheme.isNotEmpty && parsed.host.isNotEmpty) {
+        return {'Referer': '${parsed.scheme}://${parsed.host}/'};
+      }
+    } catch (_) {}
+    return const {};
+  }
   // 播放器 — v2.2.0: 卸 libmpv 改 ExoPlayer (AndroidX Media3).
   //   v2.3.11: 卸 video_player, 改用自研 [CustomExoPlayer] (走
   //   CustomExoPlayerChannel.kt). 视频输出走 Flutter SurfaceTexture,
@@ -1976,9 +2005,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///   实际是 v2.3.9 之后很多"勉强能播"的源 (慢但可用, 或 share page 解析
   ///   失败但顶层 URL 还能响应) 全部归到"不可用"了. 现在两段式:
   ///     1. 完整 m3u8 测速 (10s): 拿到 resolution + segment speed + latency
-  ///     2. fallback (3s): getStreamInfo 失败时, 用 HEAD + Range 64KB 测
+  ///     2. fallback (5s): getStreamInfo 失败时, 用 HEAD + Range 64KB 测
   ///        顶层 URL, 拿到 ms + KB/s (没 resolution, 跟旧 v2.3.7 行为一致)
-  ///   总预算 13s, 跟单源 v2.3.24 12s outer 相比多 1s, 但能多救 30% 源.
+  ///   总预算 15s, 跟单源 v2.3.24 12s outer 相比多 3s, 但能多救 30% 源.
+  ///
+  /// v2.5.22: fallback outer 3s → 5s. 之前 v2.5.21 把 3 个 fallback 函数
+  ///   的内部 timeout 都调长了 (latency 2s→3s, download 1.5s→2.5s, m3u8
+  ///   2s→3s), 3s outer 反而把调长后的链路重新砍掉, 走不到 success 分支.
+  ///   现在 5s outer 跟 m3u8 测速内部 3s + latency 3s + download 2.5s 串起来
+  ///   最坏 8.5s 留 -3.5s 余量. 实际 Future.wait 是并发, 端到端 max(3s, 2.5s)=3s,
+  ///   5s outer 留 2s 余量. 测速单源总预算 15s (10s + 5s), 6 源 3 并发
+  ///   30s 内测完, 用户体验几乎无感.
   Future<_SourceSpeedInfo> _testOneUrl(
     M3U8Service m3u8,
     String url, {
@@ -2018,10 +2055,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   直接 unavailable, 很多 "能响但 m3u8 解析失败" 的源 (CDN 403 /
     //   限流 / 分享页跳转 / 跨域广告段) 全死, 用户看到 "测速全不可用".
     //   现在 fallback 给 ms + KB/s, UI 拼 "Xms · YMB/s" (没分辨率空着).
-    //   3s 预算, 跟 v2.3.7 _fallbackLightSpeed 内部 2.5s timeout 留 0.5s 余量.
+    // v2.5.22: outer 3s → 5s, 跟调长后的 fallback 内部 timeout 对齐.
     try {
       final fallback = await _fallbackLightSpeed(url).timeout(
-        const Duration(seconds: 3),
+        const Duration(seconds: 5),
         onTimeout: () => _SourceSpeedInfo.unavailable(),
       );
       if (fallback.success) {
@@ -2113,17 +2150,25 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///   - 改用 GET Range: 0-0 拿 1 字节, 强制 drain stream 拿真实首字节延迟.
   ///   - 失败返回 -1 (跟 m3u8_service._measureLatency 保持一致), success 改
   ///     `ms > 0` 严格过滤.
+  ///
+  /// v2.5.22: 加浏览器 headers (User-Agent + Referer + Accept). 之前裸 GET
+  ///   部分 CDN 返 403 → fallback 全失败 → "不可用". 现在跟 ExoPlayer
+  ///   播放链路 header 一致, 让测速能通过 anti-bot 校验.
+  ///   timeout 2s → 3s: 慢网下 2s 经常截断返 -1, 现在拉到 3s 跟主链路
+  ///   (m3u8_service._measureLatency 5s) 留 2s 余量.
   Future<int> _fallbackMeasureLatency(http.Client client, String url) async {
     final start = DateTime.now();
     try {
       final req = http.Request('GET', Uri.parse(url))
         ..followRedirects = true
         ..maxRedirects = 2
+        ..headers.addAll(_browserHeaders)
+        ..headers.addAll(_refererHeaderFor(url))
         ..headers['Range'] = 'bytes=0-0';
-      final resp = await client.send(req).timeout(const Duration(milliseconds: 2000));
+      final resp = await client.send(req).timeout(const Duration(milliseconds: 3000));
       // 关掉 stream 释放连接 (Range: 0-0 拿 0~1 字节, 读完就 OK)
       try {
-        await resp.stream.drain<void>().timeout(const Duration(milliseconds: 300));
+        await resp.stream.drain<void>().timeout(const Duration(milliseconds: 500));
       } catch (_) {}
       return DateTime.now().difference(start).inMilliseconds;
     } catch (_) {
@@ -2142,14 +2187,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       final req = http.Request('GET', Uri.parse(url))
         ..followRedirects = true
         ..maxRedirects = 2
+        ..headers.addAll(_browserHeaders)
+        ..headers.addAll(_refererHeaderFor(url))
         ..headers['Range'] = 'bytes=0-65535';
-      final resp = await client.send(req).timeout(const Duration(milliseconds: 1500));
+      // v2.5.22: timeout 1.5s → 2.5s. 之前 1.5s 在慢网下经常截断, 现在
+      //   跟 m3u8_service._measureDownloadSpeedFast 6s 留 3.5s 余量.
+      final resp = await client.send(req).timeout(const Duration(milliseconds: 2500));
       // 把 body 读完才能算下载速度
       final bytes = <int>[];
       await for (final chunk in resp.stream) {
         bytes.addAll(chunk);
         if (bytes.length >= 65536) break; // Range 只取 64KB, 收够就停
-        if (stopwatch.elapsedMilliseconds > 1400) break; // 兜底
+        if (stopwatch.elapsedMilliseconds > 2400) break; // 兜底
       }
       stopwatch.stop();
       final n = bytes.length;
@@ -2165,41 +2214,49 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// v2.3.7: fallback m3u8 测速 - 解析 playlist 并下载真实分片
   ///   跟 m3u8_service 的 _measureSegmentSpeeds 思路一致，但用 http.Client
   ///   避免创建新的 Dio 实例。解析 m3u8 获取分片 URL，下载前几个分片测速。
+  ///
+  /// v2.5.22: 加浏览器 headers + 调长 timeout. 之前裸 GET 部分 CDN 403,
+  ///   m3u8 拉取失败 → 返回 0.0 → fallback unavailable.
+  ///   timeout 2s → 3s, segment 1.5s → 2.5s 跟 m3u8_service 对齐.
   Future<double> _fallbackMeasureM3u8Speed(http.Client client, String m3u8Url) async {
     try {
       // 1. 下载 m3u8 playlist
       final playlistReq = http.Request('GET', Uri.parse(m3u8Url))
         ..followRedirects = true
-        ..maxRedirects = 2;
-      final playlistResp = await client.send(playlistReq).timeout(const Duration(milliseconds: 2000));
+        ..maxRedirects = 2
+        ..headers.addAll(_browserHeaders)
+        ..headers.addAll(_refererHeaderFor(m3u8Url));
+      final playlistResp = await client.send(playlistReq).timeout(const Duration(milliseconds: 3000));
       final playlistContent = await playlistResp.stream.bytesToString();
-      
+
       // 2. 解析分片 URL
       final segments = _parseM3u8Segments(playlistContent, m3u8Url);
       if (segments.isEmpty) return 0.0;
-      
+
       // 3. 下载前 2 个分片测速（跳过可能的 init 段）
       final testSegments = segments.length > 2 ? segments.skip(1).take(2) : segments.take(2);
       final stopwatch = Stopwatch()..start();
       int totalBytes = 0;
-      
+
       for (final segmentUrl in testSegments) {
         try {
           final segReq = http.Request('GET', Uri.parse(segmentUrl))
             ..followRedirects = true
-            ..maxRedirects = 2;
-          final segResp = await client.send(segReq).timeout(const Duration(milliseconds: 1500));
+            ..maxRedirects = 2
+            ..headers.addAll(_browserHeaders)
+            ..headers.addAll(_refererHeaderFor(segmentUrl));
+          final segResp = await client.send(segReq).timeout(const Duration(milliseconds: 2500));
           await for (final chunk in segResp.stream) {
             totalBytes += chunk.length;
             if (totalBytes >= 512 * 1024) break; // 最多 512KB
-            if (stopwatch.elapsedMilliseconds > 2000) break; // 最多 2s
+            if (stopwatch.elapsedMilliseconds > 2400) break; // 最多 2.4s
           }
         } catch (_) {
           // 单个分片失败不影响整体
         }
-        if (stopwatch.elapsedMilliseconds > 2000) break;
+        if (stopwatch.elapsedMilliseconds > 2400) break;
       }
-      
+
       stopwatch.stop();
       if (totalBytes < 64 * 1024) return 0.0; // 样本太小
       final sec = stopwatch.elapsedMilliseconds / 1000.0;
