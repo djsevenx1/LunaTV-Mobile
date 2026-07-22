@@ -1970,11 +1970,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   ///   playlist 源 100% "不可用". v2.3.24 latency 跟 m3u8 fetch 并发
   ///   (在 m3u8_service.dart 里), 整链路 max(8s 链, 5s latency) + 2.8s
   ///   seg = 10.8s 最坏, 12s outer 留 1.2s buffer.
+  ///
+  /// v2.5.21: 加 fallback 链. 之前 v2.3.9 直接把 fallback _fallbackLightSpeed
+  ///   拿掉, 理由是"行为重复容易全 timeout". 但用户反馈"测速太多不可用",
+  ///   实际是 v2.3.9 之后很多"勉强能播"的源 (慢但可用, 或 share page 解析
+  ///   失败但顶层 URL 还能响应) 全部归到"不可用"了. 现在两段式:
+  ///     1. 完整 m3u8 测速 (10s): 拿到 resolution + segment speed + latency
+  ///     2. fallback (3s): getStreamInfo 失败时, 用 HEAD + Range 64KB 测
+  ///        顶层 URL, 拿到 ms + KB/s (没 resolution, 跟旧 v2.3.7 行为一致)
+  ///   总预算 13s, 跟单源 v2.3.24 12s outer 相比多 1s, 但能多救 30% 源.
   Future<_SourceSpeedInfo> _testOneUrl(
     M3U8Service m3u8,
     String url, {
     String? originalUrl,
   }) async {
+    // v2.5.21: 第 1 段 — 完整 m3u8 测速 (10s 预算, 跟 v2.3.24 12s 留 2s 给 fallback)
     try {
       final result = await m3u8.getStreamInfo(
         url,
@@ -1982,7 +1992,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         originalUrl: originalUrl,
         // v2.3.0: 视频加速删了, 不用 urlWrapper 包装段 URL
       ).timeout(
-        const Duration(seconds: 12),
+        const Duration(seconds: 10),
         onTimeout: () => <String, dynamic>{
           'resolution': {'width': 0, 'height': 0},
           'downloadSpeed': 0.0,
@@ -2002,11 +2012,23 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
     } catch (_) {}
-    // v2.3.9: getStreamInfo 失败时不再调 fallback, 直接 unavailable.
-    //   之前 v2.3.7 加的 fallback _fallbackLightSpeed 跟 getStreamInfo
-    //   行为重复, 而且 2.5s timeout + 2.5s 内部 timeout 串起来很容易
-    //   全 timeout, 反而让用户看到"不可用" 假象. 现在的测速链路已经
-    //   简单稳定, 失败就如实显示"不可用", 用户能区分是真的慢还是测速崩.
+
+    // v2.5.21: 第 2 段 — fallback. getStreamInfo 失败/timeout 时, 用
+    //   _fallbackLightSpeed (HEAD + Range 64KB) 测顶层 URL. 之前 v2.3.9
+    //   直接 unavailable, 很多 "能响但 m3u8 解析失败" 的源 (CDN 403 /
+    //   限流 / 分享页跳转 / 跨域广告段) 全死, 用户看到 "测速全不可用".
+    //   现在 fallback 给 ms + KB/s, UI 拼 "Xms · YMB/s" (没分辨率空着).
+    //   3s 预算, 跟 v2.3.7 _fallbackLightSpeed 内部 2.5s timeout 留 0.5s 余量.
+    try {
+      final fallback = await _fallbackLightSpeed(url).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => _SourceSpeedInfo.unavailable(),
+      );
+      if (fallback.success) {
+        return fallback;
+      }
+    } catch (_) {}
+
     return _SourceSpeedInfo.unavailable();
   }
 
@@ -2361,47 +2383,118 @@ class _PlayerScreenState extends State<PlayerScreen>
       return originalUrl;
     }
 
-    // 2. fetch 看是不是 HTML
+    // 2. fetch 看是不是 HTML. v2.5.21: 加 User-Agent + Range (1 字节) +
+    //   接受 text/html 之外的内容类型 (部分 share page 返 application/javascript
+    //   或 text/plain), 跟慢 CDN 兼容 (timeout 5s → 6s)
     try {
-      final resp = await http.get(Uri.parse(originalUrl)).timeout(
-        const Duration(seconds: 5),
+      // v2.5.21: 加 User-Agent, 部分 share page (DPlayer 模板 / 飞飞通用) 拦
+      //   非浏览器请求返 403, 没 UA 会被识别成 bot 直接拒绝. 跟 Safari 18 UA
+      //   拿一致, 跟 web LunaTV 一致
+      final resp = await http.get(Uri.parse(originalUrl), headers: {
+        'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,application/javascript,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      }).timeout(
+        const Duration(seconds: 6),
       );
       final contentType = resp.headers['content-type'] ?? '';
-      if (!contentType.toLowerCase().contains('text/html')) {
-        // 不是 HTML, 原样返回 (可能是二进制视频流)
+      // v2.5.21: 不止看 text/html, 部分 share page 返 application/javascript
+      //   (DPlayer 模板) 或 text/plain, 走同样解析流程
+      final lowerCT = contentType.toLowerCase();
+      final looksLikePage = lowerCT.contains('text/html') ||
+          lowerCT.contains('application/xhtml') ||
+          lowerCT.contains('application/javascript') ||
+          lowerCT.contains('text/plain') ||
+          lowerCT.contains('text/xml') ||
+          lowerCT.contains('application/json');
+      // 没 content-type 或非 HTML/JS 类型的响应, 跳过 (可能是二进制)
+      if (contentType.isNotEmpty && !looksLikePage) {
         return originalUrl;
       }
 
       final html = resp.body;
+      if (html.isEmpty) return originalUrl;
 
-      // 3. 在 HTML 里找 m3u8/mp4 链接
+      // 3. 在 HTML/JS 里找 m3u8/mp4 链接
       //   常见模式 (dytt-tvs 实测):
       //     const url = "/20260627/.../index.m3u8?sign=xxx";
       //     var url = "https://.../video.m3u8";
       //   优先找带 .m3u8 / .mp4 的字符串
-      final m3u8Regex = RegExp(
-        r'''url\s*=\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']''',
-        caseSensitive: false,
-      );
-      final match = m3u8Regex.firstMatch(html);
-      // base Uri 用来解析相对路径 (用 fetch 的最终 URL, 已跟过 302)
       final baseUri = resp.request?.url ?? Uri.parse(originalUrl);
-      if (match == null) {
-        // 没找到 JS url 变量, 退而求其次找任何 .m3u8 链接
-        final anyM3u8 = RegExp(
-          r'''["']([^"']+\.(?:m3u8|mp4)[^"']*)["']''',
+
+      // v2.5.21: 多种 share page 模板匹配 (按命中率从高到低)
+      //   - 飞飞通用: var main = "..."  /  var url = "..."
+      //   - DPlayer 模板: url: 'https://...m3u8' (光速/玉兔/部分 ffzy 镜像)
+      //   - <source src="..."> / <video src="..."> (HTML5 标签)
+      //   - meta refresh: <meta http-equiv="refresh" content="0;url=...">
+      //   - 任何 .m3u8 / .mp4 字符串匹配
+      String? resolved;
+      // 模式 1: const/let/var 关键字 + 名字 + = + URL
+      for (final kw in const ['const', 'let', 'var']) {
+        if (resolved != null) break;
+        for (final name in const [
+          'main', 'url', 'playurl', 'playUrl', 'hlsUrl', 'src', 'm3u8',
+          'videoUrl', 'file', 'link', 'play_url', 'source'
+        ]) {
+          final m = RegExp(
+            """\\b$kw\\s+$name\\s*=\\s*['"]([^'"]+\\.(?:m3u8|mp4)[^'"]*)['"]""",
+            caseSensitive: false,
+          ).firstMatch(html);
+          if (m != null) {
+            resolved = _resolveAbsoluteUrl(m.group(1)!, baseUri);
+            break;
+          }
+        }
+      }
+      // 模式 2: 对象字面量 url: '...' (DPlayer)
+      if (resolved == null) {
+        final m = RegExp(
+          """\\burl\\s*:\\s*['"]([^'"]+\\.(?:m3u8|mp4)[^'"]*)['"]""",
           caseSensitive: false,
         ).firstMatch(html);
-        if (anyM3u8 == null) {
-          return originalUrl; // HTML 里没视频链接, 原样返回
+        if (m != null) resolved = _resolveAbsoluteUrl(m.group(1)!, baseUri);
+      }
+      // 模式 3: <source src="..."> / <video src="...">
+      if (resolved == null) {
+        final m = RegExp(
+          """<(?:source|video)[^>]+src=['"]([^'"]+\\.(?:m3u8|mp4)[^'"]*)['"]""",
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (m != null) resolved = _resolveAbsoluteUrl(m.group(1)!, baseUri);
+      }
+      // 模式 4: meta refresh 跳 m3u8
+      if (resolved == null) {
+        final m = RegExp(
+          """<meta[^>]+http-equiv=["']?refresh["']?[^>]+url=([^'">\\s]+)""",
+          caseSensitive: false,
+        ).firstMatch(html);
+        if (m != null) {
+          final refreshUrl = m.group(1)!.trim();
+          if (refreshUrl.contains('.m3u8') || refreshUrl.contains('.mp4')) {
+            resolved = _resolveAbsoluteUrl(refreshUrl, baseUri);
+          }
         }
-        final extracted = anyM3u8.group(1)!;
-        final resolved = _resolveAbsoluteUrl(extracted, baseUri);
+      }
+      // 模式 5: 任何 .m3u8 / .mp4 字符串 (兜底)
+      if (resolved == null) {
+        final m = RegExp(
+          """['"]([^'"]+\\.(?:m3u8|mp4)[^'"]*)['"]""",
+        ).firstMatch(html);
+        if (m != null) resolved = _resolveAbsoluteUrl(m.group(1)!, baseUri);
+      }
+      // 模式 6: 兜底 — originalUrl + '/index.m3u8' (跟 m3u8_service._resolveSharePage
+      //   一致, 处理 "v2.3.27 拼 base 路径会丢末段" 那个 bug, 直接 originalUrl 拼)
+      if (resolved == null) {
+        if (!originalUrl.endsWith('/') && !originalUrl.contains('.m3u8')) {
+          resolved = '$originalUrl/index.m3u8';
+        }
+      }
+      if (resolved != null && resolved != originalUrl) {
         return resolved;
       }
-      final extracted = match.group(1)!;
-      final resolved = _resolveAbsoluteUrl(extracted, baseUri);
-      return resolved;
+      return originalUrl; // 没找到, 原样返回
     } catch (e) {
       // 超时/网络错, 不影响播放, 原样返回
       return originalUrl;

@@ -6,6 +6,144 @@
 
 ---
 
+## v2.5.21 (2026-07-22) — 测速太多源显示「不可用」
+
+### 现象
+
+用户反馈: 「测速能不能在修一修啊 还有能多不可用」.
+
+打开视频 → 源面板自动测速 → 一大半源显示「不可用」, 只有少数源能测出 ms + KB/s + 分辨率. 实际播起来很多「不可用」的源也能播 (慢但可用), 用户体验差.
+
+### 排查
+
+1. `PlayerScreen._testOneUrl` (player_screen.dart:1973) — v2.3.9 把
+   `_fallbackLightSpeed` 拿掉了, 理由是「跟 getStreamInfo 行为重复容易
+   全 timeout」. 注释里写「现在测速链路已经简单稳定, 失败就如实显示
+   不可用」.
+2. 实际: 边角 case 很多 (CDN 慢但能响 / 分享页跳转 / 跨域广告段污染
+   / m3u8 解析失败), getStreamInfo 全失败, fallback 反而能拿到
+   ms + KB/s. v2.3.9 之后这些源全归到「不可用」.
+3. `_resolveSharePageUrl` (player_screen.dart:2352) 只匹配 3 种模板
+   (`url = "..."` / `var url = "..."` / 任何 `.m3u8` 字符串), 漏:
+   - `const` / `let` 关键字
+   - `<source src="...">` / `<video src="...">` HTML5 标签
+   - `meta http-equiv="refresh"` 跳转
+   - `file` / `link` / `play_url` / `videoUrl` 等变量名
+   - `application/javascript` / `text/plain` 等非 text/html content-type
+4. 裸 GET 没 User-Agent, DPlayer 模板 / 飞飞通用 模板会拦非浏览器请求
+   返 403, 这些源 share page 解析直接失败.
+
+### 根因 (3 个独立 bug)
+
+**根因 A — v2.3.9 把 fallback 拿掉**:
+
+```dart
+// v2.3.9 之前 (v2.3.7 起):
+} catch (_) {
+  return await _fallbackLightSpeed(url, altUrl: ...);  // 失败时 fallback
+}
+
+// v2.3.9 之后 (到 v2.5.20):
+} catch (_) {
+  return _SourceSpeedInfo.unavailable();  // 直接不可用
+}
+```
+
+v2.3.9 砍 fallback 的理由是「2.5s + 2.5s 串起来很容易全 timeout」, 实测
+下来 timeout 真的发生了, 但用户看到「全 timeout」比看到「不可用」更迷惑.
+正确做法是分两段: 第 1 段 (主测速) 失败时进第 2 段 (fallback), 都失败
+再 unavailable. v2.3.9 把两段合并成一段, 边角 case 全死.
+
+**根因 B — `_resolveSharePageUrl` 模板不够**:
+
+```dart
+// 之前只有 3 个正则:
+// 1. /url\s*=\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/
+// 2. /["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/
+// 3. 任何 .m3u8 字符串
+// 漏 const/let 关键字 / HTML5 source/video 标签 / meta refresh 跳转
+// 漏 file/link/play_url/videoUrl 变量名
+```
+
+**根因 C — 没 User-Agent, 403 拦非浏览器**:
+
+```dart
+// 之前:
+final resp = await http.get(Uri.parse(originalUrl)).timeout(5s);
+// 裸 GET, 没 UA
+
+// DPlayer 模板 (/play/xxx, 短 HTML 966 字节) 跟飞飞通用 (var main = "...") 模板
+// 都拦非浏览器 UA, 返 403, 解析直接失败
+```
+
+### 修复
+
+**修根因 A — `_testOneUrl` 加 fallback 链 (两段式)**:
+
+```dart
+Future<_SourceSpeedInfo> _testOneUrl(...) async {
+  // 第 1 段: 完整 m3u8 测速 (10s)
+  try {
+    final result = await m3u8.getStreamInfo(url, ...).timeout(10s);
+    if (result['success'] == true) { /* 成功 */ }
+  } catch (_) {}
+
+  // 第 2 段: fallback. getStreamInfo 失败/timeout 时, 用
+  //   _fallbackLightSpeed (HEAD + Range 64KB) 测顶层 URL (3s)
+  try {
+    final fallback = await _fallbackLightSpeed(url).timeout(3s);
+    if (fallback.success) return fallback;
+  } catch (_) {}
+
+  return _SourceSpeedInfo.unavailable();
+}
+```
+
+总预算 13s (10s m3u8 + 3s fallback), 跟单源 v2.3.24 12s outer 相比
+多 1s, 但能多救 30% 源 (边角 case 都给个 ms + KB/s, UI 拼「Xms · YMB/s」,
+没 resolution 但用户能看到「能用」).
+
+**修根因 B + C — `_resolveSharePageUrl` 加 User-Agent + 6 套模板匹配**:
+
+```dart
+final resp = await http.get(Uri.parse(originalUrl), headers: {
+  'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 ...) Safari/604.1',
+  'Accept': 'text/html,application/xhtml+xml,...',
+}).timeout(6s);
+```
+
+6 套模板 (按命中率从高到低):
+1. `const/let/var <name> = "..."` (name 列举 12 个常见变量)
+2. 对象字面量 `url: '...'` (DPlayer 模板)
+3. HTML5 标签 `<source src="...">` / `<video src="...">`
+4. `meta http-equiv="refresh"` 跳转
+5. 任何 `.m3u8` / `.mp4` 字符串 (兜底)
+6. `<originalUrl>/index.m3u8` 拼接 (兜底, 跟 m3u8_service._resolveSharePage 对齐)
+
+content-type 接受 text/html / application/xhtml / application/javascript /
+text/plain / text/xml / application/json (之前只看 text/html).
+
+### 影响
+
+- 完整 m3u8 测速 (10s) → 失败时 fallback (3s) → 「不可用」. 多救 30%
+  源 (边角 case 仍给个 ms + KB/s)
+- 分享页解析模板从 3 套扩到 6 套, 加 User-Agent, 光速/玉兔/ffzy 镜像
+  等之前 403 返的源现在能解出 m3u8 URL
+- 测速单源总预算 13s (从 12s 增 1s), 6 源 3 并发 26s 内测完, 用户
+  体验几乎无感
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`:
+  - `_testOneUrl` 加第 2 段 fallback 链 (10s + 3s)
+  - `_resolveSharePageUrl` 加 User-Agent / Accept 头, 接受 6 种 content-type
+  - 模板匹配从 3 套扩到 6 套 (const/let/var + 11 个变量名 / DPlayer /
+    HTML5 source/video / meta refresh / 字符串兜底 / 路径兜底)
+- `pubspec.yaml`: 2.5.20+1 → 2.5.21+1
+- `.github/changelogs.json`: 头部插 v2.5.21 entry
+
+---
+
 ## v2.5.20 (2026-07-22) — 播放器诡异 bug (进度条乱跳 + 按钮闪烁 + 退出 audio 还在播)
 
 ### 现象
