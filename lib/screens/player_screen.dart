@@ -4044,19 +4044,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 跟控件一起显隐, 点击后短暂显示提示文字
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
-    // 按屏幕宽度算按钮尺寸和偏移, 避免竖屏全屏时 (360~400px 宽) 三个按钮挤一起重叠
-    // 横屏全屏宽 800+ 用 64/140; 竖屏全屏宽 ~360 用 44/72; 非全屏再小一档 40/56
+    // 按屏幕宽度算按钮尺寸和偏移, 避免竖屏 (360~400px 宽) 三个按钮挤一起重叠
+    // 横屏全屏 (宽 > 600) 用 64/140; 竖屏 (含竖屏全屏 / 竖屏非全屏) 都用 44/72
     final screenWidth = MediaQuery.of(context).size.width;
     final double size;
     final double sideOffset;
-    if (!_isFullscreen) {
-      size = 40.0;
-      sideOffset = 56.0;
-    } else if (screenWidth > 600) {
+    if (screenWidth > 600) {
       size = 64.0;
       sideOffset = 140.0;
     } else {
-      // 竖屏全屏 (portrait video + fullscreen): 用更小的按钮和偏移
+      // 竖屏 (无论全屏 / 非全屏): 统一用 44/72, 360px 宽下左-中-右各留 42px 间隙
       size = 44.0;
       sideOffset = 72.0;
     }
