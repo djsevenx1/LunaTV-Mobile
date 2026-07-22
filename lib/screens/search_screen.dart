@@ -45,6 +45,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   Timer? _updateTimer;
   bool _useAggregatedView = true;
 
+  // v2.5.27: 搜索代际 guard. debounce 缩短到 400ms 后, 用户还在输入就可能触发
+  //   新搜索, 旧搜索的 await 晚返回会覆盖新搜索的空/loading 状态, 导致"结果突然消失".
+  //   每次发起新搜索递增 generation, await 返回后校验, 不匹配就丢弃结果.
+  int _searchGeneration = 0;
+
   // 筛选/排序状态（保持不变）
   String _selectedSource = 'all';
   String _selectedYear = 'all';
@@ -101,6 +106,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     if (_updateTimer?.isActive ?? false) _updateTimer!.cancel();
     // v2.5.26: debounce 800→400ms. 800ms 偏长, 用户输入完到触发搜索的等待感明显.
     // 400ms 既能避免逐字抖动, 又让搜索更"跟手".
+    // v2.5.27: 用户继续输入时, 让进行中的旧搜索结果作废, 避免覆盖新状态.
+    _searchGeneration++;
     _updateTimer = Timer(const Duration(milliseconds: 400), () {
       if (query.trim().isEmpty) {
         if (mounted) {
@@ -116,6 +123,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Future<void> _performSearch(String query) async {
+    // v2.5.27: 记录本次搜索的代次, await 后校验, 避免旧搜索覆盖新搜索状态
+    final gen = ++_searchGeneration;
     setState(() {
       _hasSearched = true;
       _searchResults = [];
@@ -124,13 +133,13 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     });
     try {
       final results = await ApiService.fetchSourcesData(query);
-      if (!mounted) return;
+      if (!mounted || gen != _searchGeneration) return;
       setState(() {
         _searchResults = results;
         _isLoading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _searchGeneration) return;
       setState(() {
         _searchError = e.toString();
         _isLoading = false;
@@ -162,6 +171,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       onSearchSubmitted: (q) => _performSearch(q.trim()),
       onClearSearch: () {
         if (_searchController.hasListeners) _searchController.clear();
+        // v2.5.27: 清空时让进行中的搜索作废
+        _searchGeneration++;
         setState(() {
           _searchQuery = '';
           _hasSearched = false;
