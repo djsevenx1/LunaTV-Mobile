@@ -6,6 +6,90 @@
 
 ---
 
+## v2.5.19 (2026-07-22) — 竖屏全屏时播放器中央暂停/快退6s/快进6s 三个按钮重叠
+
+### 现象
+
+竖屏视频 (比如抖音/快手风格的竖屏短剧) 点全屏后, 视频中央的 -6 / 播放暂停 / +6
+三个按钮挤在一起重叠, 只能看到中间一个暂停按钮, 左右两边的 -6 / +6 完全点不到。
+横屏视频全屏正常, 三个按钮各居其位, 间距 200+px。
+
+### 排查
+
+- 截图坐标: 中间暂停按钮在水平居中, 两侧 -6/+6 应在 left/right 偏移位
+- `_buildSideSeekButtons` 按 `_isFullscreen` 二档分尺寸:
+  - 非全屏: `size=48, sideOffset=90`
+  - 全屏: `size=64, sideOffset=140`
+- 模拟 360px 宽竖屏全屏计算 (竖屏视频 `_onEnterFullscreen` 保持
+  `DeviceOrientation.portraitUp`, 屏幕宽仍 360-400px):
+  - 左按钮 (left=140, width=64): 140-204
+  - 中按钮 (居中, width=64): 148-212
+  - 右按钮 (right=140, width=64): 156-220
+  - 左∩中 = 56px 重叠, 中∩右 = 56px 重叠
+- 横屏全屏 (800+px 宽) 模拟:
+  - 左: 140-204, 中: 368-432, 右: 596-660
+  - 间距 200+px, 无重叠
+
+### 根因
+
+`_isFullscreen` 在竖屏视频下也是 `true` (因为进入全屏 `_onEnterFullscreen`
+只 setState, 方向由 `_isPortraitVideo` 决定是否转横), 但屏幕宽度仍是
+手机竖屏的 360-400px。 用 `_isFullscreen` 区分不出「横屏全屏 (800+px)」和
+「竖屏全屏 (360-400px)」两种完全不同的场景, 导致 64/140 这一档在窄屏上
+爆掉。
+
+### 修复
+
+`lib/screens/player_screen.dart:4043-4062` `_buildSideSeekButtons` 改成按
+`MediaQuery.size.width` 判断, 不再按 `_isFullscreen`:
+
+```dart
+final screenWidth = MediaQuery.of(context).size.width;
+final double size;
+final double sideOffset;
+if (screenWidth > 600) {
+  size = 64.0;
+  sideOffset = 140.0;  // 横屏 (含全屏)
+} else {
+  size = 44.0;
+  sideOffset = 72.0;   // 竖屏 (含全屏 + 非全屏)
+}
+```
+
+新尺寸下 360px 宽屏幕三按钮位置:
+- 左按钮: 72-116
+- 中按钮: 158-202
+- 右按钮: 244-288
+- 各按钮间留 42px 间隙, 不再重叠。
+
+### 设计选择
+
+- **为什么是 600 阈值** — 跟 project 里 `isTablet = screenWidth >= 600` 1:1
+  (见 player_screen.dart:2874), 跟 Material Design phone/tablet 分界点
+  一致, 复用已有习惯
+- **为什么竖屏全屏跟竖屏非全屏统一 44/72** — 用户后期反馈要求两个
+  场景尺寸一致, 避免切全屏时按钮突然变小的视觉跳变. 竖屏视频按
+  定义就不会触发横屏全屏, 两档之间不会有跨档切换
+- **为什么不读 `MediaQuery.orientation`** — Flutter `MediaQuery.size`
+  已经是 layout 后的实际像素, 跟设备物理方向解耦 (折叠屏 / 平板
+  旋转 / 异形屏都 OK), 比读 orientation 更稳
+
+### 影响
+
+- 竖屏全屏: 之前按钮重叠无法操作 → 现在三个按钮各留 42px 间隙
+- 竖屏非全屏: 之前 48/90 → 现在 44/72, 按钮略小一档, 跟竖屏全屏
+  统一
+- 横屏全屏 / 平板: 行为不变, 仍是 64/140
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: `_buildSideSeekButtons` 按
+  `MediaQuery.size.width` 分配 size + sideOffset
+- `pubspec.yaml`: 2.5.18+1 → 2.5.19+1
+- `.github/changelogs.json`: 头部插 v2.5.19 entry
+
+---
+
 ## v2.5.18 (2026-07-21) — 播放时调节音量弹系统音量条 (安卓 16)
 
 ### 现象
