@@ -47,6 +47,12 @@ class UserDataService {
   //   "这个关闭不要"). 'cf_worker' / 'cors_proxy' 在 v2.1.40 已删, 老值
   //   自动 migrate.
   static const String _tmdbDataSourceKey = 'tmdb_data_source';
+  // v2.5.29: 短剧数据源 — 跟 TMDB 一样 2 选 1 (shortdrama_proxy / direct).
+  //   配了 worker URL 默认 'shortdrama_proxy' (走 /sd-api + /sd-img), 没配 'direct'.
+  static const String _shortDramaDataSourceKey = 'shortdrama_data_source';
+  // v2.5.29: GitHub 数据源 — 2 选 1 (github_proxy / direct).
+  //   之前是隐式 (配了 worker URL 自动走), 现在显式让用户选.
+  static const String _githubDataSourceKey = 'github_data_source';
   // v2.1.41: TMDB 代理 URL — 用户自部署的 CF Worker (e.g.
   //   https://your-worker.example.com/), 走 path-based 加速. 跟 v2.0.77
   //   _cfWorkerDomainKey 区分: _cfWorkerDomainKey 是视频加速 (CORSAPI
@@ -77,6 +83,9 @@ class UserDataService {
   static String? _tmdbApiKeyCache;
   // v2.0.97
   static String? _tmdbDataSourceCache;
+  // v2.5.29: 短剧 + GitHub 数据源选择项缓存
+  static String? _shortDramaDataSourceCache;
+  static String? _githubDataSourceCache;
   // v2.1.41
   static String? _tmdbProxyDomainCache;
   // v2.5.25: serverUrl + cookies 内存缓存 — 之前每次 API 请求都读 2 次
@@ -561,6 +570,129 @@ class UserDataService {
     }
   }
 
+  // ===== v2.5.29: 短剧数据源选择项 (复制 TMDB 模式) =====
+  //
+  // 跟 TMDB 一样 2 选 1: 'shortdrama_proxy' (走 worker /sd-api + /sd-img)
+  //   或 'direct' (直连 TVBox 源). 复用同一个 worker URL 字段
+  //   (_tmdbProxyDomainKey), 不新开字段.
+
+  static Future<void> saveShortDramaDataSource(String key) async {
+    String cleaned;
+    if (key == 'shortdrama_proxy') {
+      final proxy = getTmdbProxyDomainSync();
+      cleaned = proxy.isNotEmpty ? 'shortdrama_proxy' : 'direct';
+    } else if (key == 'direct') {
+      cleaned = 'direct';
+    } else {
+      cleaned = 'direct';
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_shortDramaDataSourceKey, cleaned);
+    _shortDramaDataSourceCache = cleaned;
+  }
+
+  static Future<String> getShortDramaDataSourceKey() async {
+    if (_shortDramaDataSourceCache != null) return _shortDramaDataSourceCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_shortDramaDataSourceKey);
+    if (v != null && (v == 'shortdrama_proxy' || v == 'direct')) {
+      _shortDramaDataSourceCache = v;
+      return v;
+    }
+    final proxy = getTmdbProxyDomainSync();
+    final def = proxy.isNotEmpty ? 'shortdrama_proxy' : 'direct';
+    _shortDramaDataSourceCache = def;
+    return def;
+  }
+
+  static String getShortDramaDataSourceSync() {
+    if (_shortDramaDataSourceCache != null) return _shortDramaDataSourceCache!;
+    final proxy = getTmdbProxyDomainSync();
+    return proxy.isNotEmpty ? 'shortdrama_proxy' : 'direct';
+  }
+
+  static String getShortDramaDataSourceDisplayName(String key) {
+    switch (key) {
+      case 'shortdrama_proxy':
+        return '短剧 Worker 加速';
+      case 'direct':
+      default:
+        return '直连';
+    }
+  }
+
+  static String getShortDramaDataSourceKeyFromDisplayName(String name) {
+    switch (name) {
+      case '短剧 Worker 加速':
+        return 'shortdrama_proxy';
+      case '直连':
+      default:
+        return 'direct';
+    }
+  }
+
+  // ===== v2.5.29: GitHub 数据源选择项 (复制 TMDB 模式) =====
+  //
+  // 跟 TMDB 一样 2 选 1: 'github_proxy' (走 worker /github/repos/... +
+  //   /github/asset/...) 或 'direct' (直连 api.github.com, 国内 GFW
+  //   100% 拉不到, 但不报错). 之前 v2.1.46-v2.5.28 是隐式 (配了
+  //   worker URL 自动走), 现在显式让用户选.
+
+  static Future<void> saveGithubDataSource(String key) async {
+    String cleaned;
+    if (key == 'github_proxy') {
+      final proxy = getTmdbProxyDomainSync();
+      cleaned = proxy.isNotEmpty ? 'github_proxy' : 'direct';
+    } else if (key == 'direct') {
+      cleaned = 'direct';
+    } else {
+      cleaned = 'direct';
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_githubDataSourceKey, cleaned);
+    _githubDataSourceCache = cleaned;
+  }
+
+  static Future<String> getGithubDataSourceKey() async {
+    if (_githubDataSourceCache != null) return _githubDataSourceCache!;
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_githubDataSourceKey);
+    if (v != null && (v == 'github_proxy' || v == 'direct')) {
+      _githubDataSourceCache = v;
+      return v;
+    }
+    final proxy = getTmdbProxyDomainSync();
+    final def = proxy.isNotEmpty ? 'github_proxy' : 'direct';
+    _githubDataSourceCache = def;
+    return def;
+  }
+
+  static String getGithubDataSourceSync() {
+    if (_githubDataSourceCache != null) return _githubDataSourceCache!;
+    final proxy = getTmdbProxyDomainSync();
+    return proxy.isNotEmpty ? 'github_proxy' : 'direct';
+  }
+
+  static String getGithubDataSourceDisplayName(String key) {
+    switch (key) {
+      case 'github_proxy':
+        return 'GitHub Worker 加速';
+      case 'direct':
+      default:
+        return '直连';
+    }
+  }
+
+  static String getGithubDataSourceKeyFromDisplayName(String name) {
+    switch (name) {
+      case 'GitHub Worker 加速':
+        return 'github_proxy';
+      case '直连':
+      default:
+        return 'direct';
+    }
+  }
+
   // ===== v2.1.41: TMDB 代理 URL (用户自部署 CF Worker 加速) =====
   //
   // 用户场景: 部署 [djsevenx1/tmdb-proxy] (fork HuntzzZ/tmdb-proxy 加
@@ -979,11 +1111,14 @@ class UserDataService {
   // v2.5.28: 短剧 TVBox API + 图片代理 — 复用同一个 TMDB proxy worker URL.
   //   worker 端新增 /sd-api/{src} + /sd-img?url= 两个路由 (见 tmdb-proxy repo).
   //   没配 worker URL → 返 null / 原始 URL, 调用方走直连 (跟 TMDB/Bangumi 一致).
+  // v2.5.29 改: 加数据源选择项判断 — 用户选 'direct' 时即使配了 worker URL
+  //   也走直连 (跟 TMDB/Bangumi 一致的双条件: source == proxy && worker 配了).
 
   /// 构建短剧 TVBox API 代理 URL.
   /// [srcKey]: tyyszy / wujin / lzi (对应 ShortDramaDirectService 的 3 个源).
-  /// 返回 ${workerUrl}/sd-api/${srcKey} 或 null (没配 worker → 直连).
+  /// 返回 ${workerUrl}/sd-api/${srcKey} 或 null (没配 worker 或用户选 direct → 直连).
   static String? buildShortDramaApiUrl(String srcKey) {
+    if (getShortDramaDataSourceSync() != 'shortdrama_proxy') return null;
     final proxy = getTmdbProxyDomainSync();
     if (proxy.isEmpty) return null;
     return '$proxy/sd-api/$srcKey';
@@ -991,9 +1126,10 @@ class UserDataService {
 
   /// 构建短剧图片代理 URL.
   /// 短剧封面来自 TVBox 源各自的图床, 域名不固定, 走 worker /sd-img?url= 透传.
-  /// 没配 worker URL → 返原 URL (直连).
+  /// 用户选 direct 或没配 worker URL → 返原 URL (直连).
   static String buildShortDramaImageUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
+    if (getShortDramaDataSourceSync() != 'shortdrama_proxy') return originalUrl;
     final proxy = getTmdbProxyDomainSync();
     if (proxy.isEmpty) return originalUrl;
     return '$proxy/sd-img?url=${Uri.encodeComponent(originalUrl)}';
@@ -1103,7 +1239,10 @@ class UserDataService {
   /// 没配 worker URL → 1:1 返原 URL (用户自己负责 GFW / VPN).
   static String buildGithubApiUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
-    final proxy = getTmdbProxyDomainSync();
+    // v2.5.29: 加数据源选择项判断 — 用户选 'direct' 时即使配了 worker URL 也直连.
+    //   之前 v2.1.46-v2.5.28 是隐式 (配了 worker URL 自动走), 现在跟 TMDB/短剧一致显式选.
+    final githubSource = getGithubDataSourceSync();
+    final proxy = githubSource == 'github_proxy' ? getTmdbProxyDomainSync() : '';
     // v2.1.46: configKey 跟 (proxy) 绑定, 变就 clear cache
     final configKey = 'github_api|$proxy';
     if (_githubApiCacheConfigKey != configKey) {
@@ -1120,16 +1259,18 @@ class UserDataService {
         '$proxy/github',
       );
       DiaryService.add(
-          '[GitHub] buildApiUrl: source=tmdb_proxy, worker=$proxy');
+          '[GitHub] buildApiUrl: source=github_proxy, worker=$proxy');
       DiaryService.add(
           '[GitHub] buildApiUrl wrap: in=$originalUrl out=$wrapped');
       _githubApiUrlCache[originalUrl] = wrapped;
       return wrapped;
     } else {
-      // 没配 worker 或 URL 不是 api.github.com 开头, 1:1 返 + 日记告知
-      final reason = proxy.isEmpty
-          ? 'worker URL 未配 (在「设置 → 代理 URL」填)'
-          : 'URL 不是 api.github.com 开头 (不起作用)';
+      // 没配 worker / 用户选 direct / URL 不是 api.github.com 开头, 1:1 返 + 日记告知
+      final reason = githubSource != 'github_proxy'
+          ? 'GitHub 数据源选了「直连」'
+          : (proxy.isEmpty
+              ? 'worker URL 未配 (在「设置 → 代理 URL」填)'
+              : 'URL 不是 api.github.com 开头 (不起作用)');
       DiaryService.add(
           '[GitHub] buildApiUrl: passthrough, reason="$reason", in=$originalUrl');
       _githubApiUrlCache[originalUrl] = originalUrl;
@@ -1157,7 +1298,9 @@ class UserDataService {
   ///   日志 / 日记 / Cache-Control 都干净).
   static String buildGithubReleaseAssetUrl(String originalUrl) {
     if (originalUrl.isEmpty) return originalUrl;
-    final proxy = getTmdbProxyDomainSync();
+    // v2.5.29: 加数据源选择项判断 — 跟 buildGithubApiUrl 一致
+    final githubSource = getGithubDataSourceSync();
+    final proxy = githubSource == 'github_proxy' ? getTmdbProxyDomainSync() : '';
     final configKey = 'github_asset|$proxy';
     if (_githubAssetCacheConfigKey != configKey) {
       _githubAssetUrlCache.clear();
@@ -1181,15 +1324,18 @@ class UserDataService {
       if (proxy.isNotEmpty) {
         final wrapped = '$proxy/github/asset/$owner/$repo/$tag/$asset';
         DiaryService.add(
-            '[GitHub] buildAssetUrl: source=tmdb_proxy, worker=$proxy');
+            '[GitHub] buildAssetUrl: source=github_proxy, worker=$proxy');
         DiaryService.add(
             '[GitHub] buildAssetUrl wrap: in=$originalUrl out=$wrapped');
         _githubAssetUrlCache[originalUrl] = wrapped;
         return wrapped;
       } else {
-        // 没配 worker — 1:1 返 (用户走原 URL, 国内 100% 拉不到, 但不报错)
+        // 没配 worker / 用户选 direct — 1:1 返 (用户走原 URL, 国内 100% 拉不到, 但不报错)
+        final reason = githubSource != 'github_proxy'
+            ? 'GitHub 数据源选了「直连」'
+            : 'worker URL 未配 (国内 GFW 拉不到, 在「设置 → 代理 URL」填)';
         DiaryService.add(
-            '[GitHub] buildAssetUrl: passthrough, reason="worker URL 未配 (国内 GFW 拉不到, 在「设置 → 代理 URL」填)", in=$originalUrl');
+            '[GitHub] buildAssetUrl: passthrough, reason="$reason", in=$originalUrl');
         _githubAssetUrlCache[originalUrl] = originalUrl;
         return originalUrl;
       }
@@ -1273,6 +1419,28 @@ class UserDataService {
     if (_tmdbProxyDomainCache == null) {
       final prefs = await SharedPreferences.getInstance();
       _tmdbProxyDomainCache = prefs.getString(_tmdbProxyDomainKey) ?? '';
+    }
+    // v2.5.29: 缓存短剧 + GitHub 数据源选择项, 跟 TMDB warmup 平行
+    if (_shortDramaDataSourceCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString(_shortDramaDataSourceKey);
+      if (stored == 'shortdrama_proxy' || stored == 'direct') {
+        _shortDramaDataSourceCache = stored;
+      } else {
+        final proxy = _tmdbProxyDomainCache ?? '';
+        _shortDramaDataSourceCache =
+            proxy.isNotEmpty ? 'shortdrama_proxy' : 'direct';
+      }
+    }
+    if (_githubDataSourceCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString(_githubDataSourceKey);
+      if (stored == 'github_proxy' || stored == 'direct') {
+        _githubDataSourceCache = stored;
+      } else {
+        final proxy = _tmdbProxyDomainCache ?? '';
+        _githubDataSourceCache = proxy.isNotEmpty ? 'github_proxy' : 'direct';
+      }
     }
     // v2.5.25: 缓存 serverUrl + cookies — 之前每次 API 请求都异步读
     //   SharedPreferences 2 次, 现在 warmup 一次, 后续全走同步内存读.
