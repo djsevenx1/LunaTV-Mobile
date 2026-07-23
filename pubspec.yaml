@@ -54,7 +54,7 @@ dependencies:
   # macos_window_utils: ^1.0.4
   # bitsdojo_window: ^0.1.5
   # bs58check: ^1.0.0
-  lucide_flutter: ^3.1.14+1
+  lucide_icons_flutter: ^3.1.15
   # 编码
   gbk_codec: ^0.4.0
   # v2.2.0: 删了 dart:ffi (libmpv FFI 绑定 MpvFFI 没了, ExoPlayer 是纯原生 AndroidX)
