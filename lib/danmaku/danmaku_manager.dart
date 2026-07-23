@@ -24,7 +24,7 @@ class DanmakuManager {
   DanmakuManager._();
   static final DanmakuManager instance = DanmakuManager._();
 
-  late final Map<DanmakuSource, DanmakuSource> _sources = {
+  late final Map<DanmakuSource, BaseDanmakuSource> _sources = {
     DanmakuSource.iqiyi: IqiyiDanmaku(),
     DanmakuSource.youku: YoukuDanmaku(),
     DanmakuSource.bilibili: BilibiliDanmaku(),
