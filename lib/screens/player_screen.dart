@@ -3703,8 +3703,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       final speedStr = speed.formatLoadSpeed();
       if (speedStr.isNotEmpty) parts.add(speedStr);
       if (speed.pingMs > 0) parts.add('${speed.pingMs}ms');
-      text = parts.isEmpty ? (ms != null ? '${ms}ms' : 'OK') : parts.join(' · ');
-      color = _stateToColor(state);
+      // v2.5.33: 部分成功 (有 ping 没 speed 没 resolution) 显示 "Xms (速度未知)",
+      //   跟"完全 unavailable"区分开 (之前都看着像 "Xms", 难排错).
+      //   实际原因: fallback _fallbackLightSpeed 内部 latency 测到了 (worker URL 200)
+      //   但 download 测速拿到 0 (CDN 拒 Range / 限流 / 跨域). 跟"5s 外层 timeout
+      //   完全失败"是两种情况, 视觉一样误导.
+      if (parts.isEmpty) parts.add(ms != null ? '${ms}ms' : 'OK');
+      if (speedStr.isEmpty && speed.pingMs > 0 && speed.resolution.isEmpty) {
+        // 部分成功: 黄色 (跟"测速中"同色), 提示用户 CDN 测速受限但延迟 ok
+        text = '${speed.pingMs}ms (速度未知)';
+        color = const Color(0xFFF59E0B);
+      } else {
+        text = parts.join(' · ');
+        color = _stateToColor(state);
+      }
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
