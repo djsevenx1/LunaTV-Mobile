@@ -1813,7 +1813,10 @@ class _UserMenuState extends State<UserMenu> {
                     _githubDataSource = key;
                   });
                 },
-                icon: LucideIcons.github,
+                icon: LucideIcons.code,
+                // v2.5.32: github -> code. lucide_icons_flutter 不含 github (Simple Icons 才
+                //   有), v2.5.29 加这个选项时就编译不过, 所有 build 失败都卡 user_menu.dart:1816.
+                //   code icon 视觉上跟 <> 风格接近, 表达代码/开发/github 概念够用.
                 iconColor: _tmdbProxyDomain.isEmpty
                     ? const Color(0xFF9ca3af)
                     : const Color(0xFF22C55E),
