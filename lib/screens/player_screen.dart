@@ -2102,7 +2102,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       final results = await Future.wait([
         _fallbackMeasureLatency(httpClient, latencyTarget),
         _fallbackMeasureDownloadSpeed(httpClient, url),
-      ]).timeout(const Duration(milliseconds: 2500));
+      ]).timeout(const Duration(milliseconds: 6500));
+      // v2.5.32: 2500 → 6500ms. 内部 latency 3s + download 2.8s 是并发,
+      //   但 2.5s 外层连一次 download 都跑不完, 直接砍 → kbps=0 → UI
+      //   只显示延迟没速度 (v2.5.22 调长内部 timeout 后更严重, 注释里
+      //   "总预算 15s (10s+5s)" 跟这里 2.5s 对不上). 提到 6.5s 跟
+      //   m3u8_service._measureDownloadSpeedFast 的 6s 单源预算对齐.
       final ms = (results[0] as num).toInt();
       final kbps = (results[1] as num).toDouble();
       // v2.1.38: 严格 success — ms>0 (没掉到 -1 哨兵) 或 kbps>0 (下载真成功).
