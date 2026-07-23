@@ -34,8 +34,15 @@ import 'package:luna_tv/widgets/douban_detail_header.dart';
 import 'package:luna_tv/widgets/dlna_device_dialog.dart';
 import 'package:luna_tv/widgets/favorites_grid.dart';
 import 'package:luna_tv/widgets/exo_player_view.dart';
-// v2.3.14: 卸弹幕系统 (v2.3.12 移植自 Selene-TV, 用户反馈 UX 太差: 要求
-//   手动输 B站 cid, 违背 "TV 客户端" 一键体验原则, 整个删了).
+// v2.5.34: 重做弹幕 — v2.3.12 移植 Selene-TV 后被 v2.3.14 卸了 (UX 差:
+//   要手动输 B 站 cid). 现在按"自动选源"思路重做, 6 源并行 search
+//   → manager.autoMatch 选最优 → 自动拉. 用户在播放器上点 "弹" 按钮
+//   即触发, 不再要任何手动输入. 反编译 6 源协议见
+//   /workspace/selene_danmaku_protocol.md
+import 'package:luna_tv/danmaku/danmaku_manager.dart';
+import 'package:luna_tv/danmaku/models/danmaku_comment.dart';
+import 'package:luna_tv/danmaku/models/danmaku_media.dart';
+import 'package:luna_tv/danmaku/widgets/danmaku_overlay.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:provider/provider.dart';
@@ -233,9 +240,17 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   // v2.3.14: 卸弹幕系统 (v2.3.12 移植自 Selene-TV, 用户反馈 UX 太差:
   //   要求手动输 B 站 cid, 违背 "TV 客户端" 一键体验原则, 整个删了).
-  //   整个 danmaku 模块 (danmaku_service.dart / danmaku_overlay.dart /
-  //   danmaku_models.dart / danmaku/providers/*) 全部删除.
-  //   播放器核心只剩 ExoPlayerBackend, 不再有弹幕 overlay / 控制流.
+  // v2.5.34: 重做 — 6 源自动 search + 选最优 + 拉弹幕, 全自动不需要手动
+  //   输 cid. 用户在播放器上点 "弹" 按钮即触发.
+  bool _danmakuEnabled = false;       // 总开关
+  bool _danmakuLoading = false;       // 拉取中
+  String? _danmakuSource;             // 当前用的源 (DanmakuSource.key)
+  String? _danmakuSourceTitle;        // 媒体标题 (用于展示选了哪个)
+  int _danmakuCount = 0;              // 加载到的弹幕数
+  List<DanmakuComment> _danmakuComments = const [];
+  DanmakuMatch? _danmakuMatch;        // 搜索到的剧集
+  // Overlay key — 用于强制重建
+  final GlobalKey<DanmakuOverlayState> _danmakuKey = GlobalKey<DanmakuOverlayState>();
 
   // UI 控制
   bool _isPlaying = false;
@@ -1157,6 +1172,164 @@ class _PlayerScreenState extends State<PlayerScreen>
         _player!.setSpeed(rate);
       }
     } catch (_) {}
+  }
+
+  // v2.5.34: 轻量 toast — 弹幕加载用, 不打断用户
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 13)),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+      ),
+    );
+  }
+
+  // v2.5.34: 弹幕触发器 — 6 源并行 search 选最优, 拿分集, 拉该集弹幕.
+  //   自动: 不用用户输任何东西, 标题从 widget.videoInfo.title 拿.
+  //   当前选集 index 决定拉第几集弹幕. 切集时由 _playEpisode 调用 _reloadDanmaku.
+  Future<void> _toggleDanmaku() async {
+    if (_danmakuLoading) return;
+    final source = _selectedSource;
+    if (source == null) {
+      _toast('请先选源');
+      return;
+    }
+    if (_currentEpisodeIndex < 0 ||
+        _currentEpisodeIndex >= source.episodes.length) {
+      _toast('当前集无效');
+      return;
+    }
+    setState(() {
+      _danmakuLoading = true;
+    });
+    try {
+      final title = widget.videoInfo.title.trim();
+      if (title.isEmpty) {
+        _toast('标题为空,无法搜索');
+        return;
+      }
+      // 推断类型 + 年份
+      int? year;
+      final y = widget.videoInfo.year;
+      if (y != null && y.isNotEmpty) {
+        final m = RegExp(r'^(\d{4})').firstMatch(y);
+        if (m != null) year = int.tryParse(m.group(1)!);
+      }
+      final kind = _kind; // 'movie' | 'tv'
+
+      final match = await DanmakuManager.instance.autoMatch(
+        title: title,
+        year: year,
+        type: kind,
+      );
+      if (!mounted) return;
+      if (match == null) {
+        _toast('6 源都搜不到: $title');
+        return;
+      }
+      _danmakuMatch = match;
+      // 拿分集
+      final eps = await DanmakuManager.instance.getEpisodes(
+        match.media.source,
+        match.media.mediaId,
+      );
+      if (!mounted) return;
+      if (eps.isEmpty) {
+        _toast('${match.media.source.displayName} 暂无分集');
+        return;
+      }
+      // 选该集: 优先按 order 匹配, 退而求其次按 index
+      final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, kind);
+      if (ep == null) {
+        _toast('分集匹配失败');
+        return;
+      }
+      // 拉弹幕
+      final list = await DanmakuManager.instance.loadDanmaku(
+        match.media.source,
+        ep.episodeId,
+      );
+      if (!mounted) return;
+      if (list.isEmpty) {
+        _toast('${match.media.source.displayName} 暂无弹幕');
+        return;
+      }
+      setState(() {
+        _danmakuSource = match.media.source.key;
+        _danmakuSourceTitle =
+            '${match.media.source.displayName} · ${match.media.title} · ${ep.title}';
+        _danmakuCount = list.length;
+        _danmakuComments = list;
+        _danmakuEnabled = true;
+      });
+    } catch (e, st) {
+      debugPrint('[Danmaku] toggle error: $e\n$st');
+      if (mounted) _toast('弹幕加载失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _danmakuLoading = false;
+        });
+      }
+    }
+  }
+
+  DanmakuEpisode? _pickEpisode(List<DanmakuEpisode> eps, int wantOrder, String kind) {
+    if (eps.isEmpty) return null;
+    // 1) order 完全匹配
+    for (final e in eps) {
+      if (e.order == wantOrder) return e;
+    }
+    // 2) index = wantOrder - 1
+    if (wantOrder - 1 >= 0 && wantOrder - 1 < eps.length) {
+      return eps[wantOrder - 1];
+    }
+    // 3) 电影: 第一集
+    if (kind == 'movie') return eps.first;
+    // 4) 兜底: 第一集
+    return eps.first;
+  }
+
+  // v2.5.34: 切集时刷弹幕 (已开启状态下, 重拉新一集)
+  Future<void> _reloadDanmakuForNewEpisode() async {
+    if (!_danmakuEnabled) return;
+    if (_danmakuMatch == null) return;
+    final source = _selectedSource;
+    if (source == null) return;
+    setState(() {
+      _danmakuLoading = true;
+    });
+    try {
+      final eps = await DanmakuManager.instance.getEpisodes(
+        _danmakuMatch!.media.source,
+        _danmakuMatch!.media.mediaId,
+      );
+      if (!mounted) return;
+      final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, _kind);
+      if (ep == null) return;
+      final list = await DanmakuManager.instance.loadDanmaku(
+        _danmakuMatch!.media.source,
+        ep.episodeId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _danmakuSourceTitle =
+            '${_danmakuMatch!.media.source.displayName} · ${_danmakuMatch!.media.title} · ${ep.title}';
+        _danmakuCount = list.length;
+        _danmakuComments = list;
+      });
+    } catch (_) {
+      // 静默
+    } finally {
+      if (mounted) {
+        setState(() {
+          _danmakuLoading = false;
+        });
+      }
+    }
   }
 
   // v2.5.7: 用 PageCacheService 维护收藏. 之前用 SharedPreferences
@@ -2751,6 +2924,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         _error = '播放失败: $e';
       });
     }
+    // v2.5.34: 切集时刷弹幕 — 静默 fire-and-forget, 不阻塞播放
+    unawaited(_reloadDanmakuForNewEpisode());
   }
 
   /// 等待 player 真正开始解码 (position stream 第一次回传)
@@ -3276,6 +3451,41 @@ class _PlayerScreenState extends State<PlayerScreen>
                 color: isDark ? Colors.white : Colors.black,
               ),
             ),
+          ),
+          // v2.5.34: 弹幕开关 — 6 源自动 search + 选最优 + 拉.
+          //   任何阶段都能点 (detail / playing), 但只有 _selectedSource 选完才能
+          //   知道是第几集 → 自动拉该集弹幕. 没选源时按钮禁用.
+          IconButton(
+            tooltip: _danmakuLoading
+                ? '弹幕加载中...'
+                : (_danmakuEnabled
+                    ? '关闭弹幕 (${_danmakuSourceTitle ?? _danmakuSource ?? ""} · $_danmakuCount条)'
+                    : '打开弹幕 (自动匹配 6 源)'),
+            icon: _danmakuLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _danmakuEnabled
+                        ? Icons.subtitles
+                        : Icons.subtitles_outlined,
+                    color: _danmakuEnabled
+                        ? kLunaTheme
+                        : (isDark ? Colors.white : Colors.black),
+                  ),
+            onPressed: _danmakuLoading
+                ? null
+                : () {
+                    if (_danmakuEnabled) {
+                      setState(() {
+                        _danmakuEnabled = false;
+                      });
+                    } else {
+                      _toggleDanmaku();
+                    }
+                  },
           ),
         ],
       ),
@@ -5020,6 +5230,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                     //   UI 控件 (LunaTV 自定义底栏/顶栏/手势) 全部在外层
                     //   Stack 上, 这里只是个视频画面的薄壳.
                     ExoPlayerView(backend: _player!),
+                    // v2.5.34: 弹幕浮层 — IgnorePointer 不挡手势, CustomPaint
+                    //   滚动画. positionProvider 从 _currentPosition 读.
+                    if (_danmakuEnabled)
+                      DanmakuOverlay(
+                        key: _danmakuKey,
+                        comments: _danmakuComments,
+                        enabled: _danmakuEnabled,
+                        positionProvider: () => _currentPosition,
+                        pausedProvider: () => !_isPlaying,
+                      ),
                     if (_isBuffering)
                       const SizedBox(
                         width: 36,
