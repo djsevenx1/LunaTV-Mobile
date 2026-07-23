@@ -53,7 +53,7 @@ class DanmakuManager {
     _preferred = List.unmodifiable(v);
   }
 
-  DanmakuSource? sourceOf(DanmakuSource s) => _sources[s];
+  DanmakuSource? sourceOf(DanmakuSource s) => _sources[s]?.sourceEnum;
 
   /// 跨源并行搜索, 返聚合列表 (去重 + 标注源)
   Future<List<DanmakuMedia>> searchByTitle(
@@ -80,7 +80,7 @@ class DanmakuManager {
     return merged;
   }
 
-  Future<List<DanmakuMedia>> _safeSearch(DanmakuSource src, String kw) async {
+  Future<List<DanmakuMedia>> _safeSearch(BaseDanmakuSource src, String kw) async {
     try {
       return await src.searchMedia(kw, dio: _sharedDio);
     } catch (_) {

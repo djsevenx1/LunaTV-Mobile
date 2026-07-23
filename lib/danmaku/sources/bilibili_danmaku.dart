@@ -22,7 +22,7 @@ import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
 import 'danmaku_source.dart';
 
-class BilibiliDanmaku extends DanmakuSource {
+class BilibiliDanmaku extends BaseDanmakuSource {
   @override
   DanmakuSource get sourceEnum => DanmakuSource.bilibili;
 

@@ -23,7 +23,7 @@ import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
 import 'danmaku_source.dart';
 
-class TencentDanmaku extends DanmakuSource {
+class TencentDanmaku extends BaseDanmakuSource {
   @override
   DanmakuSource get sourceEnum => DanmakuSource.tencent;
 

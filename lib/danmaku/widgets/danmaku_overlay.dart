@@ -42,12 +42,13 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
   int _lastTickMs = 0;
 
   // 滚动轨道行: 记录每行最后一颗结束时间, 避免堆叠
-  static const int _scrollRows = 14;
-  final List<int> _scrollRowFreeAtMs = List.filled(_scrollRows, 0);
-  static const int _topRows = 4;
-  final List<int> _topRowFreeAtMs = List.filled(_topRows, 0);
-  static const int _bottomRows = 4;
-  final List<int> _bottomRowFreeAtMs = List.filled(_bottomRows, 0);
+  // public 让同文件内 _DanmakuPainter (单独 class) 能读到
+  static const int scrollRows = 14;
+  final List<int> _scrollRowFreeAtMs = List.filled(scrollRows, 0);
+  static const int topRows = 4;
+  final List<int> _topRowFreeAtMs = List.filled(topRows, 0);
+  static const int bottomRows = 4;
+  final List<int> _bottomRowFreeAtMs = List.filled(bottomRows, 0);
 
   Duration _mediaPos = Duration.zero;
   DateTime _lastWall = DateTime.now();
@@ -162,7 +163,7 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
   int _pickTrack(int mode, int nowMs) {
     if (mode == 5) {
       // 顶部
-      for (var i = 0; i < _topRows; i++) {
+      for (var i = 0; i < topRows; i++) {
         if (_topRowFreeAtMs[i] <= nowMs) {
           _topRowFreeAtMs[i] = nowMs + 4000;
           return i;
@@ -172,7 +173,7 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
     }
     if (mode == 4) {
       // 底部
-      for (var i = 0; i < _bottomRows; i++) {
+      for (var i = 0; i < bottomRows; i++) {
         if (_bottomRowFreeAtMs[i] <= nowMs) {
           _bottomRowFreeAtMs[i] = nowMs + 4000;
           return i;
@@ -181,7 +182,7 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
       return -1;
     }
     // 滚动
-    for (var i = 0; i < _scrollRows; i++) {
+    for (var i = 0; i < scrollRows; i++) {
       if (_scrollRowFreeAtMs[i] <= nowMs) {
         _scrollRowFreeAtMs[i] = nowMs + 4500;
         return i;
@@ -240,10 +241,10 @@ class _DanmakuPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (bullets.isEmpty) return;
     final lineH = fontSize + 6;
-    final topH = _DanmakuOverlayState._topRows * lineH;
-    final bottomH = _DanmakuOverlayState._bottomRows * lineH;
+    final topH = DanmakuOverlayState.topRows * lineH;
+    final bottomH = DanmakuOverlayState.bottomRows * lineH;
     final scrollH = (height - topH - bottomH).clamp(0, height);
-    final scrollRows = _DanmakuOverlayState._scrollRows;
+    final scrollRows = DanmakuOverlayState.scrollRows;
     final rowH = scrollRows > 0 ? scrollH / scrollRows : 0;
 
     for (final b in bullets) {

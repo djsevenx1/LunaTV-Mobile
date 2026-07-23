@@ -23,7 +23,7 @@ import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
 import 'danmaku_source.dart';
 
-class YoukuDanmaku extends DanmakuSource {
+class YoukuDanmaku extends BaseDanmakuSource {
   @override
   DanmakuSource get sourceEnum => DanmakuSource.youku;
 
@@ -57,11 +57,22 @@ class YoukuDanmaku extends DanmakuSource {
 
   Future<String> _fetchToken(Dio d) async {
     try {
-      await d.get<String>(_tokenUrl);
-      for (final c in d.cookies) {
-        if (c.name == '_m_h5_tk') {
-          final v = c.value.split('_').first;
-          return v;
+      final r = await d.get<String>(_tokenUrl,
+          options: Options(responseType: ResponseType.plain));
+      // 优酷回 set-cookie, 多个值是逗号串在一起 (按 RFC 6265)
+      final setCookie = r.headers.map['set-cookie'];
+      if (setCookie != null) {
+        for (final raw in setCookie) {
+          for (final part in raw.split(',')) {
+            final kv = part.trim().split(';').first.trim();
+            final eq = kv.indexOf('=');
+            if (eq <= 0) continue;
+            final name = kv.substring(0, eq);
+            final value = kv.substring(eq + 1);
+            if (name == '_m_h5_tk') {
+              return value.split('_').first;
+            }
+          }
         }
       }
     } catch (_) {}

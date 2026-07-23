@@ -19,7 +19,7 @@ import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
 import 'danmaku_source.dart';
 
-class IqiyiDanmaku extends DanmakuSource {
+class IqiyiDanmaku extends BaseDanmakuSource {
   @override
   DanmakuSource get sourceEnum => DanmakuSource.iqiyi;
 

@@ -21,7 +21,7 @@ import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
 import 'danmaku_source.dart';
 
-class MgtvDanmaku extends DanmakuSource {
+class MgtvDanmaku extends BaseDanmakuSource {
   @override
   DanmakuSource get sourceEnum => DanmakuSource.mgtv;
 
