@@ -48,6 +48,9 @@ class YoukuDanmaku extends BaseDanmakuSource {
   // 跨调用共享 token, 同 session 内复用, 失效时重抓
   String? _cachedToken;
   DateTime? _tokenTime;
+  // ★ Cookie 持久化: token 请求返回的 set-cookie 全部存下来,
+  //   后续弹幕 POST 请求带上 Cookie 头, 否则 mtop 校验 _m_h5_tk 失败 → TOKEN_EMPTY
+  String? _cachedCookies;
 
   Dio _newDio() => Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 8),
@@ -66,6 +69,9 @@ class YoukuDanmaku extends BaseDanmakuSource {
       // 优酷回 set-cookie, 多个值是逗号串在一起 (按 RFC 6265)
       final setCookie = r.headers.map['set-cookie'];
       if (setCookie != null) {
+        // ★ 收集所有 cookie, 拼成 "k1=v1; k2=v2" 格式存下来
+        final cookieParts = <String>[];
+        String? token;
         for (final raw in setCookie) {
           for (final part in raw.split(',')) {
             final kv = part.trim().split(';').first.trim();
@@ -73,12 +79,20 @@ class YoukuDanmaku extends BaseDanmakuSource {
             if (eq <= 0) continue;
             final name = kv.substring(0, eq);
             final value = kv.substring(eq + 1);
+            cookieParts.add(kv);
             if (name == '_m_h5_tk') {
-              final token = value.split('_').first;
-              debugPrint('[Youku] token fetched: ${token.substring(0, token.length.clamp(0, 8))}...');
-              return token;
+              token = value.split('_').first;
             }
           }
+        }
+        if (cookieParts.isNotEmpty) {
+          _cachedCookies = cookieParts.join('; ');
+        }
+        if (token != null) {
+          debugPrint('[Youku] token fetched: '
+              '${token.substring(0, token.length.clamp(0, 8))}... '
+              'cookies=${cookieParts.length}');
+          return token;
         }
       }
       debugPrint('[Youku] token fetch: no _m_h5_tk in cookies, '
@@ -303,7 +317,11 @@ class YoukuDanmaku extends BaseDanmakuSource {
         data: body,
         options: Options(
           responseType: ResponseType.plain,
-          headers: _postHeaders,
+          headers: {
+            ..._postHeaders,
+            // ★ 带上 token 请求获取的 cookie, mtop 校验 _m_h5_tk
+            if (_cachedCookies != null) 'Cookie': _cachedCookies,
+          },
         ),
       );
       if (r.data == null || r.data!.isEmpty) return const [];
@@ -312,7 +330,9 @@ class YoukuDanmaku extends BaseDanmakuSource {
       final ret = root['ret'];
       String ret0 = '';
       if (ret is List && ret.isNotEmpty) ret0 = ret[0]?.toString() ?? '';
-      if (ret0 == 'SUCCESS') {
+      // ★ 优酷 ret 格式: "SUCCESS::调用成功" 或 "FAIL_SYS_XXX::xxx"
+      //   不能用 == 'SUCCESS', 用 startsWith 匹配
+      if (ret0.startsWith('SUCCESS')) {
         final dataObj = root['data'];
         if (dataObj is! Map) return const [];
         final resultStr = dataObj['result']?.toString() ?? '';
@@ -329,6 +349,7 @@ class YoukuDanmaku extends BaseDanmakuSource {
       if (!retry && ret0.contains('TOKEN')) {
         _cachedToken = null;
         _tokenTime = null;
+        _cachedCookies = null; // 清 cookie, 重新走 token 流程
         return _fetchSegment(d, vid, seg, retry: true);
       }
       return const [];
