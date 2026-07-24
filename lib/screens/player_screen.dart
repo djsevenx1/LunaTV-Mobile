@@ -1291,19 +1291,23 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
 
       // 6) 显示弹幕
+      // best 在 setState 闭包外提取, 避免 DanmakuMedia? 闭包内丢失类型提升
+      final selSource = best.source;
+      final selMediaId = best.mediaId;
+      final selTitle = best.title;
       setState(() {
-        _danmakuSelSource = best.source;
-        _danmakuSelMediaId = best.mediaId;
-        _danmakuSelMediaTitle = best.title;
-        _danmakuSource = best.source.key;
+        _danmakuSelSource = selSource;
+        _danmakuSelMediaId = selMediaId;
+        _danmakuSelMediaTitle = selTitle;
+        _danmakuSource = selSource.key;
         _danmakuSourceTitle =
-            '${best.source.displayName} · ${best.title} · ${ep.title}';
+            '${selSource.displayName} · $selTitle · ${ep.title}';
         _danmakuCount = list.length;
         _danmakuComments = list;
         _danmakuEnabled = true;
       });
       _danmakuKey.currentState?.reset();
-      _toast('弹幕 · ${best.source.displayName} · ${list.length}条');
+      _toast('弹幕 · ${selSource.displayName} · ${list.length}条');
     } catch (e) {
       _toast('弹幕加载失败');
       debugPrint('[Danmaku] auto-match error: $e');
