@@ -4985,9 +4985,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ),
                           ),
                           const Spacer(),
-                          // v2.5.37: 弹幕开关移到播控栏 (跟 SeleneTV 一致,
-                          //   原来在详情页顶栏 v2.3.14 卸过, v2.5.34 放回顶栏,
-                          //   现在挪到播控).
+                          // v2.5.44: 弹幕开关 — 对齐 SeleneTV 文字按钮风格
+                          //   SeleneTV: "弹幕 · 关" / "弹幕 · 优酷" / "弹幕 · B站"
+                          //   不再用 subtitles 图标 (用户反馈找不到)
                           if (_danmakuLoading)
                             const SizedBox(
                               width: 40,
@@ -5004,13 +5004,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                               ),
                             )
                           else
-                            _iconBtn(
-                              icon: _danmakuEnabled
-                                  ? Icons.subtitles
-                                  : Icons.subtitles_outlined,
-                              iconColor: _danmakuEnabled
-                                  ? kLunaTheme
-                                  : Colors.white,
+                            GestureDetector(
                               onTap: () {
                                 if (_danmakuEnabled) {
                                   setState(() {
@@ -5020,6 +5014,43 @@ class _PlayerScreenState extends State<PlayerScreen>
                                   _toggleDanmaku();
                                 }
                               },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: _danmakuEnabled
+                                      ? kLunaTheme.withOpacity(0.2)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.subtitles,
+                                      size: 16,
+                                      color: _danmakuEnabled
+                                          ? kLunaTheme
+                                          : Colors.white70,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      _danmakuEnabled
+                                          ? '弹幕 · ${_danmakuSelSource?.displayName ?? "开"}'
+                                          : '弹幕 · 关',
+                                      style: TextStyle(
+                                        color: _danmakuEnabled
+                                            ? kLunaTheme
+                                            : Colors.white70,
+                                        fontSize: 12,
+                                        fontWeight: _danmakuEnabled
+                                            ? FontWeight.w600
+                                            : FontWeight.normal,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           // v2.5.37: 弹幕设置按钮 (仅弹幕开启时显示)
                           if (_danmakuEnabled && !_danmakuLoading)
