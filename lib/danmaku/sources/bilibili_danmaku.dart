@@ -53,23 +53,12 @@ class BilibiliDanmaku extends BaseDanmakuSource {
   };
 
   /// 获取 buvid3 Cookie — 对齐 SeleneTV gr.e():
-  ///   1. GET https://www.bilibili.com (暖场)
-  ///   2. GET https://api.bilibili.com/x/frontend/finger/spi → JSON {data:{b_3, b_4}}
-  ///   3. 组 "buvid3={b_3}; buvid4={b_4}"
+  ///   1. GET https://api.bilibili.com/x/frontend/finger/spi → JSON {data:{b_3, b_4}}
+  ///   2. 组 "buvid3={b_3}; buvid4={b_4}"
+  /// ★ v2.5.46: 跳过 bilibili.com 暖场 (省 1-2s), finger/spi 单独可用
   Future<String> _getBuvid3Cookie(Dio dio) async {
     if (_cachedCookie != null) return _cachedCookie!;
     try {
-      // 1. 暖场访问 (SeleneTV gr.e() 第一步)
-      await dio.get<String>(
-        'https://www.bilibili.com',
-        options: Options(
-          headers: _segHeaders,
-          responseType: ResponseType.plain,
-        ),
-      );
-    } catch (_) {}
-    try {
-      // 2. 取 finger/spi
       final r = await dio.get<String>(
         'https://api.bilibili.com/x/frontend/finger/spi',
         options: Options(
@@ -270,48 +259,72 @@ class BilibiliDanmaku extends BaseDanmakuSource {
 
       // 2. 分段计算 (对齐 SeleneTV: 360s/段, 默认 100 段)
       final startSeg = startSec > 0 ? (startSec / 360).floor() + 1 : 1;
+      // ★ v2.5.46: 默认 40 段 (4 小时), 原 100 段 = 10 小时, 大多数视频用不到
+      //   多余段只会增加请求时间 → "3-4分钟才显示"
       final endSeg = endSec > 0
-          ? (endSec / 360.0).ceil().clamp(1, 100)
-          : 100; // SeleneTV 默认 100 段
+          ? (endSec / 360.0).ceil().clamp(1, 40)
+          : 40;
 
-      // 3. 遍历 seg.so protobuf 段
+      // 3. 遍历 seg.so protobuf 段 (并行批量, 每批 15 个分片)
       final all = <DanmakuComment>[];
-      for (var seg = startSeg; seg <= endSeg; seg++) {
-        final url = 'https://api.bilibili.com/x/v2/dm/web/seg.so'
-            '?type=1&oid=$episodeId&segment_index=$seg';
-        try {
-          final r = await d.get<List<int>>(
-            url,
-            options: Options(
-              responseType: ResponseType.bytes,
-              headers: reqHeaders,
-            ),
-          );
-          final raw = r.data;
-          if (raw == null || raw.isEmpty) {
-            // 空段 = 越界, 对齐 SeleneTV: 立即 break
-            break;
-          }
-          final parsed = _parseDmSegMobile(Uint8List.fromList(raw));
-          if (parsed.isEmpty) {
-            // 有数据但解析 0 条 (可能 -412 JSON 或风控页)
-            if (seg == 1) {
-              debugPrint('[Bilibili] seg1 parsed 0, raw=${raw.length}B '
-                  'head=${raw.length >= 8 ? raw.sublist(0, 8) : raw}');
+      const batchSize = 15;
+      var seg = startSeg;
+      while (seg <= endSeg) {
+        // 构建当前批次的分片号列表
+        final batchSegs = <int>[];
+        for (var i = 0; i < batchSize && seg <= endSeg; i++, seg++) {
+          batchSegs.add(seg);
+        }
+        // 并行请求整批 (8 个分片同时), 每段独立 try/catch, 返回 null 表示该段需 break
+        final results = await Future.wait(
+          batchSegs.map((s) async {
+            final url = 'https://api.bilibili.com/x/v2/dm/web/seg.so'
+                '?type=1&oid=$episodeId&segment_index=$s';
+            try {
+              final r = await d.get<List<int>>(
+                url,
+                options: Options(
+                  responseType: ResponseType.bytes,
+                  headers: reqHeaders,
+                ),
+              );
+              final raw = r.data;
+              if (raw == null || raw.isEmpty) {
+                // 空段 = 越界, 对齐 SeleneTV: 返回 null 表示 break
+                return null;
+              }
+              final parsed = _parseDmSegMobile(Uint8List.fromList(raw));
+              if (parsed.isEmpty) {
+                // 有数据但解析 0 条 (可能 -412 JSON 或风控页)
+                if (s == 1) {
+                  debugPrint('[Bilibili] seg1 parsed 0, raw=${raw.length}B '
+                      'head=${raw.length >= 8 ? raw.sublist(0, 8) : raw}');
+                }
+                // 对齐 SeleneTV: 空段 break
+                return null;
+              }
+              return parsed;
+            } on DioException catch (e) {
+              final code = e.response?.statusCode;
+              debugPrint('[Bilibili] seg$s DioException: $code ${e.message}');
+              // 任何错误都 break (对齐 SeleneTV: xg0.a 异常 → 返空 → break)
+              return null;
+            } catch (e) {
+              debugPrint('[Bilibili] seg$s error: $e');
+              return null;
             }
-            // 对齐 SeleneTV: 空段 break
+          }),
+        );
+        // 按顺序处理结果: 遇到第一个空段/错误即停止 (对齐 SeleneTV 立即 break)
+        var shouldBreak = false;
+        for (final parsed in results) {
+          if (parsed == null) {
+            shouldBreak = true;
             break;
           }
           all.addAll(parsed);
-        } on DioException catch (e) {
-          final code = e.response?.statusCode;
-          debugPrint('[Bilibili] seg$seg DioException: $code ${e.message}');
-          // 任何错误都 break (对齐 SeleneTV: xg0.a 异常 → 返空 → break)
-          break;
-        } catch (e) {
-          debugPrint('[Bilibili] seg$seg error: $e');
-          break;
         }
+        if (shouldBreak) break;
       }
 
       if (all.isNotEmpty) {

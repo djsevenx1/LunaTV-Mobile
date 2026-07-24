@@ -155,7 +155,8 @@ class IqiyiDanmaku extends BaseDanmakuSource {
     final own = dio == null;
     try {
       // 1) 拿总时长, 决定段数 (best-effort, 失败则用大上限靠 404/空收尾)
-      int totalSegs = 60;
+      // ★ v2.5.46: 默认 40 段 (~3.3h), 原 60 段太多增加加载时间
+      int totalSegs = 40;
       try {
         final infoR = await d.get<String>(
           'https://pcw-api.iqiyi.com/video/video/baseinfo/$episodeId',
@@ -183,7 +184,7 @@ class IqiyiDanmaku extends BaseDanmakuSource {
           ? (endSec / 300.0).ceil().clamp(1, totalSegs)
           : totalSegs;
       if (startSeg > endSeg) endSeg = startSeg;
-      if (endSeg > 100) endSeg = 100; // 单源硬上限
+      if (endSeg > 40) endSeg = 40; // ★ v2.5.46: 40 段上限 (~3.3h)
 
       // 2) URL 路径: tvid 末 4 位拆 2+2 (SeleneTV / 公开协议一致)
       final p1 = episodeId.length >= 4
@@ -194,48 +195,65 @@ class IqiyiDanmaku extends BaseDanmakuSource {
           : episodeId;
 
       final all = <DanmakuComment>[];
-      for (var seg = startSeg; seg <= endSeg; seg++) {
-        final url = 'https://cmts.iqiyi.com/bullet/'
-            '$p1/$p2/${episodeId}_300_$seg.z';
-        try {
-          final r = await d.get<List<int>>(
-            url,
-            options: Options(
-              responseType: ResponseType.bytes,
-              headers: _bulletHeaders,
-            ),
-          );
-          final raw = r.data;
-          if (raw == null || raw.isEmpty) {
-            // 空 body = 越界段
-            if (seg > 1) break;
-            continue;
-          }
-          final xml = _inflateIqiyi(Uint8List.fromList(raw));
-          if (xml.isEmpty) {
-            // 解不出 XML (非 .z 数据, 多半是越界 404 页)
-            if (seg > 1) break;
-            continue;
-          }
-          final parsed = _parseIqiyi(xml);
-          if (parsed.isEmpty) {
-            if (seg == 1) {
-              debugPrint('[iQiyi] seg1 parsed 0, xmllen=${xml.length} '
-                  'head=${xml.length >= 40 ? xml.substring(0, 40) : xml}');
-            } else {
-              // 段有 XML 但无弹幕节点 = 越界空段, 收尾
-              break;
-            }
-          }
-          all.addAll(parsed);
-        } on DioException catch (e) {
-          debugPrint('[iQiyi] seg$seg DioException: '
-              '${e.response?.statusCode} ${e.message}');
-          if (seg > 1) break;
-        } catch (e) {
-          debugPrint('[iQiyi] seg$seg error: $e');
-          if (seg > 1) break;
+      // 并行批量加载: 每批 15 个分片同时请求, 批次结束后检查连续空段
+      const batchSize = 15;
+      var seg = startSeg;
+      var emptyCount = 0;
+      while (seg <= endSeg) {
+        final batchSegs = <int>[];
+        for (var i = 0; i < batchSize && seg <= endSeg; i++, seg++) {
+          batchSegs.add(seg);
         }
+        final results = await Future.wait(
+          batchSegs.map((s) async {
+            final url = 'https://cmts.iqiyi.com/bullet/'
+                '$p1/$p2/${episodeId}_300_$s.z';
+            try {
+              final r = await d.get<List<int>>(
+                url,
+                options: Options(
+                  responseType: ResponseType.bytes,
+                  headers: _bulletHeaders,
+                ),
+              );
+              final raw = r.data;
+              if (raw == null || raw.isEmpty) {
+                // 空 body = 越界段
+                return <DanmakuComment>[];
+              }
+              final xml = _inflateIqiyi(Uint8List.fromList(raw));
+              if (xml.isEmpty) {
+                // 解不出 XML (非 .z 数据, 多半是越界 404 页)
+                return <DanmakuComment>[];
+              }
+              final parsed = _parseIqiyi(xml);
+              if (parsed.isEmpty) {
+                if (s == 1) {
+                  debugPrint('[iQiyi] seg1 parsed 0, xmllen=${xml.length} '
+                      'head=${xml.length >= 40 ? xml.substring(0, 40) : xml}');
+                }
+                return <DanmakuComment>[];
+              }
+              return parsed;
+            } on DioException catch (e) {
+              debugPrint('[iQiyi] seg$s DioException: '
+                  '${e.response?.statusCode} ${e.message}');
+              return <DanmakuComment>[];
+            } catch (e) {
+              debugPrint('[iQiyi] seg$s error: $e');
+              return <DanmakuComment>[];
+            }
+          }),
+        );
+        for (final batchComments in results) {
+          if (batchComments.isEmpty) {
+            emptyCount++;
+          } else {
+            emptyCount = 0;
+            all.addAll(batchComments);
+          }
+        }
+        if (emptyCount >= 3) break;
       }
       debugPrint('[iQiyi] tvid=$episodeId → ${all.length} comments');
       return all;

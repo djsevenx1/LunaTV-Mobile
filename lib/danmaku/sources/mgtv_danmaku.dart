@@ -158,45 +158,62 @@ class MgtvDanmaku extends BaseDanmakuSource {
       final e = endSec > 0 ? endSec : 3600 * 8; // 8h 上限
       final all = <DanmakuComment>[];
       int emptyCount = 0;
+      const batchSize = 15;
       while (s < e) {
-        final segEnd = (s + 300).clamp(0, e);
-        try {
-          final url = 'https://bullet-ott.hitv.com/bullet/list'
-              '?vid=$episodeId&start=$s&end=$segEnd';
-          final r = await d.get<List<int>>(
-            url,
-            options: Options(
-              responseType: ResponseType.bytes,
-              headers: _headers,
-            ),
-          );
-          final raw = r.data;
-          if (raw != null && raw.isNotEmpty) {
-            final text = _decodeMgtv(Uint8List.fromList(raw));
-            if (text.isNotEmpty) {
-              final parsed = _parseMgtvJson(text);
-              if (parsed.isNotEmpty) {
-                all.addAll(parsed);
-                emptyCount = 0;
-              } else {
-                emptyCount++;
-              }
-            } else {
-              emptyCount++;
-              if (s == 0) {
-                debugPrint('[Mgtv] first seg decode empty, raw=${raw.length}B');
-              }
-            }
-          } else {
-            emptyCount++;
-          }
-        } catch (e) {
-          if (s == 0) debugPrint('[Mgtv] first seg error: $e');
-          emptyCount++;
+        // 构建当前批次的分片区间列表 (每片 300s)
+        final batchPairs = <List<int>>[];
+        var bs = s;
+        for (var i = 0; i < batchSize && bs < e; i++) {
+          final be = (bs + 300).clamp(0, e);
+          batchPairs.add([bs, be]);
+          bs = be;
         }
-        // ★ 连续 3 段空 = 越界, break (避免 96 段死循环)
+        // 并行请求整批 (8 个分片同时), 每段独立 try/catch
+        final results = await Future.wait(
+          batchPairs.map((pair) async {
+            final segStart = pair[0];
+            final segEnd = pair[1];
+            try {
+              final url = 'https://bullet-ott.hitv.com/bullet/list'
+                  '?vid=$episodeId&start=$segStart&end=$segEnd';
+              final r = await d.get<List<int>>(
+                url,
+                options: Options(
+                  responseType: ResponseType.bytes,
+                  headers: _headers,
+                ),
+              );
+              final raw = r.data;
+              if (raw != null && raw.isNotEmpty) {
+                final text = _decodeMgtv(Uint8List.fromList(raw));
+                if (text.isNotEmpty) {
+                  return _parseMgtvJson(text);
+                } else {
+                  if (segStart == 0) {
+                    debugPrint(
+                        '[Mgtv] first seg decode empty, raw=${raw.length}B');
+                  }
+                }
+              }
+              return const <DanmakuComment>[];
+            } catch (err) {
+              if (segStart == 0) debugPrint('[Mgtv] first seg error: $err');
+              return const <DanmakuComment>[];
+            }
+          }),
+        );
+        // 处理结果 (保持原有解析逻辑不变)
+        for (final parsed in results) {
+          if (parsed.isEmpty) {
+            emptyCount++;
+          } else {
+            all.addAll(parsed);
+            emptyCount = 0;
+          }
+        }
+        // ★ 连续 3 段空 = 越界, break (每批结束后检查, 避免 96 段死循环)
         if (emptyCount >= 3) break;
-        s = segEnd;
+        s = bs;
       }
       debugPrint('[Mgtv] vid=$episodeId → ${all.length} comments');
       return all;

@@ -49,6 +49,17 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
   final List<_LiveBullet> _live = [];
   int _lastTickMs = 0;
 
+  // === 排序后的弹幕 + 已渲染追踪 (v2.5.45 性能优化) ===
+  // 原实现每 50ms 遍历全部 comments 找时间窗口 → 5000条弹幕 = 25万次检查/tick
+  // 优化: 按 timeMs 排序, 用二分查找定位窗口, 用 Set 追踪已渲染
+  List<DanmakuComment> _sorted = const [];
+  final Set<int> _spawnedHashes = {}; // 已渲染弹幕的 identityHashCode
+  bool _commentsChanged = false; // 标记需重新排序
+  // ★ v2.5.46: 弹幕晚到回填 — comments 变化后首次 spawn 用 0~current 宽窗口
+  //   弹幕加载慢时 (1-4分钟), current 已到 60000~240000ms,
+  //   原窗口 current-30s 会跳过所有早期弹幕 → "不显示"
+  bool _needsBackfill = false;
+
   // === 轨道管理 ===
   // 滚动弹幕: 按行排布, 每行记录 [freeAtMs, lastRightEdge]
   //   freeAtMs: 该行何时空闲 (时间预估)
@@ -113,15 +124,19 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
     }
     _lastTickMs = 0;
     _densityCounter = 0;
+    _spawnedHashes.clear();
+    _commentsChanged = true;
+    _needsBackfill = true; // ★ 触发回填: 首次 spawn 用宽窗口
     if (mounted) setState(() {});
   }
 
-  /// ★ 检测 comments 列表变化 → 自动 reset
+  /// ★ 检测 comments 列表变化 → 排序 + reset
   @override
   void didUpdateWidget(DanmakuOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     // comments 引用变了 → 新一集的弹幕, 重置轨道
     if (!identical(oldWidget.comments, widget.comments)) {
+      _commentsChanged = true;
       reset();
     }
   }
@@ -176,7 +191,15 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
     for (final b in _live) {
       b.advance(_mediaPos.inMilliseconds);
     }
+    // ★ 清理过期弹幕时同步清 _spawnedHashes, 否则同一条弹幕永远无法再次渲染
+    final beforeLen = _live.length;
     _live.removeWhere((b) => b.done);
+    if (_live.length < beforeLen) {
+      // 有弹幕过期, 清理对应 hash (允许 seek 回来后重新渲染)
+      // 注意: 不全清, 只清过期的 — 避免同一条弹幕在 _live 中时被误清
+      final liveHashes = _live.map((b) => identityHashCode(b.comment)).toSet();
+      _spawnedHashes.removeWhere((h) => !liveHashes.contains(h));
+    }
 
     if (_lastTickMs >= 50) {
       // 20fps 刷新 UI
@@ -258,42 +281,85 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
     final maxScrollRows = (availH / lineH).floor().clamp(1, _maxScrollRows);
     final maxFixedRows = (availH / lineH / 2).floor().clamp(1, _maxFixedRows); // 顶部底部各占一半
 
-    for (final c in widget.comments) {
-      // 时间窗口: ±8s
-      if (c.timeMs > current - 8000 && c.timeMs <= current + 200) {
-        if (_live.any((b) => identical(b.comment, c))) continue;
+    // ★ v2.5.45: 排序 + 二分查找优化
+    // 原实现: 每 50ms 遍历全部 comments → O(n) per tick, 5000条 = 卡顿
+    // 新实现: 按 timeMs 排序, 二分查找窗口起点, 只遍历窗口内弹幕
+    if (_commentsChanged) {
+      _sorted = List.of(widget.comments)
+        ..sort((a, b) => a.timeMs.compareTo(b.timeMs));
+      _commentsChanged = false;
+    }
+    if (_sorted.isEmpty) return;
 
-        // 模式过滤
-        if (!_shouldShowByMode(c.mode)) continue;
+    // ★ v2.5.46: 弹幕晚到回填 + 更宽的时间窗口
+    // 原来只有 ±8s, 弹幕加载慢时 (3-4分钟) 早期弹幕全部被跳过 → 不显示
+    // 修复: 
+    //   1) 首次 spawn (comments 刚到): 窗口 = 0 ~ current+200ms, 回填所有已过去时间的弹幕
+    //      密度过滤 + 轨道限制会自然控制数量, 不会一次性铺满屏幕
+    //   2) 后续 spawn: 窗口 = current-30s ~ current+200ms (正常跟踪)
+    final windowEnd = current + 200;
+    final int windowStart;
+    if (_needsBackfill) {
+      // ★ 回填模式: 从头开始扫描, 让密度过滤决定哪些显示
+      windowStart = 0;
+      _needsBackfill = false; // 只回填一次
+    } else {
+      windowStart = current - 30000;
+    }
 
-        // 密度过滤
-        if (!_shouldShowByDensity()) continue;
+    // 二分查找: 找到第一个 timeMs > windowStart 的索引
+    int lo = 0, hi = _sorted.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_sorted[mid].timeMs <= windowStart) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
 
-        final track = _pickTrack(c.mode, current, w, lineH, maxScrollRows, maxFixedRows);
-        if (track < 0) continue;
+    // 从 lo 开始遍历, 直到 timeMs > windowEnd
+    for (var i = lo; i < _sorted.length; i++) {
+      final c = _sorted[i];
+      if (c.timeMs > windowEnd) break; // 超出窗口, 后面都更大, 直接退出
 
-        final speed = _effectiveSpeed();
-        final scrollMs = (_scrollDurationMs / speed).round();
+      // ★ 用 Set 替代 _live.any(identical) 检查 → O(1) vs O(n)
+      final hash = identityHashCode(c);
+      if (_spawnedHashes.contains(hash)) continue;
+      // 旧逻辑兼容: 也检查 _live (防止 GC 导致 hash 碰撞)
+      if (_live.any((b) => identical(b.comment, c))) continue;
 
-        final bullet = _LiveBullet(
-          comment: c,
-          row: track,
-          spawnedAtMs: current,
-          screenWidth: w,
-          scrollDurationMs: scrollMs,
-          fixedDurationMs: _fixedDurationMs,
-          fontSize: _effectiveFontSize(),
-        );
-        _live.add(bullet);
+      // 模式过滤
+      if (!_shouldShowByMode(c.mode)) continue;
 
-        // 记录该轨道最后一条弹幕 (防重叠用)
-        if (c.mode == 1) {
-          _scrollTracks[track].lastBullet = bullet;
-        } else if (c.mode == 5) {
-          _topTracks[track].lastBullet = bullet;
-        } else if (c.mode == 4) {
-          _bottomTracks[track].lastBullet = bullet;
-        }
+      // 密度过滤
+      if (!_shouldShowByDensity()) continue;
+
+      final track = _pickTrack(c.mode, current, w, lineH, maxScrollRows, maxFixedRows);
+      if (track < 0) continue;
+
+      final speed = _effectiveSpeed();
+      final scrollMs = (_scrollDurationMs / speed).round();
+
+      final bullet = _LiveBullet(
+        comment: c,
+        row: track,
+        spawnedAtMs: current,
+        screenWidth: w,
+        scrollDurationMs: scrollMs,
+        fixedDurationMs: _fixedDurationMs,
+        fontSize: _effectiveFontSize(),
+      );
+      _live.add(bullet);
+      _spawnedHashes.add(hash);
+
+      // 记录该轨道最后一条弹幕 (防重叠用)
+      if (c.mode == 1) {
+        _scrollTracks[track].lastBullet = bullet;
+      } else if (c.mode == 5) {
+        _topTracks[track].lastBullet = bullet;
+      } else if (c.mode == 4) {
+        _bottomTracks[track].lastBullet = bullet;
       }
     }
   }

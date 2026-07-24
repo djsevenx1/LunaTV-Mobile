@@ -240,54 +240,78 @@ class YoukuDanmaku extends BaseDanmakuSource {
           : totalSegs;
       if (startSeg > endSeg) return [];
 
+      // ★ v2.5.46: 预取 token — 避免 15 个并行请求同时触发 token 获取
+      //   原: 每个分片各自调 _ensureToken, 第一批 15 个并行请求竞争同一个 token
+      //   修复: 统一在循环前取一次, 失败则直接返回, 不浪费时间逐段重试
+      final token = await _ensureToken(d);
+      if (token.isEmpty) {
+        debugPrint('[Youku] no token, skip danmaku loading (vid=$vid)');
+        return [];
+      }
+
       final all = <DanmakuComment>[];
       int emptyCount = 0;
-      for (var seg = startSeg; seg <= endSeg; seg++) {
-        final arr = await _fetchSegment(d, vid, seg, retry: false);
-        if (arr.isEmpty) {
-          emptyCount++;
-          if (seg == 1) {
-            debugPrint('[Youku] seg1 empty, vid=$vid totalSegs=$totalSegs');
-          }
-          // ★ 连续 3 段空 = 越界, break (避免 45+ 段死循环)
-          if (emptyCount >= 3) break;
-          continue;
+      const batchSize = 15;
+      var seg = startSeg;
+      while (seg <= endSeg) {
+        // 构建当前批次的分片号列表
+        final batchSegs = <int>[];
+        for (var i = 0; i < batchSize && seg <= endSeg; i++, seg++) {
+          batchSegs.add(seg);
         }
-        emptyCount = 0;
-        for (var i = 0; i < arr.length; i++) {
-          final item = arr[i];
-          if (item is! Map) continue;
-          String propStr = item['propertis']?.toString() ?? '{}';
-          Map prop = const {};
-          try {
-            prop = json.decode(propStr) as Map? ?? const {};
-          } catch (_) {}
-          final color = (prop['color'] is num)
-              ? (prop['color'] as num).toInt()
-              : 0xFFFFFF;
-          int pos;
-          switch (
-              (prop['pos'] is num) ? (prop['pos'] as num).toInt() : 1) {
-            case 4:
-              pos = 4;
-              break;
-            case 5:
-              pos = 5;
-              break;
-            default:
-              pos = 1;
+        // 并行请求整批 (15 个分片同时)
+        final results = await Future.wait(
+          batchSegs.map((s) => _fetchSegment(d, vid, s, retry: false)),
+        );
+        // 处理结果 (保持原有解析逻辑不变)
+        for (var idx = 0; idx < results.length; idx++) {
+          final arr = results[idx];
+          if (arr.isEmpty) {
+            emptyCount++;
+            final segNo = batchSegs[idx];
+            if (segNo == 1) {
+              debugPrint('[Youku] seg1 empty, vid=$vid totalSegs=$totalSegs');
+            }
+            continue;
           }
-          final playat =
-              (item['playat'] is num) ? (item['playat'] as num).toInt() : 0;
-          final content = item['content']?.toString() ?? '';
-          if (content.isEmpty) continue;
-          all.add(DanmakuComment(
-            timeMs: playat,
-            mode: pos,
-            color: color,
-            content: content,
-          ));
+          emptyCount = 0;
+          for (var i = 0; i < arr.length; i++) {
+            final item = arr[i];
+            if (item is! Map) continue;
+            String propStr = item['propertis']?.toString() ?? '{}';
+            Map prop = const {};
+            try {
+              prop = json.decode(propStr) as Map? ?? const {};
+            } catch (_) {}
+            final color = (prop['color'] is num)
+                ? (prop['color'] as num).toInt()
+                : 0xFFFFFF;
+            int pos;
+            switch (
+                (prop['pos'] is num) ? (prop['pos'] as num).toInt() : 1) {
+              case 4:
+                pos = 4;
+                break;
+              case 5:
+                pos = 5;
+                break;
+              default:
+                pos = 1;
+            }
+            final playat =
+                (item['playat'] is num) ? (item['playat'] as num).toInt() : 0;
+            final content = item['content']?.toString() ?? '';
+            if (content.isEmpty) continue;
+            all.add(DanmakuComment(
+              timeMs: playat,
+              mode: pos,
+              color: color,
+              content: content,
+            ));
+          }
         }
+        // ★ 连续 3 段空 = 越界, break (每批结束后检查, 避免 45+ 段死循环)
+        if (emptyCount >= 3) break;
       }
       return all;
     } finally {

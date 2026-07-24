@@ -137,85 +137,98 @@ class LeDanmaku extends BaseDanmakuSource {
       final e = endSec > 0 ? endSec : 3600 * 8;
       final all = <DanmakuComment>[];
       int emptyCount = 0;
+      // 并行批量加载: 每批 15 个分片同时请求, 批次结束后检查连续空段
+      const batchSize = 15;
       while (s < e) {
-        final segEnd = (s + 300).clamp(0, e);
-        try {
-          final url = 'https://hd-my.le.com/danmu/list'
-              '?vid=$episodeId&start=$s&end=$segEnd';
-          final r = await d.get<String>(url,
-              options: Options(headers: _headers));
-          if (r.data == null || r.data!.isEmpty) {
+        // 构建本批分片 (start,end) 列表
+        final batchSegs = <List<int>>[];
+        for (var i = 0; i < batchSize && s < e; i++) {
+          final segEnd = (s + 300).clamp(0, e);
+          batchSegs.add([s, segEnd]);
+          s = segEnd;
+        }
+        final results = await Future.wait(
+          batchSegs.map((se) async {
+            final segStart = se[0];
+            final segEnd = se[1];
+            try {
+              final url = 'https://hd-my.le.com/danmu/list'
+                  '?vid=$episodeId&start=$segStart&end=$segEnd';
+              final r = await d.get<String>(url,
+                  options: Options(headers: _headers));
+              if (r.data == null || r.data!.isEmpty) {
+                return <DanmakuComment>[];
+              }
+              final text = r.data!;
+              // 兼容 JSONP
+              var body = text;
+              final pIdx = body.indexOf('(');
+              final lIdx = body.lastIndexOf(')');
+              if (pIdx >= 0 && lIdx > pIdx && body.indexOf(';') > 0) {
+                body = body.substring(pIdx + 1, lIdx);
+              }
+              final root = json.decode(body);
+              final out = <DanmakuComment>[];
+              if (root is Map) {
+                final data = root['data'];
+                List? list;
+                if (data is List) {
+                  list = data;
+                } else if (data is Map) {
+                  for (final k in ['list', 'items', 'danmu', 'barrage_list']) {
+                    final v = data[k];
+                    if (v is List) {
+                      list = v;
+                      break;
+                    }
+                  }
+                }
+                if (list != null) {
+                  for (final item in list) {
+                    if (item is! Map) continue;
+                    final t = (item['time'] is num)
+                        ? (item['time'] as num).toInt()
+                        : ((item['playat'] is num) ? (item['playat'] as num).toInt() : 0);
+                    final content = item['content']?.toString() ??
+                        item['text']?.toString() ??
+                        '';
+                    if (content.isEmpty) continue;
+                    int mode = 1;
+                    final type = item['type']?.toString() ?? '';
+                    if (type == 'top') {
+                      mode = 5;
+                    } else if (type == 'bottom') {
+                      mode = 4;
+                    }
+                    int color = 0xFFFFFF;
+                    final c = item['color'];
+                    if (c is num) color = c.toInt();
+                    out.add(DanmakuComment(
+                      timeMs: t * 1000,
+                      mode: mode,
+                      color: color,
+                      content: content,
+                    ));
+                  }
+                }
+              }
+              return out;
+            } catch (e) {
+              if (segStart == 0) debugPrint('[Le] first seg error: $e');
+              return <DanmakuComment>[];
+            }
+          }),
+        );
+        for (final batchComments in results) {
+          if (batchComments.isEmpty) {
             emptyCount++;
-            s = segEnd;
-            if (emptyCount >= 3) break;
-            continue;
-          }
-          final text = r.data!;
-          // 兼容 JSONP
-          var body = text;
-          final pIdx = body.indexOf('(');
-          final lIdx = body.lastIndexOf(')');
-          if (pIdx >= 0 && lIdx > pIdx && body.indexOf(';') > 0) {
-            body = body.substring(pIdx + 1, lIdx);
-          }
-          final root = json.decode(body);
-          int segCount = 0;
-          if (root is Map) {
-            final data = root['data'];
-            List? list;
-            if (data is List) {
-              list = data;
-            } else if (data is Map) {
-              for (final k in ['list', 'items', 'danmu', 'barrage_list']) {
-                final v = data[k];
-                if (v is List) {
-                  list = v;
-                  break;
-                }
-              }
-            }
-            if (list != null) {
-              for (final item in list) {
-                if (item is! Map) continue;
-                final t = (item['time'] is num)
-                    ? (item['time'] as num).toInt()
-                    : ((item['playat'] is num) ? (item['playat'] as num).toInt() : 0);
-                final content = item['content']?.toString() ??
-                    item['text']?.toString() ??
-                    '';
-                if (content.isEmpty) continue;
-                int mode = 1;
-                final type = item['type']?.toString() ?? '';
-                if (type == 'top') {
-                  mode = 5;
-                } else if (type == 'bottom') {
-                  mode = 4;
-                }
-                int color = 0xFFFFFF;
-                final c = item['color'];
-                if (c is num) color = c.toInt();
-                all.add(DanmakuComment(
-                  timeMs: t * 1000,
-                  mode: mode,
-                  color: color,
-                  content: content,
-                ));
-                segCount++;
-              }
-            }
-          }
-          if (segCount > 0) {
-            emptyCount = 0;
           } else {
-            emptyCount++;
+            emptyCount = 0;
+            all.addAll(batchComments);
           }
-        } catch (e) {
-          if (s == 0) debugPrint('[Le] first seg error: $e');
-          emptyCount++;
         }
         // ★ 连续 3 段空 = 越界, break (避免 96 段死循环)
         if (emptyCount >= 3) break;
-        s = segEnd;
       }
       debugPrint('[Le] vid=$episodeId → ${all.length} comments');
       return all;

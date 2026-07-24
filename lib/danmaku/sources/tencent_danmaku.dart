@@ -209,43 +209,61 @@ class TencentDanmaku extends BaseDanmakuSource {
           ? (endSec / 300.0).ceil().clamp(1, totalSegs)
           : totalSegs;
       if (startSeg > endSeg) return [];
-      if (endSeg > 100) endSeg = 100;
+      if (endSeg > 40) endSeg = 40; // ★ v2.5.46: 40 段上限 (~3.3h)
 
       final all = <DanmakuComment>[];
-      for (var seg = startSeg; seg <= endSeg; seg++) {
-        try {
-          final r = await d.post<List<int>>(
-            'https://bullet.video.qq.com/fcgi-bin/bulletin/list',
-            data: utf8.encode(json.encode({
-              'vid': vid,
-              'cid': vid,
-              'page': seg,
-            })),
-            options: Options(
-              responseType: ResponseType.bytes,
-              headers: _postHeaders,
-            ),
-          );
-          final raw = r.data;
-          if (raw == null || raw.isEmpty) {
-            if (seg > 1) break;
-            continue;
-          }
-          final text = _decodeTencent(Uint8List.fromList(raw));
-          if (text.isEmpty) {
-            debugPrint('[Tencent] seg$seg decode empty, raw=${raw.length}B');
-            if (seg > 1) break;
-            continue;
-          }
-          final parsed = _parseTencentJson(text);
-          all.addAll(parsed);
-        } on DioException catch (e) {
-          debugPrint('[Tencent] seg$seg DioException: ${e.response?.statusCode} ${e.message}');
-          if (seg > 1) break;
-        } catch (e) {
-          debugPrint('[Tencent] seg$seg error: $e');
-          if (seg > 1) break;
+      // 并行批量加载: 每批 15 个分片同时请求, 批次结束后检查连续空段
+      const batchSize = 15;
+      var seg = startSeg;
+      var emptyCount = 0;
+      while (seg <= endSeg) {
+        final batchSegs = <int>[];
+        for (var i = 0; i < batchSize && seg <= endSeg; i++, seg++) {
+          batchSegs.add(seg);
         }
+        final results = await Future.wait(
+          batchSegs.map((s) async {
+            try {
+              final r = await d.post<List<int>>(
+                'https://bullet.video.qq.com/fcgi-bin/bulletin/list',
+                data: utf8.encode(json.encode({
+                  'vid': vid,
+                  'cid': vid,
+                  'page': s,
+                })),
+                options: Options(
+                  responseType: ResponseType.bytes,
+                  headers: _postHeaders,
+                ),
+              );
+              final raw = r.data;
+              if (raw == null || raw.isEmpty) {
+                return <DanmakuComment>[];
+              }
+              final text = _decodeTencent(Uint8List.fromList(raw));
+              if (text.isEmpty) {
+                debugPrint('[Tencent] seg$s decode empty, raw=${raw.length}B');
+                return <DanmakuComment>[];
+              }
+              return _parseTencentJson(text);
+            } on DioException catch (e) {
+              debugPrint('[Tencent] seg$s DioException: ${e.response?.statusCode} ${e.message}');
+              return <DanmakuComment>[];
+            } catch (e) {
+              debugPrint('[Tencent] seg$s error: $e');
+              return <DanmakuComment>[];
+            }
+          }),
+        );
+        for (final batchComments in results) {
+          if (batchComments.isEmpty) {
+            emptyCount++;
+          } else {
+            emptyCount = 0;
+            all.addAll(batchComments);
+          }
+        }
+        if (emptyCount >= 3) break;
       }
       debugPrint('[Tencent] vid=$vid → ${all.length} comments');
       return all;
