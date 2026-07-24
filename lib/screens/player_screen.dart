@@ -3456,61 +3456,6 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
           ),
-          // v2.5.34: 弹幕开关 — 6 源自动 search + 选最优 + 拉.
-          //   任何阶段都能点 (detail / playing), 但只有 _selectedSource 选完才能
-          //   知道是第几集 → 自动拉该集弹幕. 没选源时按钮禁用.
-          IconButton(
-            tooltip: _danmakuLoading
-                ? '弹幕加载中...'
-                : (_danmakuEnabled
-                    ? '关闭弹幕 (${_danmakuSourceTitle ?? _danmakuSource ?? ""} · $_danmakuCount条)'
-                    : '打开弹幕 (自动匹配 6 源)'),
-            icon: _danmakuLoading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    _danmakuEnabled
-                        ? Icons.subtitles
-                        : Icons.subtitles_outlined,
-                    color: _danmakuEnabled
-                        ? kLunaTheme
-                        : (isDark ? Colors.white : Colors.black),
-                  ),
-            onPressed: _danmakuLoading
-                ? null
-                : () {
-                    if (_danmakuEnabled) {
-                      setState(() {
-                        _danmakuEnabled = false;
-                      });
-                    } else {
-                      _toggleDanmaku();
-                    }
-                  },
-          ),
-          // v2.5.36: 弹幕设置按钮 — 弹出设置面板 (透明度/速度/字体/密度/
-          //   防重叠/区域/模式). 移植自 SeleneTV Lo9; + Ldh0; 设置页.
-          if (_danmakuEnabled)
-            IconButton(
-              tooltip: '弹幕设置',
-              icon: Icon(
-                Icons.tune,
-                color: isDark ? Colors.white : Colors.black,
-                size: 20,
-              ),
-              onPressed: () {
-                DanmakuSettingsSheet.show(
-                  context,
-                  onChanged: () {
-                    // 刷新 overlay, 应用新设置
-                    _danmakuKey.currentState?.refreshSettings();
-                  },
-                );
-              },
-            ),
         ],
       ),
     );
@@ -5057,8 +5002,56 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ),
                           ),
                           const Spacer(),
-                          // v2.3.14: 卸弹幕开关 (v2.3.12 移植自 Selene-TV,
-                          //   用户反馈 UX 太差, 整个删了).
+                          // v2.5.37: 弹幕开关移到播控栏 (跟 SeleneTV 一致,
+                          //   原来在详情页顶栏 v2.3.14 卸过, v2.5.34 放回顶栏,
+                          //   现在挪到播控).
+                          if (_danmakuLoading)
+                            const SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            _iconBtn(
+                              icon: _danmakuEnabled
+                                  ? Icons.subtitles
+                                  : Icons.subtitles_outlined,
+                              iconColor: _danmakuEnabled
+                                  ? kLunaTheme
+                                  : Colors.white,
+                              onTap: () {
+                                if (_danmakuEnabled) {
+                                  setState(() {
+                                    _danmakuEnabled = false;
+                                  });
+                                } else {
+                                  _toggleDanmaku();
+                                }
+                              },
+                            ),
+                          // v2.5.37: 弹幕设置按钮 (仅弹幕开启时显示)
+                          if (_danmakuEnabled && !_danmakuLoading)
+                            _iconBtn(
+                              icon: Icons.tune,
+                              iconColor: Colors.white,
+                              onTap: () {
+                                DanmakuSettingsSheet.show(
+                                  context,
+                                  onChanged: () {
+                                    _danmakuKey.currentState?.refreshSettings();
+                                  },
+                                );
+                              },
+                            ),
                           // 右: 倍速
                           _iconBtn(
                             icon: Icons.speed,
