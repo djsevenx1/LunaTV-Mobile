@@ -88,17 +88,22 @@ class DanmakuManager {
     }
   }
 
-  /// 搜索单个源 — 供弹幕面板逐源检查用
+  /// 搜索单个源 — 供弹幕面板逐源检查用 (10s 超时)
   Future<List<DanmakuMedia>> searchSingleSource(
     DanmakuSource source,
     String title,
   ) async {
     final src = _sources[source];
     if (src == null) return [];
-    return _safeSearch(src, title);
+    try {
+      return await src.searchMedia(title, dio: _sharedDio)
+          .timeout(const Duration(seconds: 10), onTimeout: () => []);
+    } catch (_) {
+      return const [];
+    }
   }
 
-  /// 拿分集
+  /// 拿分集 (10s 超时)
   Future<List<DanmakuEpisode>> getEpisodes(
     DanmakuSource source,
     String mediaId,
@@ -106,13 +111,14 @@ class DanmakuManager {
     final src = _sources[source];
     if (src == null) return [];
     try {
-      return await src.getEpisodes(mediaId, dio: _sharedDio);
+      return await src.getEpisodes(mediaId, dio: _sharedDio)
+          .timeout(const Duration(seconds: 10), onTimeout: () => []);
     } catch (_) {
       return [];
     }
   }
 
-  /// 拉弹幕 — 整集
+  /// 拉弹幕 — 整集 (15s 超时, 防止优酷分片拉取卡住)
   Future<List<DanmakuComment>> loadDanmaku(
     DanmakuSource source,
     String episodeId, {
@@ -127,7 +133,7 @@ class DanmakuManager {
         startSec: startSec,
         endSec: endSec,
         dio: _sharedDio,
-      );
+      ).timeout(const Duration(seconds: 15), onTimeout: () => []);
     } catch (_) {
       return [];
     }
