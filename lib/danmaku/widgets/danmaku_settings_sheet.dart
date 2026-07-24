@@ -145,7 +145,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
     var best = 0;
     var bestDist = double.infinity;
     for (var i = 0; i < steps.length; i++) {
-      final d = (steps[i] - v).abs();
+      final d = (steps[i] - v).abs().toDouble();
       if (d < bestDist) {
         bestDist = d;
         best = i;
