@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -46,7 +47,13 @@ class BilibiliDanmaku extends BaseDanmakuSource {
       final url = 'https://api.bilibili.com/x/web-interface/search/all/v2'
           '?keyword=${Uri.encodeQueryComponent(keyword)}'
           '&platform=pc&duration=0&order=totalrank';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://search.bilibili.com',
+            'Cookie': 'buvid3=infoc; b_nut=100',
+          }));
       if (r.data == null || r.data!.isEmpty) return [];
       final root = json.decode(r.data!);
       if (root is! Map) return [];
@@ -107,6 +114,7 @@ class BilibiliDanmaku extends BaseDanmakuSource {
         final sid = mediaId.substring(3);
         final r = await d.get<String>(
           'https://api.bilibili.com/pgc/view/web/ep/list?season_id=$sid',
+          options: Options(headers: _segHeaders),
         );
         if (r.data == null || r.data!.isEmpty) return [];
         final root = json.decode(r.data!);
@@ -128,6 +136,7 @@ class BilibiliDanmaku extends BaseDanmakuSource {
         final bvid = mediaId.substring(3);
         final r = await d.get<String>(
           'https://api.bilibili.com/x/player/pagelist?bvid=$bvid',
+          options: Options(headers: _segHeaders),
         );
         if (r.data == null || r.data!.isEmpty) return [];
         final root = json.decode(r.data!);
@@ -152,6 +161,14 @@ class BilibiliDanmaku extends BaseDanmakuSource {
     }
   }
 
+  static const Map<String, String> _segHeaders = {
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://www.bilibili.com',
+    'Origin': 'https://www.bilibili.com',
+  };
+
   @override
   Future<List<DanmakuComment>> getDanmaku(
     String episodeId, {
@@ -164,7 +181,11 @@ class BilibiliDanmaku extends BaseDanmakuSource {
     final own = dio == null;
     try {
       final startSeg = startSec > 0 ? (startSec / 360).floor() + 1 : 1;
-      final endSeg = endSec > 0 ? (endSec / 360.0).ceil() : 1000;
+      // 不再遍历 1000 段; 默认拉前 20 段 (≈ 2h), 够覆盖大多数视频.
+      // 若 endSec 有值则按 endSec 算, 但上限 200.
+      final endSeg = endSec > 0
+          ? (endSec / 360.0).ceil().clamp(1, 200)
+          : 20;
 
       final all = <DanmakuComment>[];
       for (var seg = startSeg; seg <= endSeg; seg++) {
@@ -173,15 +194,41 @@ class BilibiliDanmaku extends BaseDanmakuSource {
         try {
           final r = await d.get<List<int>>(
             url,
-            options: Options(responseType: ResponseType.bytes),
+            options: Options(
+              responseType: ResponseType.bytes,
+              headers: _segHeaders,
+            ),
           );
           final raw = r.data;
-          if (raw == null || raw.isEmpty) break;
-          all.addAll(_parseDmSegMobile(Uint8List.fromList(raw)));
-        } catch (_) {
-          break; // 404 = 末尾
+          if (raw == null || raw.isEmpty) {
+            // 空响应 = 该段无弹幕, 继续下一段 (不 break, 有些段确实空)
+            if (seg > 1) break; // 第 2 段起空 → 到尾了
+            continue;
+          }
+          final parsed = _parseDmSegMobile(Uint8List.fromList(raw));
+          if (parsed.isEmpty && seg == 1) {
+            // 第 1 段有数据但解析出 0 条 → 可能是 -412 风控 JSON
+            debugPrint('[Bilibili] seg1 parsed 0 comments, raw=${raw.length}B '
+                'head=${raw.length >= 4 ? raw.sublist(0, 4) : raw}');
+          }
+          all.addAll(parsed);
+        } on DioException catch (e) {
+          final code = e.response?.statusCode;
+          debugPrint('[Bilibili] seg$seg DioException: $code ${e.message}');
+          if (code == 404 || code == 304) break; // 末尾
+          if (code == 412) {
+            // 风控: 继续试下一段没意义, 直接退出
+            debugPrint('[Bilibili] 412 risk control — need cookie/buvid3');
+            break;
+          }
+          // 其他错误 (网络等): 第 1 段不 break, 后续段 break
+          if (seg > 1) break;
+        } catch (e) {
+          debugPrint('[Bilibili] seg$seg error: $e');
+          if (seg > 1) break;
         }
       }
+      debugPrint('[Bilibili] oid=$episodeId → ${all.length} comments');
       return all;
     } finally {
       if (own) d.close(force: true);

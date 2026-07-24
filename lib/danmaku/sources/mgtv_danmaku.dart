@@ -16,6 +16,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -45,7 +46,8 @@ class MgtvDanmaku extends BaseDanmakuSource {
     try {
       final url = 'https://mobileso.bz.mgtv.com/so/v2/search'
           '?wd=${Uri.encodeQueryComponent(keyword)}&t=video&p=0';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _headers));
       if (r.data == null || r.data!.isEmpty) return [];
       final root = json.decode(r.data!);
       if (root is! Map) return [];
@@ -91,7 +93,8 @@ class MgtvDanmaku extends BaseDanmakuSource {
     try {
       final url = 'https://pcweb.api.miguvideo.com/pc/player/core/v1/playurl'
           '?cid=$mediaId';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _headers));
       if (r.data == null || r.data!.isEmpty) return [];
       final root = json.decode(r.data!);
       if (root is! Map) return [];
@@ -161,18 +164,26 @@ class MgtvDanmaku extends BaseDanmakuSource {
               '?vid=$episodeId&start=$s&end=$segEnd';
           final r = await d.get<List<int>>(
             url,
-            options: Options(responseType: ResponseType.bytes),
+            options: Options(
+              responseType: ResponseType.bytes,
+              headers: _headers,
+            ),
           );
           final raw = r.data;
           if (raw != null && raw.isNotEmpty) {
             final text = _decodeMgtv(Uint8List.fromList(raw));
             if (text.isNotEmpty) {
               all.addAll(_parseMgtvJson(text));
+            } else if (s == 0) {
+              debugPrint('[Mgtv] first seg decode empty, raw=${raw.length}B');
             }
           }
-        } catch (_) {}
+        } catch (e) {
+          if (s == 0) debugPrint('[Mgtv] first seg error: $e');
+        }
         s = segEnd;
       }
+      debugPrint('[Mgtv] vid=$episodeId → ${all.length} comments');
       return all;
     } finally {
       if (own) d.close(force: true);
@@ -180,18 +191,38 @@ class MgtvDanmaku extends BaseDanmakuSource {
   }
 
   String _decodeMgtv(Uint8List raw) {
-    if (raw.length < 4) return '';
+    if (raw.length < 2) return '';
     final looksJson = (String s) => s.startsWith('{') || s.startsWith('[');
+
+    // 方案 1: 标准 zlib (带 header)
     try {
       final s = utf8.decode(zlib.decode(raw));
       if (looksJson(s)) return s;
     } catch (_) {}
+
+    // 方案 2: raw deflate (无 header)
     try {
-      if (raw.length < 6) return '';
-      final body = raw.sublist(2, raw.length - 4);
-      final s = utf8.decode(zlib.decode(body));
+      final decoder = ZLibDecoder(raw: true);
+      final s = utf8.decode(decoder.convert(raw));
       if (looksJson(s)) return s;
     } catch (_) {}
+
+    // 方案 3: 剥 2 字节头 + 4 字节尾, raw deflate
+    if (raw.length > 6) {
+      try {
+        final body = raw.sublist(2, raw.length - 4);
+        final decoder = ZLibDecoder(raw: true);
+        final s = utf8.decode(decoder.convert(body));
+        if (looksJson(s)) return s;
+      } catch (_) {}
+    }
+
+    // 方案 4: 直接当文本
+    try {
+      final s = utf8.decode(raw, allowMalformed: true);
+      if (looksJson(s)) return s;
+    } catch (_) {}
+
     return '';
   }
 

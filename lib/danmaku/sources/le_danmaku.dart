@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -42,7 +43,8 @@ class LeDanmaku extends BaseDanmakuSource {
     try {
       // 走乐视 so.le.com HTML, 内部抓 vid 列表
       final url = 'https://so.le.com/s?wd=' + Uri.encodeQueryComponent(keyword);
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _headers));
       if (r.data == null || r.data!.isEmpty) return [];
       final html = r.data!;
       final out = <DanmakuMedia>[];
@@ -80,7 +82,8 @@ class LeDanmaku extends BaseDanmakuSource {
     final own = dio == null;
     try {
       final url = 'https://api.le.com/album/episodeList?albumId=$mediaId';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _headers));
       if (r.data == null || r.data!.isEmpty) return [];
       final root = json.decode(r.data!);
       if (root is! Map) return [];
@@ -138,7 +141,8 @@ class LeDanmaku extends BaseDanmakuSource {
         try {
           final url = 'https://hd-my.le.com/danmu/list'
               '?vid=$episodeId&start=$s&end=$segEnd';
-          final r = await d.get<String>(url);
+          final r = await d.get<String>(url,
+              options: Options(headers: _headers));
           if (r.data == null || r.data!.isEmpty) {
             s = segEnd;
             continue;
@@ -195,9 +199,12 @@ class LeDanmaku extends BaseDanmakuSource {
               }
             }
           }
-        } catch (_) {}
+        } catch (e) {
+          if (s == 0) debugPrint('[Le] first seg error: $e');
+        }
         s = segEnd;
       }
+      debugPrint('[Le] vid=$episodeId → ${all.length} comments');
       return all;
     } finally {
       if (own) d.close(force: true);

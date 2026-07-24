@@ -14,6 +14,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -42,7 +43,8 @@ class IqiyiDanmaku extends BaseDanmakuSource {
     try {
       final url = 'https://search.video.iqiyi.com/o?if=html5&key=' +
           Uri.encodeQueryComponent(keyword);
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _bulletHeaders));
       final body = r.data ?? '';
       if (body.isEmpty) return [];
       final root = json.decode(body);
@@ -89,7 +91,8 @@ class IqiyiDanmaku extends BaseDanmakuSource {
     try {
       final url = 'https://pcw-api.iqiyi.com/albums/album/avlistinfo'
           '?aid=$mediaId&page=1&size=60';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _bulletHeaders));
       final body = r.data ?? '';
       if (body.isEmpty) {
         return [
@@ -131,6 +134,13 @@ class IqiyiDanmaku extends BaseDanmakuSource {
     }
   }
 
+  static const Map<String, String> _bulletHeaders = {
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://www.iqiyi.com',
+  };
+
   @override
   Future<List<DanmakuComment>> getDanmaku(
     String episodeId, {
@@ -147,6 +157,7 @@ class IqiyiDanmaku extends BaseDanmakuSource {
       try {
         final infoR = await d.get<String>(
           'https://pcw-api.iqiyi.com/video/video/baseinfo/$episodeId',
+          options: Options(headers: _bulletHeaders),
         );
         if (infoR.data != null && infoR.data!.isNotEmpty) {
           final info = json.decode(infoR.data!);
@@ -158,7 +169,9 @@ class IqiyiDanmaku extends BaseDanmakuSource {
             }
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[iQiyi] baseinfo failed: $e');
+      }
 
       int startSeg = startSec > 0 ? (startSec / 300).floor() + 1 : 1;
       int endSeg = endSec > 0
@@ -179,40 +192,89 @@ class IqiyiDanmaku extends BaseDanmakuSource {
         try {
           final r = await d.get<List<int>>(
             url,
-            options: Options(responseType: ResponseType.bytes),
+            options: Options(
+              responseType: ResponseType.bytes,
+              headers: _bulletHeaders,
+            ),
           );
           final raw = r.data;
-          if (raw == null || raw.isEmpty) continue;
+          if (raw == null || raw.isEmpty) {
+            if (seg > 1) break;
+            continue;
+          }
           final xml = _inflateIqiyi(Uint8List.fromList(raw));
-          if (xml.isEmpty) continue;
-          all.addAll(_parseIqiyiXml(xml));
-        } catch (_) {
-          // 单段失败不阻断
+          if (xml.isEmpty) {
+            debugPrint('[iQiyi] seg$seg inflate empty, raw=${raw.length}B '
+                'head=${raw.length >= 4 ? raw.sublist(0, 4) : raw}');
+            if (seg > 1) break;
+            continue;
+          }
+          final parsed = _parseIqiyiXml(xml);
+          if (parsed.isEmpty && seg == 1) {
+            debugPrint('[iQiyi] seg1 parsed 0 from xml len=${xml.length}');
+          }
+          all.addAll(parsed);
+        } on DioException catch (e) {
+          debugPrint('[iQiyi] seg$seg DioException: ${e.response?.statusCode} ${e.message}');
+          if (seg > 1) break;
+        } catch (e) {
+          debugPrint('[iQiyi] seg$seg error: $e');
+          if (seg > 1) break;
         }
       }
+      debugPrint('[iQiyi] tvid=$episodeId → ${all.length} comments');
       return all;
     } finally {
       if (own) d.close(force: true);
     }
   }
 
-  // iqiyi .z 文件是 raw deflate, 头 2 字节 zlib header, 尾 4 字节 adler32.
-  // dart:io zlib 解码 zlib 格式 (含 header), 直接 inflate 即可.
+  // iqiyi .z 文件可能有两种格式:
+  //   1) zlib 格式 (0x78 0x9c 头 + adler32 尾) — dart:io zlib.decode 可直接解
+  //   2) raw deflate (无头无尾) — 需 ZLibDecoder(raw: true)
+  // 解出后是 XML, 含 <d p="..."> 文本</d> 或 <bulletInfo> 结构.
   String _inflateIqiyi(Uint8List raw) {
-    if (raw.length < 8) return '';
+    if (raw.length < 2) return '';
+
+    // 方案 1: 标准 zlib (带 header)
     try {
-      // 先按 zlib 格式解 (服务端大多会带 header)
-      final s = utf8.decode(zlib.decode(raw));
-      if (s.startsWith('<d ') || s.contains('<bulletInfo>')) return s;
+      final bytes = zlib.decode(raw);
+      final s = utf8.decode(bytes);
+      if (s.startsWith('<') || s.contains('<bulletInfo>') || s.contains('<d ')) {
+        return s;
+      }
     } catch (_) {}
+
+    // 方案 2: raw deflate (无 zlib header)
     try {
-      // 剥 2 字节头 + 4 字节尾, 走 raw deflate — Dart 没有 raw inflate
-      // 只能按 zlib 格式. 大多数情况下服务端文件已带 zlib 头, 上面能解.
-      // 极少数 raw deflate 直接当 string (退化方案)
-      return utf8.decode(raw, allowMalformed: true);
-    } catch (_) {
-      return '';
+      final decoder = ZLibDecoder(raw: true);
+      final bytes = decoder.convert(raw);
+      final s = utf8.decode(bytes);
+      if (s.startsWith('<') || s.contains('<bulletInfo>') || s.contains('<d ')) {
+        return s;
+      }
+    } catch (_) {}
+
+    // 方案 3: 剥 2 字节头 + 4 字节尾再试 zlib
+    if (raw.length > 6) {
+      try {
+        final body = raw.sublist(2, raw.length - 4);
+        final decoder = ZLibDecoder(raw: true);
+        final bytes = decoder.convert(body);
+        final s = utf8.decode(bytes);
+        if (s.startsWith('<') || s.contains('<bulletInfo>') || s.contains('<d ')) {
+          return s;
+        }
+      } catch (_) {}
     }
+
+    // 方案 4: 退化 — 直接当 UTF-8 文本 (极少数未压缩响应)
+    try {
+      final s = utf8.decode(raw, allowMalformed: true);
+      if (s.startsWith('<') || s.contains('<d ')) return s;
+    } catch (_) {}
+
+    return '';
   }
 
   static final RegExp _dRe = RegExp(r'<d\s+p="([^"]*)"[^>]*>([^<]*)</d>');

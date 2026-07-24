@@ -18,6 +18,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -58,7 +59,10 @@ class YoukuDanmaku extends BaseDanmakuSource {
   Future<String> _fetchToken(Dio d) async {
     try {
       final r = await d.get<String>(_tokenUrl,
-          options: Options(responseType: ResponseType.plain));
+          options: Options(
+            responseType: ResponseType.plain,
+            headers: _getHeaders,
+          ));
       // 优酷回 set-cookie, 多个值是逗号串在一起 (按 RFC 6265)
       final setCookie = r.headers.map['set-cookie'];
       if (setCookie != null) {
@@ -70,12 +74,18 @@ class YoukuDanmaku extends BaseDanmakuSource {
             final name = kv.substring(0, eq);
             final value = kv.substring(eq + 1);
             if (name == '_m_h5_tk') {
-              return value.split('_').first;
+              final token = value.split('_').first;
+              debugPrint('[Youku] token fetched: ${token.substring(0, token.length.clamp(0, 8))}...');
+              return token;
             }
           }
         }
       }
-    } catch (_) {}
+      debugPrint('[Youku] token fetch: no _m_h5_tk in cookies, '
+          'set-cookie=${setCookie?.length ?? 0} entries');
+    } catch (e) {
+      debugPrint('[Youku] token fetch error: $e');
+    }
     return '';
   }
 
@@ -105,7 +115,8 @@ class YoukuDanmaku extends BaseDanmakuSource {
     try {
       final url = 'https://search.youku.com/api/search?keyword=' +
           Uri.encodeQueryComponent(keyword);
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _getHeaders));
       if (r.data == null || r.data!.isEmpty) return [];
       final root = json.decode(r.data!);
       if (root is! Map) return [];
@@ -160,7 +171,8 @@ class YoukuDanmaku extends BaseDanmakuSource {
           '?client_id=$_clientId'
           '&package=com.huawei.hwvplayer.youku'
           '&ext=show&show_id=$mediaId';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _getHeaders));
       if (r.data == null || r.data!.isEmpty) return [];
       final root = json.decode(r.data!);
       if (root is! Map) return [];
@@ -217,6 +229,9 @@ class YoukuDanmaku extends BaseDanmakuSource {
       final all = <DanmakuComment>[];
       for (var seg = startSeg; seg <= endSeg; seg++) {
         final arr = await _fetchSegment(d, vid, seg, retry: false);
+        if (arr.isEmpty && seg == 1) {
+          debugPrint('[Youku] seg1 empty, vid=$vid totalSegs=$totalSegs');
+        }
         for (var i = 0; i < arr.length; i++) {
           final item = arr[i];
           if (item is! Map) continue;
@@ -265,7 +280,10 @@ class YoukuDanmaku extends BaseDanmakuSource {
       final t = DateTime.now().millisecondsSinceEpoch.toString();
       final data = json.encode({'vid': vid, 'mat': seg});
       final token = await _ensureToken(d);
-      if (token.isEmpty) return const [];
+      if (token.isEmpty) {
+        debugPrint('[Youku] _fetchSegment seg$seg: no token');
+        return const [];
+      }
       final sign = _md5Sign(token, t, data);
       final queryStr = '?jsv=2.7.0&appKey=$_appKey'
           '&t=$t&sign=$sign'
@@ -299,13 +317,15 @@ class YoukuDanmaku extends BaseDanmakuSource {
         if (arr is List) return arr;
         return const [];
       }
+      debugPrint('[Youku] seg$seg ret=$ret0 (retry=$retry)');
       if (!retry && ret0.contains('TOKEN')) {
         _cachedToken = null;
         _tokenTime = null;
         return _fetchSegment(d, vid, seg, retry: true);
       }
       return const [];
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Youku] _fetchSegment seg$seg exception: $e');
       return const [];
     }
   }

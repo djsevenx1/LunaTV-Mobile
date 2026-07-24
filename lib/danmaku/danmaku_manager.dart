@@ -33,9 +33,20 @@ class DanmakuManager {
     DanmakuSource.le: LeDanmaku(),
   };
 
+  /// 共享 Dio — 所有源共用. 必须带浏览器 UA, 否则多数弹幕 API 会拒绝.
+  /// 各源在 getDanmaku 等方法里可通过 Options(headers: ...) 追加源专属头.
+  static const String kDefaultUA =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
   final Dio _sharedDio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 8),
     receiveTimeout: const Duration(seconds: 12),
+    headers: {
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
   ));
 
   // 用户偏好: 优先哪些源, 顺序就是优先级

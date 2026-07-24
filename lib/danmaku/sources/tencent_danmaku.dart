@@ -18,6 +18,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -54,7 +55,8 @@ class TencentDanmaku extends BaseDanmakuSource {
       // hint API 不需要 sign, 简单 GET
       final url = 'https://h5vv.video.qq.com/gethint?word=' +
           Uri.encodeQueryComponent(keyword);
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _headers));
       if (r.data == null || r.data!.isEmpty) return [];
       var body = r.data!;
       // 可能是 JSONP: callback({...}); → 剥 callback
@@ -106,7 +108,8 @@ class TencentDanmaku extends BaseDanmakuSource {
       // getvideoinfo 返回 JSONP
       final url = 'https://vv.video.qq.com/getvideoinfo'
           '?otype=json&vid=$mediaId';
-      final r = await d.get<String>(url);
+      final r = await d.get<String>(url,
+          options: Options(headers: _headers));
       if (r.data == null || r.data!.isEmpty) return [];
       var body = r.data!;
       final pIdx = body.indexOf('(');
@@ -178,7 +181,8 @@ class TencentDanmaku extends BaseDanmakuSource {
       int totalSegs = 1;
       try {
         final infoUrl = 'https://vv.video.qq.com/getvideoinfo?otype=json&vid=$vid';
-        final r = await d.get<String>(infoUrl);
+        final r = await d.get<String>(infoUrl,
+            options: Options(headers: _headers));
         if (r.data != null && r.data!.isNotEmpty) {
           var body = r.data!;
           final pIdx = body.indexOf('(');
@@ -223,32 +227,67 @@ class TencentDanmaku extends BaseDanmakuSource {
             ),
           );
           final raw = r.data;
-          if (raw == null || raw.isEmpty) continue;
+          if (raw == null || raw.isEmpty) {
+            if (seg > 1) break;
+            continue;
+          }
           final text = _decodeTencent(Uint8List.fromList(raw));
-          if (text.isEmpty) continue;
-          all.addAll(_parseTencentJson(text));
-        } catch (_) {}
+          if (text.isEmpty) {
+            debugPrint('[Tencent] seg$seg decode empty, raw=${raw.length}B');
+            if (seg > 1) break;
+            continue;
+          }
+          final parsed = _parseTencentJson(text);
+          all.addAll(parsed);
+        } on DioException catch (e) {
+          debugPrint('[Tencent] seg$seg DioException: ${e.response?.statusCode} ${e.message}');
+          if (seg > 1) break;
+        } catch (e) {
+          debugPrint('[Tencent] seg$seg error: $e');
+          if (seg > 1) break;
+        }
       }
+      debugPrint('[Tencent] vid=$vid → ${all.length} comments');
       return all;
     } finally {
       if (own) d.close(force: true);
     }
   }
 
-  // 腾讯弹幕响应: zlib 压缩 (带 zlib 头) 的 JSON
+  // 腾讯弹幕响应: 可能是 zlib 压缩或 raw deflate, 解出后是 JSON
   String _decodeTencent(Uint8List raw) {
-    if (raw.length < 4) return '';
+    if (raw.length < 2) return '';
+    final looksJson = (String s) => s.startsWith('{') || s.startsWith('[');
+
+    // 方案 1: 标准 zlib (带 header)
     try {
       final s = utf8.decode(zlib.decode(raw));
-      if (s.startsWith('{') || s.startsWith('[')) return s;
+      if (looksJson(s)) return s;
     } catch (_) {}
-    // raw deflate 退化
+
+    // 方案 2: raw deflate (无 header)
     try {
-      if (raw.length < 6) return '';
-      final body = raw.sublist(2, raw.length - 4);
-      final s = utf8.decode(zlib.decode(body));
-      if (s.startsWith('{') || s.startsWith('[')) return s;
+      final decoder = ZLibDecoder(raw: true);
+      final s = utf8.decode(decoder.convert(raw));
+      if (looksJson(s)) return s;
     } catch (_) {}
+
+    // 方案 3: 剥 2 字节头 + 4 字节尾, raw deflate
+    if (raw.length > 6) {
+      try {
+        final body = raw.sublist(2, raw.length - 4);
+        final decoder = ZLibDecoder(raw: true);
+        final s = utf8.decode(decoder.convert(body));
+        if (looksJson(s)) return s;
+      } catch (_) {}
+    }
+
+    // 方案 4: 直接当文本
+    try {
+      final s = utf8.decode(raw, allowMalformed: true);
+      if (looksJson(s)) return s;
+    } catch (_) {}
+
     return '';
   }
 
