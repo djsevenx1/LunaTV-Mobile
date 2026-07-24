@@ -123,7 +123,8 @@ class BilibiliDanmaku extends BaseDanmakuSource {
         if (dataList is! List) continue;
         for (final item in dataList) {
           if (item is! Map) continue;
-          // 只取番剧 (media_bangumi) 和 普通视频 (video)
+          // ★ v2.5.50: 只取番剧 (media_bangumi) 和 影视 (media_ft)
+          //   去掉 video 类型 (UP主投稿的观后感/解说), 提高搜索准确性
           if (resultType == 'media_bangumi' || resultType == 'media_ft') {
             final sid = item['season_id']?.toString();
             if (sid == null || sid.isEmpty) continue;
@@ -131,22 +132,10 @@ class BilibiliDanmaku extends BaseDanmakuSource {
               source: sourceEnum,
               mediaId: 'ep:$sid',
               title: item['title']?.toString().replaceAll('<em class="keyword">', '').replaceAll('</em>', '') ?? '',
-              type: 'tv',
+              type: resultType == 'media_ft' ? 'movie' : 'tv',
               year: int.tryParse(item['season_year']?.toString() ?? '0') ?? 0,
               poster: null,
               episodeCount: 80,
-            ));
-          } else if (resultType == 'video') {
-            final bvid = item['bvid']?.toString();
-            if (bvid == null || bvid.isEmpty) continue;
-            out.add(DanmakuMedia(
-              source: sourceEnum,
-              mediaId: 'bv:$bvid',
-              title: item['title']?.toString().replaceAll('<em class="keyword">', '').replaceAll('</em>', '') ?? '',
-              type: 'movie',
-              year: null,
-              poster: null,
-              episodeCount: 1,
             ));
           }
         }

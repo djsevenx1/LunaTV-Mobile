@@ -191,59 +191,80 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
   }
 
   // 评分选最优 + 自动拉弹幕
+  // ★ v2.5.50: 如果最优源加载失败 (无分集/无弹幕), 自动尝试下一个源
   Future<void> _autoSelectBest(List<DanmakuMedia> results) async {
-    DanmakuMedia? best;
-    int bestScore = -1;
+    // 按评分排序
+    final scored = <MapEntry<DanmakuMedia, int>>[];
     for (final m in results) {
       var s = 0;
       if (m.title.contains(widget.videoTitle) ||
           widget.videoTitle.contains(m.title)) s += 10;
       if (widget.year != null && m.year == widget.year) s += 5;
       if (widget.kind == m.type) s += 3;
-      if (s > bestScore) {
-        bestScore = s;
-        best = m;
-      }
+      scored.add(MapEntry(m, s));
     }
-    if (best == null) {
+    scored.sort((a, b) => b.value - a.value);
+
+    if (scored.isEmpty || scored.first.value < 0) {
       setState(() => _statusMsg = '未找到匹配的弹幕');
       return;
     }
-    await _loadFromSource(best);
+
+    // 依次尝试评分最高的 3 个源
+    for (var i = 0; i < scored.length && i < 3; i++) {
+      final media = scored[i].key;
+      final success = await _loadFromSource(media, silent: i > 0);
+      if (success) return;
+    }
+    // 全部失败
+    if (mounted) {
+      setState(() => _statusMsg = '多个源均无弹幕, 可手动选择重试');
+    }
   }
 
   // 从指定源拉弹幕
-  Future<void> _loadFromSource(DanmakuMedia media) async {
+  // ★ v2.5.50: 返回 bool 表示是否成功, 支持 silent 模式 (不显示错误提示)
+  //   当 getEpisodes 返回空时, 尝试用 mediaId 直接作为 episodeId 拉弹幕 (兜底)
+  Future<bool> _loadFromSource(DanmakuMedia media, {bool silent = false}) async {
     setState(() {
       _loadingSource = media.source;
       _statusMsg = null;
     });
     try {
-      final eps = await DanmakuManager.instance.getEpisodes(
+      var eps = await DanmakuManager.instance.getEpisodes(
         media.source,
         media.mediaId,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
+
+      DanmakuEpisode? ep;
       if (eps.isEmpty) {
-        setState(() {
-          _loadingSource = null;
-          _statusMsg = '${media.source.displayName} 无分集信息';
-        });
-        return;
+        // ★ 兜底: 用 mediaId 直接作为 episodeId 拉弹幕
+        //   有些源的 mediaId 本身就是可用的 episodeId (如爱奇艺 albumId)
+        eps = [
+          DanmakuEpisode(
+            source: media.source,
+            episodeId: media.mediaId,
+            order: 1,
+            title: '正片',
+          ),
+        ];
       }
-      final ep = _pickEpisode(eps, widget.currentEpisodeIndex + 1, widget.kind);
+      ep = _pickEpisode(eps, widget.currentEpisodeIndex + 1, widget.kind);
       if (ep == null) {
-        setState(() {
-          _loadingSource = null;
-          _statusMsg = '无法匹配当前集';
-        });
-        return;
+        if (!silent) {
+          setState(() {
+            _loadingSource = null;
+            _statusMsg = '无法匹配当前集';
+          });
+        }
+        return false;
       }
       final list = await DanmakuManager.instance.loadDanmaku(
         media.source,
         ep.episodeId,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       final sourceTitle =
           '${media.source.displayName} · ${media.title} · ${ep.title}';
       setState(() {
@@ -254,7 +275,11 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
         _loadingSource = null;
       });
       if (list.isEmpty) {
-        setState(() => _statusMsg = '${media.source.displayName} 暂无弹幕');
+        // 弹幕为空 = 失败, 自动尝试下一个源
+        if (!silent) {
+          setState(() => _statusMsg = '${media.source.displayName} 暂无弹幕');
+        }
+        return false;
       }
       // 通知 player 更新状态
       widget.onDanmakuLoaded(
@@ -264,12 +289,14 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
         sourceTitle,
         list,
       );
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _loadingSource = null;
-        _statusMsg = '加载失败';
+        _statusMsg = silent ? _statusMsg : '加载失败';
       });
+      return false;
     }
   }
 

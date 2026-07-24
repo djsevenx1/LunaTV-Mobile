@@ -58,7 +58,9 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
   // ★ v2.5.46: 弹幕晚到回填 — comments 变化后首次 spawn 用 0~current 宽窗口
   //   弹幕加载慢时 (1-4分钟), current 已到 60000~240000ms,
   //   原窗口 current-30s 会跳过所有早期弹幕 → "不显示"
-  bool _needsBackfill = false;
+  // ★ v2.5.50: 初始值改为 true — overlay 首次创建时 (从 _danmakuEnabled=false→true)
+  //   initState 不会走 didUpdateWidget/reset 路径, 需要在首帧就回填
+  bool _needsBackfill = true;
 
   // === 轨道管理 ===
   // 滚动弹幕: 按行排布, 每行记录 [freeAtMs, lastRightEdge]
