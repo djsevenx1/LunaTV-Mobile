@@ -45,6 +45,7 @@ import 'package:luna_tv/danmaku/models/danmaku_comment.dart';
 import 'package:luna_tv/danmaku/models/danmaku_media.dart';
 import 'package:luna_tv/danmaku/widgets/danmaku_overlay.dart';
 import 'package:luna_tv/danmaku/widgets/danmaku_panel.dart';
+import 'package:luna_tv/danmaku/widgets/danmaku_control_sheet.dart';
 import 'package:luna_tv/danmaku/widgets/danmaku_settings_sheet.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
@@ -1192,6 +1193,60 @@ class _PlayerScreenState extends State<PlayerScreen>
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
       ),
+    );
+  }
+
+  // v2.5.49: 弹幕按钮 → 弹出控制面板 (开关 + 源列表 + 设置入口)
+  //   不再直接开关, 而是弹出面板让用户看到源选择和设置
+  Future<void> _showDanmakuPanel() async {
+    int? year;
+    final y = widget.videoInfo.year;
+    if (y != null && y.isNotEmpty) {
+      final m = RegExp(r'^(\d{4})').firstMatch(y);
+      if (m != null) year = int.tryParse(m.group(1)!);
+    }
+
+    await DanmakuControlSheet.show(
+      context,
+      initiallyEnabled: _danmakuEnabled,
+      currentSource: _danmakuSelSource,
+      currentMediaId: _danmakuSelMediaId,
+      currentMediaTitle: _danmakuSelMediaTitle,
+      currentSourceTitle: _danmakuSourceTitle,
+      danmakuCount: _danmakuCount,
+      videoTitle: widget.videoInfo.title.trim(),
+      year: year,
+      kind: _kind,
+      currentEpisodeIndex: _currentEpisodeIndex,
+      onDanmakuLoaded: (source, mediaId, mediaTitle, sourceTitle, comments) {
+        setState(() {
+          _danmakuSelSource = source;
+          _danmakuSelMediaId = mediaId;
+          _danmakuSelMediaTitle = mediaTitle;
+          _danmakuSource = source.key;
+          _danmakuSourceTitle = sourceTitle;
+          _danmakuCount = comments.length;
+          _danmakuComments = comments;
+          _danmakuEnabled = true;
+        });
+        _danmakuKey.currentState?.reset();
+      },
+      onDanmakuDisabled: () {
+        setState(() {
+          _danmakuEnabled = false;
+          _danmakuComments = const [];
+          _danmakuCount = 0;
+        });
+        _danmakuKey.currentState?.reset();
+      },
+      onOpenSettings: () {
+        DanmakuSettingsSheet.show(
+          context,
+          onChanged: () {
+            _danmakuKey.currentState?.refreshSettings();
+          },
+        );
+      },
     );
   }
 
@@ -5049,66 +5104,28 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ),
                           ),
                           const Spacer(),
-                          // v2.5.47: 弹幕开关 — 纯图标, 无文字 (用户反馈文字占位)
-                          if (_danmakuLoading)
-                            const SizedBox(
+                          // v2.5.49: 弹幕按钮 — 点击弹出控制面板 (开关+源列表+设置)
+                          GestureDetector(
+                            onTap: _showDanmakuPanel,
+                            child: Container(
                               width: 40,
                               height: 40,
-                              child: Center(
-                                child: SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                ),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _danmakuEnabled
+                                    ? kLunaTheme.withOpacity(0.2)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(4),
                               ),
-                            )
-                          else
-                            GestureDetector(
-                              onTap: () {
-                                if (_danmakuEnabled) {
-                                  setState(() {
-                                    _danmakuEnabled = false;
-                                  });
-                                } else {
-                                  _toggleDanmaku();
-                                }
-                              },
-                              child: Container(
-                                width: 40,
-                                height: 40,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: _danmakuEnabled
-                                      ? kLunaTheme.withOpacity(0.2)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Icon(
-                                  Icons.subtitles,
-                                  size: 20,
-                                  color: _danmakuEnabled
-                                      ? kLunaTheme
-                                      : Colors.white70,
-                                ),
+                              child: Icon(
+                                Icons.subtitles,
+                                size: 20,
+                                color: _danmakuEnabled
+                                    ? kLunaTheme
+                                    : Colors.white70,
                               ),
                             ),
-                          // v2.5.37: 弹幕设置按钮 (仅弹幕开启时显示)
-                          if (_danmakuEnabled && !_danmakuLoading)
-                            _iconBtn(
-                              icon: Icons.tune,
-                              iconColor: Colors.white,
-                              onTap: () {
-                                DanmakuSettingsSheet.show(
-                                  context,
-                                  onChanged: () {
-                                    _danmakuKey.currentState?.refreshSettings();
-                                  },
-                                );
-                              },
-                            ),
+                          ),
                           // 右: 倍速
                           _iconBtn(
                             icon: Icons.speed,
