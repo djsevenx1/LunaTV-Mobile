@@ -88,6 +88,16 @@ class DanmakuManager {
     }
   }
 
+  /// 搜索单个源 — 供弹幕面板逐源检查用
+  Future<List<DanmakuMedia>> searchSingleSource(
+    DanmakuSource source,
+    String title,
+  ) async {
+    final src = _sources[source];
+    if (src == null) return [];
+    return _safeSearch(src, title);
+  }
+
   /// 拿分集
   Future<List<DanmakuEpisode>> getEpisodes(
     DanmakuSource source,

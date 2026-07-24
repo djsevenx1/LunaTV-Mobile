@@ -15,8 +15,12 @@
 //   danmaku_area         (String: off/third/half/full)
 //   danmaku_last_area    (String)
 //   danmaku_mode         (String: all/scroll/top/bottom)
+//   danmaku_sources      (String: 逗号分隔的源 key, 如 "bilibili,tencent,iqiyi")
+//                        — 对应 SeleneTV Lkj;->invokeSuspend 里的 putString
 
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'models/danmaku_media.dart';
 
 /// 弹幕渲染设置 — 对应 SeleneTV Ldh0; (DanmakuRenderSettings)
 ///
@@ -153,17 +157,31 @@ class DanmakuSettings {
   static const _kArea = 'danmaku_area';
   static const _kLastArea = 'danmaku_last_area';
   static const _kMode = 'danmaku_mode';
+  static const _kSources = 'danmaku_sources';
 
   SharedPreferences? _prefs;
   DanmakuRenderSettings _render = const DanmakuRenderSettings();
   DanmakuAreaOption _area = DanmakuAreaOption.full;
   DanmakuAreaOption _lastArea = DanmakuAreaOption.full;
   DanmakuMode _mode = DanmakuMode.all;
+  // 启用的弹幕源 key 集合 — 对应 SeleneTV Llj;->f (Set<String>)
+  Set<String> _enabledSourceKeys = DanmakuSource.values
+      .map((s) => s.key)
+      .toSet();
 
   DanmakuRenderSettings get render => _render;
   DanmakuAreaOption get area => _area;
   DanmakuAreaOption get lastArea => _lastArea;
   DanmakuMode get mode => _mode;
+
+  /// 启用的弹幕源 — 对应 SeleneTV Llj;->f
+  List<DanmakuSource> get enabledSources => DanmakuSource.values
+      .where((s) => _enabledSourceKeys.contains(s.key))
+      .toList();
+
+  /// 某源是否启用
+  bool isSourceEnabled(DanmakuSource s) =>
+      _enabledSourceKeys.contains(s.key);
 
   /// 初始化 — 从 SharedPreferences 读取全部设置
   /// 对应 SeleneTV Llj; 初始化逻辑
@@ -179,6 +197,30 @@ class DanmakuSettings {
     _area = DanmakuAreaOption.fromKey(_prefs!.getString(_kArea));
     _lastArea = DanmakuAreaOption.fromKey(_prefs!.getString(_kLastArea));
     _mode = DanmakuMode.fromKey(_prefs!.getString(_kMode));
+    // 读取启用的源 — 对应 SeleneTV Llj;->f
+    // SharedPreferences 存逗号分隔 String, 如 "bilibili,tencent,iqiyi"
+    final raw = _prefs!.getString(_kSources);
+    if (raw != null && raw.isNotEmpty) {
+      _enabledSourceKeys = raw.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
+    }
+  }
+
+  /// 切换某源的启用状态 — 对应 SeleneTV Lkj;->invokeSuspend
+  /// (add/remove from set → join "," → putString("danmaku_sources", ...))
+  Future<void> toggleSource(DanmakuSource s, bool enabled) async {
+    _prefs ??= await SharedPreferences.getInstance();
+    if (enabled) {
+      _enabledSourceKeys.add(s.key);
+    } else {
+      _enabledSourceKeys.remove(s.key);
+    }
+    // 至少保留一个源
+    if (_enabledSourceKeys.isEmpty) {
+      _enabledSourceKeys.add(s.key);
+      return;
+    }
+    final joined = _enabledSourceKeys.join(',');
+    await _prefs!.setString(_kSources, joined);
   }
 
   /// 保存渲染设置 — 对应 SeleneTV Lo9; 里 putFloat/putInt/putBoolean 全部5个key

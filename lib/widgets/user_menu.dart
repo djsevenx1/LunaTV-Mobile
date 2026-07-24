@@ -18,6 +18,9 @@ import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/text_context_menu.dart';
 import 'package:luna_tv/widgets/update_dialog.dart';
+import 'package:luna_tv/danmaku/danmaku_settings.dart';
+import 'package:luna_tv/danmaku/models/danmaku_media.dart';
+import 'package:luna_tv/danmaku/widgets/danmaku_settings_sheet.dart';
 
 class UserMenu extends StatefulWidget {
   final bool isDarkMode;
@@ -91,6 +94,10 @@ class _UserMenuState extends State<UserMenu> {
     super.initState();
     _loadUserInfo();
     _loadVersion();
+    // v2.5.38: 加载弹幕设置 (源开关)
+    DanmakuSettings.instance.load().then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadVersion() async {
@@ -1923,6 +1930,44 @@ class _UserMenuState extends State<UserMenu> {
                   iconColor: const Color(0xFFef4444),
                 ),
               ],
+            ],
+          ),
+          // ===== 弹幕 =====
+          // v2.5.38: 弹幕设置 — 对齐 SeleneTV app 设置里的弹幕入口
+          //   源开关 + 渲染设置 (透明度/速度/字体/密度/防重叠/区域/模式)
+          _buildSectionHeader('弹幕'),
+          _buildCard(
+            children: [
+              // 弹幕源开关 — 6 源, 对应 SeleneTV danmaku_sources
+              ...DanmakuSource.values.map((s) {
+                final enabled = DanmakuSettings.instance.isSourceEnabled(s);
+                return Column(
+                  children: [
+                    _buildToggleOption(
+                      title: s.displayName,
+                      value: enabled,
+                      onChanged: (value) async {
+                        await DanmakuSettings.instance.toggleSource(s, value);
+                        if (!mounted) return;
+                        setState(() {});
+                      },
+                      icon: Icons.dns_rounded,
+                      iconColor: const Color(0xFF22C55E),
+                    ),
+                    if (s != DanmakuSource.values.last) _buildDivider(),
+                  ],
+                );
+              }),
+              _buildDivider(),
+              // 渲染设置 — 弹出底部 Sheet (透明度/速度/字体/密度/防重叠/区域/模式)
+              _buildActionItem(
+                title: '弹幕显示设置',
+                icon: Icons.tune_rounded,
+                iconColor: const Color(0xFF3b82f6),
+                onTap: () {
+                  DanmakuSettingsSheet.show(context);
+                },
+              ),
             ],
           ),
           // ===== 其他 =====

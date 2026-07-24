@@ -4,6 +4,8 @@
 enum DanmakuSource { iqiyi, youku, bilibili, tencent, mgtv, le }
 
 extension DanmakuSourceName on DanmakuSource {
+  // key 与 SeleneTV Lpi0; <clinit> 完全一致:
+  //   bilibili / tencent / iqiyi / youku / mgtv / letv
   String get key {
     switch (this) {
       case DanmakuSource.iqiyi:    return 'iqiyi';
@@ -11,18 +13,19 @@ extension DanmakuSourceName on DanmakuSource {
       case DanmakuSource.bilibili: return 'bilibili';
       case DanmakuSource.tencent:  return 'tencent';
       case DanmakuSource.mgtv:     return 'mgtv';
-      case DanmakuSource.le:       return 'le';
+      case DanmakuSource.le:       return 'letv';
     }
   }
 
+  // displayName 与 SeleneTV Loi0;->b 完全一致
   String get displayName {
     switch (this) {
       case DanmakuSource.iqiyi:    return '爱奇艺';
       case DanmakuSource.youku:    return '优酷';
-      case DanmakuSource.bilibili: return 'B站';
+      case DanmakuSource.bilibili: return '哔哩哔哩';
       case DanmakuSource.tencent:  return '腾讯视频';
       case DanmakuSource.mgtv:     return '芒果TV';
-      case DanmakuSource.le:       return '乐视';
+      case DanmakuSource.le:       return '乐视视频';
     }
   }
 }

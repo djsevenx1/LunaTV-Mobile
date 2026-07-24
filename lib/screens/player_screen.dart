@@ -44,6 +44,7 @@ import 'package:luna_tv/danmaku/danmaku_settings.dart';
 import 'package:luna_tv/danmaku/models/danmaku_comment.dart';
 import 'package:luna_tv/danmaku/models/danmaku_media.dart';
 import 'package:luna_tv/danmaku/widgets/danmaku_overlay.dart';
+import 'package:luna_tv/danmaku/widgets/danmaku_panel.dart';
 import 'package:luna_tv/danmaku/widgets/danmaku_settings_sheet.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
@@ -250,7 +251,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   String? _danmakuSourceTitle;        // 媒体标题 (用于展示选了哪个)
   int _danmakuCount = 0;              // 加载到的弹幕数
   List<DanmakuComment> _danmakuComments = const [];
-  DanmakuMatch? _danmakuMatch;        // 搜索到的剧集
+  // v2.5.38: 弹幕面板选中后保存, 切集时用同一源+mediaId 重拉
+  DanmakuSource? _danmakuSelSource;
+  String? _danmakuSelMediaId;
+  String? _danmakuSelMediaTitle;
   // Overlay key — 用于强制重建
   final GlobalKey<DanmakuOverlayState> _danmakuKey = GlobalKey<DanmakuOverlayState>();
 
@@ -1191,9 +1195,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  // v2.5.34: 弹幕触发器 — 6 源并行 search 选最优, 拿分集, 拉该集弹幕.
-  //   自动: 不用用户输任何东西, 标题从 widget.videoInfo.title 拿.
-  //   当前选集 index 决定拉第几集弹幕. 切集时由 _playEpisode 调用 _reloadDanmaku.
+  // v2.5.38: 弹幕触发器 — 弹出源选择面板, 对齐 SeleneTV Lth0;
+  //   面板自动并行搜所有启用源, 用户选源+选集, 返回弹幕列表.
   Future<void> _toggleDanmaku() async {
     if (_danmakuLoading) return;
     final source = _selectedSource;
@@ -1206,79 +1209,49 @@ class _PlayerScreenState extends State<PlayerScreen>
       _toast('当前集无效');
       return;
     }
-    setState(() {
-      _danmakuLoading = true;
-    });
-    try {
-      final title = widget.videoInfo.title.trim();
-      if (title.isEmpty) {
-        _toast('标题为空,无法搜索');
-        return;
-      }
-      // 推断类型 + 年份
-      int? year;
-      final y = widget.videoInfo.year;
-      if (y != null && y.isNotEmpty) {
-        final m = RegExp(r'^(\d{4})').firstMatch(y);
-        if (m != null) year = int.tryParse(m.group(1)!);
-      }
-      final kind = _kind; // 'movie' | 'tv'
 
-      final match = await DanmakuManager.instance.autoMatch(
-        title: title,
-        year: year,
-        type: kind,
-      );
-      if (!mounted) return;
-      if (match == null) {
-        _toast('6 源都搜不到: $title');
-        return;
-      }
-      _danmakuMatch = match;
-      // 拿分集
-      final eps = await DanmakuManager.instance.getEpisodes(
-        match.media.source,
-        match.media.mediaId,
-      );
-      if (!mounted) return;
-      if (eps.isEmpty) {
-        _toast('${match.media.source.displayName} 暂无分集');
-        return;
-      }
-      // 选该集: 优先按 order 匹配, 退而求其次按 index
-      final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, kind);
-      if (ep == null) {
-        _toast('分集匹配失败');
-        return;
-      }
-      // 拉弹幕
-      final list = await DanmakuManager.instance.loadDanmaku(
-        match.media.source,
-        ep.episodeId,
-      );
-      if (!mounted) return;
-      if (list.isEmpty) {
-        _toast('${match.media.source.displayName} 暂无弹幕');
-        return;
-      }
-      setState(() {
-        _danmakuSource = match.media.source.key;
-        _danmakuSourceTitle =
-            '${match.media.source.displayName} · ${match.media.title} · ${ep.title}';
-        _danmakuCount = list.length;
-        _danmakuComments = list;
-        _danmakuEnabled = true;
-      });
-    } catch (e, st) {
-      debugPrint('[Danmaku] toggle error: $e\n$st');
-      if (mounted) _toast('弹幕加载失败: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _danmakuLoading = false;
-        });
-      }
+    // 推断类型 + 年份
+    int? year;
+    final y = widget.videoInfo.year;
+    if (y != null && y.isNotEmpty) {
+      final m = RegExp(r'^(\d{4})').firstMatch(y);
+      if (m != null) year = int.tryParse(m.group(1)!);
     }
+    final kind = _kind;
+
+    final title = widget.videoInfo.title.trim();
+    if (title.isEmpty) {
+      _toast('标题为空,无法搜索');
+      return;
+    }
+
+    final result = await DanmakuPanel.show(
+      context,
+      title: title,
+      year: year,
+      kind: kind,
+      currentEpisode: _currentEpisodeIndex,
+    );
+
+    if (result == null) return; // 用户取消
+    if (!mounted) return;
+
+    if (result.comments.isEmpty) {
+      _toast('${result.source.displayName} 暂无弹幕');
+      return;
+    }
+
+    setState(() {
+      _danmakuSelSource = result.source;
+      _danmakuSelMediaId = result.mediaId;
+      _danmakuSelMediaTitle = result.mediaTitle;
+      _danmakuSource = result.source.key;
+      _danmakuSourceTitle =
+          '${result.source.displayName} · ${result.mediaTitle} · ${result.episodeTitle}';
+      _danmakuCount = result.comments.length;
+      _danmakuComments = result.comments;
+      _danmakuEnabled = true;
+    });
   }
 
   DanmakuEpisode? _pickEpisode(List<DanmakuEpisode> eps, int wantOrder, String kind) {
@@ -1297,10 +1270,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     return eps.first;
   }
 
-  // v2.5.34: 切集时刷弹幕 (已开启状态下, 重拉新一集)
+  // v2.5.38: 切集时刷弹幕 (已开启状态下, 用同一源+mediaId 重拉新一集)
   Future<void> _reloadDanmakuForNewEpisode() async {
     if (!_danmakuEnabled) return;
-    if (_danmakuMatch == null) return;
+    if (_danmakuSelSource == null || _danmakuSelMediaId == null) return;
     final source = _selectedSource;
     if (source == null) return;
     setState(() {
@@ -1308,20 +1281,20 @@ class _PlayerScreenState extends State<PlayerScreen>
     });
     try {
       final eps = await DanmakuManager.instance.getEpisodes(
-        _danmakuMatch!.media.source,
-        _danmakuMatch!.media.mediaId,
+        _danmakuSelSource!,
+        _danmakuSelMediaId!,
       );
       if (!mounted) return;
       final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, _kind);
       if (ep == null) return;
       final list = await DanmakuManager.instance.loadDanmaku(
-        _danmakuMatch!.media.source,
+        _danmakuSelSource!,
         ep.episodeId,
       );
       if (!mounted) return;
       setState(() {
         _danmakuSourceTitle =
-            '${_danmakuMatch!.media.source.displayName} · ${_danmakuMatch!.media.title} · ${ep.title}';
+            '${_danmakuSelSource!.displayName} · ${_danmakuSelMediaTitle ?? ""} · ${ep.title}';
         _danmakuCount = list.length;
         _danmakuComments = list;
       });
