@@ -9,6 +9,7 @@
 // 全局单例, 默认 5 min 缓存.
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'models/danmaku_comment.dart';
 import 'models/danmaku_media.dart';
@@ -133,7 +134,10 @@ class DanmakuManager {
     }
   }
 
-  /// 拉弹幕 — 整集 (30s 超时, B站需先取 buvid3 + 多段拉取)
+  /// 拉弹幕 — 整集
+  /// ★ 不再用 .timeout(onTimeout:()=>[]) 丢弃结果!
+  ///   旧实现: mgtv/le 做 96 段串行请求, 30s 必然超时 → onTimeout 丢弃全部已拉到的弹幕 → "暂无弹幕"
+  ///   新实现: 各源内部已加空段 break (最多拉到内容结束位置), manager 只加诊断日志
   Future<List<DanmakuComment>> loadDanmaku(
     DanmakuSource source,
     String episodeId, {
@@ -142,14 +146,21 @@ class DanmakuManager {
   }) async {
     final src = _sources[source];
     if (src == null) return [];
+    debugPrint('[DanmakuManager] loadDanmaku: source=${source.key} '
+        'episodeId=$episodeId startSec=$startSec endSec=$endSec');
     try {
-      return await src.getDanmaku(
+      final result = await src.getDanmaku(
         episodeId,
         startSec: startSec,
         endSec: endSec,
         dio: _sharedDio,
-      ).timeout(const Duration(seconds: 30), onTimeout: () => []);
-    } catch (_) {
+      );
+      debugPrint('[DanmakuManager] loadDanmaku result: '
+          'source=${source.key} episodeId=$episodeId → ${result.length} comments');
+      return result;
+    } catch (e) {
+      debugPrint('[DanmakuManager] loadDanmaku error: '
+          'source=${source.key} episodeId=$episodeId → $e');
       return [];
     }
   }

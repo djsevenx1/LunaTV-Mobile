@@ -227,11 +227,19 @@ class YoukuDanmaku extends BaseDanmakuSource {
       if (startSeg > endSeg) return [];
 
       final all = <DanmakuComment>[];
+      int emptyCount = 0;
       for (var seg = startSeg; seg <= endSeg; seg++) {
         final arr = await _fetchSegment(d, vid, seg, retry: false);
-        if (arr.isEmpty && seg == 1) {
-          debugPrint('[Youku] seg1 empty, vid=$vid totalSegs=$totalSegs');
+        if (arr.isEmpty) {
+          emptyCount++;
+          if (seg == 1) {
+            debugPrint('[Youku] seg1 empty, vid=$vid totalSegs=$totalSegs');
+          }
+          // ★ 连续 3 段空 = 越界, break (避免 45+ 段死循环)
+          if (emptyCount >= 3) break;
+          continue;
         }
+        emptyCount = 0;
         for (var i = 0; i < arr.length; i++) {
           final item = arr[i];
           if (item is! Map) continue;

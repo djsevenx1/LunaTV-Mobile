@@ -94,6 +94,38 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
 
   int get liveCount => _live.length;
 
+  /// ★ 重置所有轨道状态 — 切集/换 comments 时调用
+  ///   旧轨道 freeAtMs 保留旧集的大数值 (如 600000ms),
+  ///   新集从 0ms 开始 → _pickTrack 全返回 -1 → 新弹幕投不上轨 → 屏幕空白
+  void reset() {
+    _live.clear();
+    for (final t in _scrollTracks) {
+      t.freeAtMs = 0;
+      t.lastBullet = null;
+    }
+    for (final t in _topTracks) {
+      t.freeAtMs = 0;
+      t.lastBullet = null;
+    }
+    for (final t in _bottomTracks) {
+      t.freeAtMs = 0;
+      t.lastBullet = null;
+    }
+    _lastTickMs = 0;
+    _densityCounter = 0;
+    if (mounted) setState(() {});
+  }
+
+  /// ★ 检测 comments 列表变化 → 自动 reset
+  @override
+  void didUpdateWidget(DanmakuOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // comments 引用变了 → 新一集的弹幕, 重置轨道
+    if (!identical(oldWidget.comments, widget.comments)) {
+      reset();
+    }
+  }
+
   /// 从 DanmakuSettings 刷新设置 (设置面板关闭后调用)
   void refreshSettings() {
     final s = DanmakuSettings.instance;
@@ -351,7 +383,11 @@ class _LiveBullet {
 
   void advance(int nowMs) {
     final elapsed = nowMs - spawnedAtMs;
-    if (elapsed < 0) return;
+    // ★ elapsed < 0 = 切集后时钟回退, 旧子弹已过期 → 立即标记 done 清除
+    if (elapsed < 0) {
+      done = true;
+      return;
+    }
     if (comment.mode == 1) {
       // 滚动: scrollDurationMs 走过屏幕宽
       final t = (elapsed / scrollDurationMs).clamp(0.0, 1.0);

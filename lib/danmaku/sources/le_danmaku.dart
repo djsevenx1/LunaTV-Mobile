@@ -136,6 +136,7 @@ class LeDanmaku extends BaseDanmakuSource {
       int s = startSec;
       final e = endSec > 0 ? endSec : 3600 * 8;
       final all = <DanmakuComment>[];
+      int emptyCount = 0;
       while (s < e) {
         final segEnd = (s + 300).clamp(0, e);
         try {
@@ -144,7 +145,9 @@ class LeDanmaku extends BaseDanmakuSource {
           final r = await d.get<String>(url,
               options: Options(headers: _headers));
           if (r.data == null || r.data!.isEmpty) {
+            emptyCount++;
             s = segEnd;
+            if (emptyCount >= 3) break;
             continue;
           }
           final text = r.data!;
@@ -156,6 +159,7 @@ class LeDanmaku extends BaseDanmakuSource {
             body = body.substring(pIdx + 1, lIdx);
           }
           final root = json.decode(body);
+          int segCount = 0;
           if (root is Map) {
             final data = root['data'];
             List? list;
@@ -196,12 +200,21 @@ class LeDanmaku extends BaseDanmakuSource {
                   color: color,
                   content: content,
                 ));
+                segCount++;
               }
             }
           }
+          if (segCount > 0) {
+            emptyCount = 0;
+          } else {
+            emptyCount++;
+          }
         } catch (e) {
           if (s == 0) debugPrint('[Le] first seg error: $e');
+          emptyCount++;
         }
+        // ★ 连续 3 段空 = 越界, break (避免 96 段死循环)
+        if (emptyCount >= 3) break;
         s = segEnd;
       }
       debugPrint('[Le] vid=$episodeId → ${all.length} comments');

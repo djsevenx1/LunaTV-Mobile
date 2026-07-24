@@ -162,8 +162,10 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
   }
 
   /// 自动选最优源 — 对应 SeleneTV 评分逻辑
+  /// ★ 修复: 记录最优 media 而非只存 SourceState, 避免 medias.first 选错剧
   void _autoSelectBest() {
-    _SourceState? best;
+    _SourceState? bestSt;
+    DanmakuMedia? bestMedia;
     int bestScore = -1;
     for (final st in _sources) {
       if (st.status != _SourceStatus.found || st.medias.isEmpty) continue;
@@ -175,16 +177,17 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
         if (widget.kind == m.type) s += 3;
         if (s > bestScore) {
           bestScore = s;
-          best = st;
+          bestSt = st;
+          bestMedia = m;
         }
       }
     }
-    if (best != null) {
-      _expandSource(best);
+    if (bestSt != null && bestMedia != null) {
+      _expandSource(bestSt, bestMedia);
     }
   }
 
-  Future<void> _expandSource(_SourceState st) async {
+  Future<void> _expandSource(_SourceState st, [DanmakuMedia? specificMedia]) async {
     if (_expandedSource == st.source) {
       setState(() => _expandedSource = null);
       return;
@@ -192,11 +195,13 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
     setState(() => _expandedSource = st.source);
     // 如果还没加载分集, 加载之
     if (st.episodes.isEmpty && !st.episodesLoading && st.medias.isNotEmpty) {
+      // ★ 优先用传入的 specificMedia (最优匹配), 否则用 first
+      final media = specificMedia ?? st.medias.first;
       st.episodesLoading = true;
       setState(() {});
       final eps = await DanmakuManager.instance.getEpisodes(
         st.source,
-        st.medias.first.mediaId,
+        media.mediaId,
       );
       if (mounted) {
         st.episodes = eps;

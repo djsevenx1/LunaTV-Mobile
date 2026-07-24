@@ -157,6 +157,7 @@ class MgtvDanmaku extends BaseDanmakuSource {
       int s = startSec;
       final e = endSec > 0 ? endSec : 3600 * 8; // 8h 上限
       final all = <DanmakuComment>[];
+      int emptyCount = 0;
       while (s < e) {
         final segEnd = (s + 300).clamp(0, e);
         try {
@@ -173,14 +174,28 @@ class MgtvDanmaku extends BaseDanmakuSource {
           if (raw != null && raw.isNotEmpty) {
             final text = _decodeMgtv(Uint8List.fromList(raw));
             if (text.isNotEmpty) {
-              all.addAll(_parseMgtvJson(text));
-            } else if (s == 0) {
-              debugPrint('[Mgtv] first seg decode empty, raw=${raw.length}B');
+              final parsed = _parseMgtvJson(text);
+              if (parsed.isNotEmpty) {
+                all.addAll(parsed);
+                emptyCount = 0;
+              } else {
+                emptyCount++;
+              }
+            } else {
+              emptyCount++;
+              if (s == 0) {
+                debugPrint('[Mgtv] first seg decode empty, raw=${raw.length}B');
+              }
             }
+          } else {
+            emptyCount++;
           }
         } catch (e) {
           if (s == 0) debugPrint('[Mgtv] first seg error: $e');
+          emptyCount++;
         }
+        // ★ 连续 3 段空 = 越界, break (避免 96 段死循环)
+        if (emptyCount >= 3) break;
         s = segEnd;
       }
       debugPrint('[Mgtv] vid=$episodeId → ${all.length} comments');

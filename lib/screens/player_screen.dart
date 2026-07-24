@@ -1286,7 +1286,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
       if (!mounted) return;
       final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, _kind);
-      if (ep == null) return;
+      if (ep == null) {
+        // ★ ep==null 时清空旧弹幕, 避免上集弹幕残留
+        setState(() {
+          _danmakuCount = 0;
+          _danmakuComments = const [];
+        });
+        return;
+      }
       final list = await DanmakuManager.instance.loadDanmaku(
         _danmakuSelSource!,
         ep.episodeId,
@@ -1298,6 +1305,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         _danmakuCount = list.length;
         _danmakuComments = list;
       });
+      // ★ 切集后重置 overlay 轨道状态 (didUpdateWidget 会自动检测 comments 变化并 reset,
+      //   但显式调用确保万无一失)
+      _danmakuKey.currentState?.reset();
     } catch (_) {
       // 静默
     } finally {
