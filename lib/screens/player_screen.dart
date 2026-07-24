@@ -1195,8 +1195,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  // v2.5.38: 弹幕触发器 — 弹出源选择面板, 对齐 SeleneTV Lth0;
-  //   面板自动并行搜所有启用源, 用户选源+选集, 返回弹幕列表.
+  // v2.5.47: 弹幕开关 — 点击后全自动匹配, 不弹手动选择面板
+  //   流程: 6源并行搜索 → 评分选最优 → 自动选当前集 → 拉弹幕 → 显示
+  //   失败 (无结果/无弹幕) → toast 提示, 不弹面板
   Future<void> _toggleDanmaku() async {
     if (_danmakuLoading) return;
     final source = _selectedSource;
@@ -1225,33 +1226,92 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
 
-    final result = await DanmakuPanel.show(
-      context,
-      title: title,
-      year: year,
-      kind: kind,
-      currentEpisode: _currentEpisodeIndex,
-    );
+    setState(() => _danmakuLoading = true);
 
-    if (result == null) return; // 用户取消
-    if (!mounted) return;
+    try {
+      // 1) 6 源并行搜索
+      final results = await DanmakuManager.instance.searchByTitle(title);
+      if (!mounted) return;
 
-    if (result.comments.isEmpty) {
-      _toast('${result.source.displayName} 暂无弹幕');
-      return;
+      if (results.isEmpty) {
+        _toast('未找到弹幕源');
+        return;
+      }
+
+      // 2) 评分选最优 (标题包含 + 年份匹配 + 类型匹配)
+      DanmakuMedia? best;
+      int bestScore = -1;
+      for (final m in results) {
+        var s = 0;
+        if (m.title.contains(title) || title.contains(m.title)) s += 10;
+        if (year != null && m.year == year) s += 5;
+        if (kind == m.type) s += 3;
+        if (s > bestScore) {
+          bestScore = s;
+          best = m;
+        }
+      }
+      if (best == null) {
+        _toast('未找到匹配的弹幕');
+        return;
+      }
+
+      debugPrint('[Danmaku] auto-match: ${best.source.key} '
+          '"${best.title}" score=$bestScore');
+
+      // 3) 拿分集列表
+      final eps = await DanmakuManager.instance.getEpisodes(
+        best.source,
+        best.mediaId,
+      );
+      if (!mounted) return;
+
+      if (eps.isEmpty) {
+        _toast('${best.source.displayName} 无分集信息');
+        return;
+      }
+
+      // 4) 自动选当前集
+      final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, kind);
+      if (ep == null) {
+        _toast('无法匹配当前集');
+        return;
+      }
+
+      // 5) 拉弹幕
+      final list = await DanmakuManager.instance.loadDanmaku(
+        best.source,
+        ep.episodeId,
+      );
+      if (!mounted) return;
+
+      if (list.isEmpty) {
+        _toast('${best.source.displayName} 暂无弹幕');
+        return;
+      }
+
+      // 6) 显示弹幕
+      setState(() {
+        _danmakuSelSource = best.source;
+        _danmakuSelMediaId = best.mediaId;
+        _danmakuSelMediaTitle = best.title;
+        _danmakuSource = best.source.key;
+        _danmakuSourceTitle =
+            '${best.source.displayName} · ${best.title} · ${ep.title}';
+        _danmakuCount = list.length;
+        _danmakuComments = list;
+        _danmakuEnabled = true;
+      });
+      _danmakuKey.currentState?.reset();
+      _toast('弹幕 · ${best.source.displayName} · ${list.length}条');
+    } catch (e) {
+      _toast('弹幕加载失败');
+      debugPrint('[Danmaku] auto-match error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _danmakuLoading = false);
+      }
     }
-
-    setState(() {
-      _danmakuSelSource = result.source;
-      _danmakuSelMediaId = result.mediaId;
-      _danmakuSelMediaTitle = result.mediaTitle;
-      _danmakuSource = result.source.key;
-      _danmakuSourceTitle =
-          '${result.source.displayName} · ${result.mediaTitle} · ${result.episodeTitle}';
-      _danmakuCount = result.comments.length;
-      _danmakuComments = result.comments;
-      _danmakuEnabled = true;
-    });
   }
 
   DanmakuEpisode? _pickEpisode(List<DanmakuEpisode> eps, int wantOrder, String kind) {
@@ -4985,9 +5045,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ),
                           ),
                           const Spacer(),
-                          // v2.5.44: 弹幕开关 — 对齐 SeleneTV 文字按钮风格
-                          //   SeleneTV: "弹幕 · 关" / "弹幕 · 优酷" / "弹幕 · B站"
-                          //   不再用 subtitles 图标 (用户反馈找不到)
+                          // v2.5.47: 弹幕开关 — 纯图标, 无文字 (用户反馈文字占位)
                           if (_danmakuLoading)
                             const SizedBox(
                               width: 40,
@@ -5015,40 +5073,21 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 }
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: _danmakuEnabled
                                       ? kLunaTheme.withOpacity(0.2)
                                       : Colors.transparent,
                                   borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.subtitles,
-                                      size: 16,
-                                      color: _danmakuEnabled
-                                          ? kLunaTheme
-                                          : Colors.white70,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      _danmakuEnabled
-                                          ? '弹幕 · ${_danmakuSelSource?.displayName ?? "开"}'
-                                          : '弹幕 · 关',
-                                      style: TextStyle(
-                                        color: _danmakuEnabled
-                                            ? kLunaTheme
-                                            : Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: _danmakuEnabled
-                                            ? FontWeight.w600
-                                            : FontWeight.normal,
-                                      ),
-                                    ),
-                                  ],
+                                child: Icon(
+                                  Icons.subtitles,
+                                  size: 20,
+                                  color: _danmakuEnabled
+                                      ? kLunaTheme
+                                      : Colors.white70,
                                 ),
                               ),
                             ),
