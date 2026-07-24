@@ -40,9 +40,11 @@ import 'package:luna_tv/widgets/exo_player_view.dart';
 //   即触发, 不再要任何手动输入. 反编译 6 源协议见
 //   /workspace/selene_danmaku_protocol.md
 import 'package:luna_tv/danmaku/danmaku_manager.dart';
+import 'package:luna_tv/danmaku/danmaku_settings.dart';
 import 'package:luna_tv/danmaku/models/danmaku_comment.dart';
 import 'package:luna_tv/danmaku/models/danmaku_media.dart';
 import 'package:luna_tv/danmaku/widgets/danmaku_overlay.dart';
+import 'package:luna_tv/danmaku/widgets/danmaku_settings_sheet.dart';
 import 'package:dlna_dart/dlna.dart';
 import 'package:luna_tv/services/tmdb_service.dart';
 import 'package:provider/provider.dart';
@@ -369,6 +371,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _loadSkipConfig();
     // 加载倍速持久化
     _loadPlaybackRate();
+    // v2.5.36: 加载弹幕设置 (移植自 SeleneTV SharedPreferences)
+    unawaited(DanmakuSettings.instance.load());
     // 加载收藏状态
     _loadFavorite();
     // 一集播完自动播下一集 (避免用户点下一集的繁琐)
@@ -3487,6 +3491,26 @@ class _PlayerScreenState extends State<PlayerScreen>
                     }
                   },
           ),
+          // v2.5.36: 弹幕设置按钮 — 弹出设置面板 (透明度/速度/字体/密度/
+          //   防重叠/区域/模式). 移植自 SeleneTV Lo9; + Ldh0; 设置页.
+          if (_danmakuEnabled)
+            IconButton(
+              tooltip: '弹幕设置',
+              icon: Icon(
+                Icons.tune,
+                color: isDark ? Colors.white : Colors.black,
+                size: 20,
+              ),
+              onPressed: () {
+                DanmakuSettingsSheet.show(
+                  context,
+                  onChanged: () {
+                    // 刷新 overlay, 应用新设置
+                    _danmakuKey.currentState?.refreshSettings();
+                  },
+                );
+              },
+            ),
         ],
       ),
     );
