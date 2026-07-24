@@ -42,6 +42,10 @@ class DanmakuManager {
   final Dio _sharedDio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 8),
     receiveTimeout: const Duration(seconds: 12),
+    // ★ responseType 必须是 plain: 默认 json 会导致 Dio 自动解码 JSON 为 Map,
+    //   源码里 json.decode(r.data!) 会因 r.data 已是 Map 而崩溃.
+    //   plain 保证 r.data 始终是 String, 由各源自行 json.decode.
+    responseType: ResponseType.plain,
     headers: {
       'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -129,7 +133,7 @@ class DanmakuManager {
     }
   }
 
-  /// 拉弹幕 — 整集 (15s 超时, 防止优酷分片拉取卡住)
+  /// 拉弹幕 — 整集 (30s 超时, B站需先取 buvid3 + 多段拉取)
   Future<List<DanmakuComment>> loadDanmaku(
     DanmakuSource source,
     String episodeId, {
@@ -144,7 +148,7 @@ class DanmakuManager {
         startSec: startSec,
         endSec: endSec,
         dio: _sharedDio,
-      ).timeout(const Duration(seconds: 15), onTimeout: () => []);
+      ).timeout(const Duration(seconds: 30), onTimeout: () => []);
     } catch (_) {
       return [];
     }
