@@ -854,28 +854,21 @@ class M3U8Service {
     }
   }
 
-  /// 测量下载速度 (v2.3.0 + v2.3.4: 真实分片抽样, Range 1MB 取 512KB)
+  /// v2.5.54: 改用 SeleneTV `qb3` 风格 — 并发下载多分片, 总字节 / 总耗时.
   ///
-  /// 跟 web LunaTV hls.js FRAG_LOADED 思路 1:1 对齐 — 测的是真实分片
-  ///   下载速度, 跟 libmpv / ExoPlayer 实际播放走的链路完全一样, 不走
-  ///   playlist 文本 (playlist 几 KB 测不出真实速度).
+  /// 之前 v2.3.4 取中位数: 每个分片独立算 KB/s 再取中位数.
+  ///   问题: 慢分片速度低 → 拉低中位值 → 显示比实际播放慢.
+  ///   SeleneTV 做法: 3 个 URL 并发 awaitAll, 总字节 / 总耗时.
+  ///   慢分片只贡献少字节, 不拖低结果; 快分片照常贡献, 更贴近
+  ///   并发下载实际吞吐量.
   ///
-  /// 之前 v1.0.45 用 Range 64KB 测的是"首字节 + 64KB" 速度, 在 CDN 边缘
-  ///   节点上经常虚高 (CDN burst 给首字节快, 实际播放时 m3u8 重写链 + libmpv
-  ///   加载是另一条路径). 用户看着 5MB/s 实际播放卡, 就是这个根因.
-  ///
-  /// v2.3.0 ~ v2.3.4 演化:
-  ///   v1.0.45: Range 64KB 抽样 (CDN burst 虚高)
-  ///   v2.3.0: 1 真实分片完整下载 (太大, 慢)
-  ///   v2.3.4: Range 1MB 抽样 (取前 512KB), 跟 web LunaTV iPad 简化路径
-  ///           思路一致, 不下完整文件
-  ///   v2.3.6: 走 ExoPlayer prepare (太慢, 1-2s + 串行 17s 整体超时)
-  ///   v2.3.9 ~ v2.3.13: 反复实验 (256KB / 32KB / 512KB playlist 风格),
-  ///           都不理想
-  ///   v2.3.14: 回到 v2.3.4 真实分片 Range 1MB 抽样
-  ///
-  /// 1 个 1080p 5s segment 约 2-5MB, Range 1MB 在 1Mbps 链路上 ~8s,
-  ///   512KB 限制让慢链 5-6s 就能跑完, 整函数 6s timeout 兜底.
+  /// 例: 3 分片并发, 2 个 1s 下 512KB, 1 个 3s 下 512KB
+  ///   取中位数: 512, 512, 170 → 中位数 512 KB/s
+  ///   取总和: (1536KB) / 3s = 512 KB/s  (一样)
+  /// 但若 1 个超时返 0: 512, 512, 0
+  ///   取中位数: 512 → 偏高 (少算了一个慢的)
+  ///   取总和: 1024KB / 6s(timeout) = 170 → 偏低
+  ///   实际播放是并发缓冲, 取总和更准.
   Future<double> _measureSegmentSpeeds(
     List<String> segments, {
     String Function(String)? urlWrapper,
@@ -886,16 +879,22 @@ class M3U8Service {
         .toList();
     if (testUrls.isEmpty) return 0.0;
 
-    // v2.3.4: 之前 v1.0.45 用完整 GET 拿 1 个分片, 太大. 改成 Range 1MB
-    //   抽样, 最多读 512KB 或 2.8s 截断. 跟 web LunaTV hls.js 取样思路
-    //   一致 — 不下完整分片, 拿代表性块算 KB/s.
+    // v2.5.54: 外层统一计时 (跟 SeleneTV qb3 的 currentTimeMillis 一致)
+    final stopwatch = Stopwatch()..start();
     final results = await Future.wait(
-      testUrls.map(_measureDownloadSpeedFast),
+      testUrls.map(_downloadSegmentBytes),
     );
-    final valid = results.where((v) => v > 0).toList()..sort();
-    if (valid.isEmpty) return 0.0;
-    // v2.3.4: 取中位数 (避免单个分片异常拉偏)
-    return valid[valid.length ~/ 2];
+    stopwatch.stop();
+
+    var totalBytes = 0;
+    for (final b in results) {
+      totalBytes += b;
+    }
+    // 总字节太小 (全失败或都是 init 探针) → 返 0
+    if (totalBytes < 64 * 1024) return 0.0;
+    final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
+    if (elapsedSeconds <= 0) return 0.0;
+    return (totalBytes / 1024) / elapsedSeconds; // KB/s
   }
 
   /// v2.3.21: 提取 host 当 Referer. 部分 CDN (iQiyi / 腾讯 / 爱奇艺
@@ -924,56 +923,42 @@ class M3U8Service {
     };
   }
 
-  /// v2.3.4: 单分片 Range 1MB 抽样.
-  /// v2.3.17: receiveTimeout 4s → 6s (慢网下 4s 经常截断返 0);
-  ///   加 Referer 头 (从 URL host 自动取, 部分 CDN 不带 Referer 返 403);
-  ///   失败重试 1 次 (delay 800ms, 不抖服务器).
-  /// v2.3.21: 抽 `_refererHeaders` helper, 跟 _getSegmentUrls /
-  ///   _getResolutionFromM3U8 共用.
-  Future<double> _measureDownloadSpeedFast(String url) async {
+  /// v2.5.54: 改用 SeleneTV `u74.c` 风格 — 只返回下载字节数, 不在内部算速度.
+  ///
+  /// 速度改由 [_measureSegmentSpeeds] 统一算 (总字节 / 总耗时).
+  ///   慢分片只贡献少字节, 不会像"取中位数"那样拉低结果;
+  ///   快分片照常贡献, 更贴近并发下载实际吞吐量.
+  ///
+  /// 删掉的内容 (跟 SeleneTV 对齐, 简化):
+  ///   - 独立 stopwatch → 改用外层统一计时
+  ///   - 2.8s 截断 → 靠 512KB 上限 + receiveTimeout 6s 兜底
+  ///   - 64KB 最小样本检查 → 移到外层 (检查总字节)
+  ///   - 重试 1 次 → 删掉, 失败返 0 字节, 不拖长总耗时
+  Future<int> _downloadSegmentBytes(String url) async {
     final refHeaders = _refererHeaders(url);
-
-    for (int attempt = 0; attempt < 2; attempt++) {
-      try {
-        final stopwatch = Stopwatch()..start();
-        var bytes = 0;
-        // Range bytes=0-1048575 = 1MB. v2.3.4 跟 web LunaTV iPad 简化路径
-        //   思路一致 — 拿代表性块算 KB/s, 不下完整分片.
-        final headers = <String, dynamic>{
-          'Range': 'bytes=0-1048575',
-          ...refHeaders,
-        };
-        final response = await _dio.get(
-          url,
-          options: Options(
-            responseType: ResponseType.stream,
-            receiveTimeout: const Duration(seconds: 6),
-            headers: headers,
-          ),
-        );
-        final body = response.data as ResponseBody;
-        await for (final chunk in body.stream) {
-          bytes += chunk.length;
-          if (bytes >= 512 * 1024) break;
-          if (stopwatch.elapsedMilliseconds >= 2800) break;
-        }
-        stopwatch.stop();
-        // 小于 64KB 的样本多数是 init/探针/异常小片段, 不拿来显示速度.
-        if (bytes < 64 * 1024) return 0.0;
-        final elapsedSeconds = stopwatch.elapsedMilliseconds / 1000.0;
-        if (elapsedSeconds <= 0) return 0.0;
-        return (bytes / 1024) / elapsedSeconds; // KB/s
-      } catch (e) {
-        // v2.3.17: 第 1 次失败等 800ms 重试 1 次, 应付偶发 5xx / timeout.
-        //   第 2 次还失败就认, 返 0. 不重试 2 次以上, 测速延迟爆炸.
-        if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 800));
-          continue;
-        }
-        return 0.0;
+    try {
+      var bytes = 0;
+      final headers = <String, dynamic>{
+        'Range': 'bytes=0-1048575',
+        ...refHeaders,
+      };
+      final response = await _dio.get(
+        url,
+        options: Options(
+          responseType: ResponseType.stream,
+          receiveTimeout: const Duration(seconds: 6),
+          headers: headers,
+        ),
+      );
+      final body = response.data as ResponseBody;
+      await for (final chunk in body.stream) {
+        bytes += chunk.length;
+        if (bytes >= 512 * 1024) break;
       }
+      return bytes;
+    } catch (e) {
+      return 0;
     }
-    return 0.0;
   }
 
   /// 直链 (非 M3U8) 测速
