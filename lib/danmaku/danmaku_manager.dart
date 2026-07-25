@@ -166,7 +166,11 @@ class DanmakuManager {
   }
 
   /// 自动选源: 给定标题 + (可选) 类型 (movie/tv) + (可选) 年份
-  /// 6 源并行搜索, 按评分选最优
+  /// ★ v2.5.51: 移植 SeleneTV ph0.java 评分算法
+  ///   - 标题归一化 + Levenshtein 编辑距离
+  ///   - 季数提取与匹配
+  ///   - 黑名单过滤 (NCOP/NCED/OVA/ED/SP/特典/预告/广告/花絮/速看/PV/番外)
+  ///   - 多级评分: 完全相等 > 去季号相同+季数匹配 > 子串包含+季数匹配 > 相似度≥85%+季数匹配
   Future<DanmakuMatch?> autoMatch({
     required String title,
     int? year,
@@ -176,21 +180,220 @@ class DanmakuManager {
     if (kw.isEmpty) return null;
     final results = await searchByTitle(kw);
     if (results.isEmpty) return null;
-    // 评分: 标题完全包含 + 年份匹配 + 类型匹配
-    DanmakuMedia? best;
-    int bestScore = -1;
-    for (final m in results) {
-      var s = 0;
-      if (m.title.contains(kw) || kw.contains(m.title)) s += 10;
-      if (year != null && m.year == year) s += 5;
-      if (type != null && m.type == type) s += 3;
-      if (s > bestScore) {
-        bestScore = s;
-        best = m;
+    final scored = DanmakuScorer.score(kw, results, year: year, type: type);
+    if (scored.isEmpty) return null;
+    return DanmakuMatch(media: scored.first.media, score: scored.first.score);
+  }
+}
+
+// ─── SeleneTV ph0.java 评分算法移植 (v2.5.51) ───────────────────────────
+//   评分逻辑:
+//     1. 黑名单过滤: 剔除标题含 NCOP/NCED/OVA/ED/SP/特典/预告/广告/花絮/速看/PV/番外
+//     2. 标题归一化: 去符号转小写
+//     3. 季数提取: 正则识别 Season N / 第N季 / 第N部 / 罗马数字等
+//     4. Levenshtein 编辑距离 → 相似度百分比
+//     5. 评分:
+//        - 归一化后完全相等 → 10000
+//        - 去季号后相同 + 季数一致 → similarity + 5000
+//        - 子串包含 (≥4字) + 季数一致 → similarity + 3000
+//        - 相似度 ≥85% + 季数一致 → similarity
+//        - 其他 → 0 (丢弃)
+class DanmakuScorer {
+  // 中文黑名单 (SeleneTV ph0.e)
+  static final RegExp _cnBlacklist = RegExp(
+    r'特典|预告|广告|花絮|速看|PV|番外|彩蛋|OST|MV|ED|OP',
+  );
+  // 英文黑名单 (SeleneTV ph0.f)
+  static final RegExp _enBlacklist = RegExp(
+    r'NCOP|NCED|OP|ED|SP|OVA|OAD|PV|MV|CM',
+    caseSensitive: false,
+  );
+
+  // 标题归一化: 去掉 《》「」[]()·:：-—_~!？,. 空格等, 转小写
+  static final RegExp _normalizeRe = RegExp(
+    r'[《》「」\[\]\(\)·:：\-—_~！？,.\s/\\|]',
+  );
+
+  // 季数提取正则 (SeleneTV ph0.d)
+  static final List<RegExp> _seasonPatterns = [
+    RegExp(r'(?:S|Season)\s*(\d+)', caseSensitive: false),
+    RegExp(r'第([一二三四五六七八九十])[季部幕]'),
+    RegExp(r'第(\d+)[季部幕]'),
+    RegExp(r'([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ])'),
+    RegExp(r'(IV|XL|CD|IX|VI|VII|VIII|XI|XII)', caseSensitive: false),
+  ];
+
+  /// 对搜索结果评分排序
+  static List<DanmakuMatch> score(
+    String queryTitle,
+    List<DanmakuMedia> results, {
+    int? year,
+    String? type,
+  }) {
+    final out = <DanmakuMatch>[];
+
+    // 1) 黑名单过滤
+    final filtered = results.where((m) {
+      final t = m.title;
+      if (_cnBlacklist.hasMatch(t) || _enBlacklist.hasMatch(t)) return false;
+      return true;
+    }).toList();
+
+    // 2) 评分
+    final normQuery = normalize(queryTitle);
+    final seasonQuery = extractSeason(queryTitle);
+
+    for (final m in filtered) {
+      final normCandidate = normalize(m.title);
+      final seasonCandidate = extractSeason(m.title);
+      final seasonMatch = seasonQuery == seasonCandidate;
+
+      int score = 0;
+
+      if (normQuery == normCandidate) {
+        // 完全相等 → 满分
+        score = 10000;
+      } else {
+        final baseQuery = stripSeason(normQuery);
+        final baseCandidate = stripSeason(normCandidate);
+
+        if (baseQuery == baseCandidate) {
+          // 去季号后相同
+          if (seasonMatch) {
+            score = similarity(normQuery, normCandidate) + 5000;
+          }
+        } else if (baseQuery.length >= 4 &&
+            baseCandidate.contains(baseQuery) &&
+            seasonMatch) {
+          // 子串包含
+          score = similarity(baseQuery, baseCandidate) + 3000;
+        } else if (baseCandidate.length >= 4 &&
+            baseQuery.contains(baseCandidate) &&
+            seasonMatch) {
+          score = similarity(baseQuery, baseCandidate) + 3000;
+        } else {
+          // Levenshtein 相似度
+          final sim = similarity(baseQuery, baseCandidate);
+          if (sim >= 85 && seasonMatch) {
+            score = sim;
+          }
+        }
+      }
+
+      // 年份/类型加分 (LunaTV 扩展, SeleneTV 无此逻辑)
+      if (score > 0) {
+        if (year != null && m.year == year) score += 5;
+        if (type != null && m.type == type) score += 3;
+      }
+
+      if (score > 0) {
+        out.add(DanmakuMatch(media: m, score: score));
       }
     }
-    if (best == null) return null;
-    return DanmakuMatch(media: best, score: bestScore);
+
+    // 3) 按分数降序
+    out.sort((a, b) => b.score - a.score);
+    return out;
+  }
+
+  /// 标题归一化 (SeleneTV ph0.a)
+  static String normalize(String s) {
+    return s.replaceAll(_normalizeRe, '').toLowerCase();
+  }
+
+  /// 季数提取 (SeleneTV ph0.d) — 提取季数用于匹配
+  /// 返回 null 表示无法识别季数 (视为 "无季号", 匹配时视作一致)
+  static int? extractSeason(String s) {
+    // 中文数字映射
+    const cnMap = {
+      '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+      '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+    };
+    const romanMap = {
+      'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5,
+      'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12,
+    };
+
+    for (final re in _seasonPatterns) {
+      final m = re.firstMatch(s);
+      if (m != null) {
+        final g = m.group(1)!;
+        // 中文数字
+        if (cnMap.containsKey(g)) return cnMap[g];
+        // 罗马数字 (Unicode)
+        if (romanMap.containsKey(g)) return romanMap[g];
+        // 罗马数字 (ASCII)
+        final roman = _parseRoman(g);
+        if (roman != null) return roman;
+        // 阿拉伯数字
+        final n = int.tryParse(g);
+        if (n != null) return n;
+      }
+    }
+    return null;
+  }
+
+  static int? _parseRoman(String s) {
+    const vals = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000};
+    final up = s.toUpperCase();
+    if (!up.split('').every((c) => vals.containsKey(c))) return null;
+    int result = 0;
+    for (var i = 0; i < up.length; i++) {
+      final v = vals[up[i]]!;
+      if (i + 1 < up.length && v < vals[up[i + 1]]!) {
+        result -= v;
+      } else {
+        result += v;
+      }
+    }
+    return result > 0 ? result : null;
+  }
+
+  /// 去掉季号后缀 (SeleneTV ph0.f) — 用于主干标题比较
+  static final RegExp _stripSeasonRe = RegExp(
+    r'(?:第[一二三四五六七八九十\d]+[季部幕])|(?:S\s*\d+)|(?:Season\s*\d+)|([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ])|(?:第\d+季)|(?:之章)',
+    caseSensitive: false,
+  );
+  static String stripSeason(String s) {
+    return s.replaceAll(_stripSeasonRe, '');
+  }
+
+  /// Levenshtein 编辑距离 → 相似度百分比 (SeleneTV ph0.c)
+  /// 返回 0-100
+  static int similarity(String a, String b) {
+    if (a.isEmpty && b.isEmpty) return 100;
+    if (a.isEmpty || b.isEmpty) return 0;
+    final maxLen = a.length > b.length ? a.length : b.length;
+    if (maxLen == 0) return 100;
+    final dist = _levenshtein(a, b);
+    return ((1 - dist / maxLen) * 100).round().clamp(0, 100);
+  }
+
+  static int _levenshtein(String s1, String s2) {
+    final l1 = s1.length;
+    final l2 = s2.length;
+    if (l1 == 0) return l2;
+    if (l2 == 0) return l1;
+
+    // 滚动数组优化
+    var prev = List<int>.generate(l2 + 1, (i) => i);
+    var curr = List<int>.filled(l2 + 1, 0);
+
+    for (var i = 1; i <= l1; i++) {
+      curr[0] = i;
+      for (var j = 1; j <= l2; j++) {
+        final cost = s1[i - 1] == s2[j - 1] ? 0 : 1;
+        curr[j] = [
+          prev[j] + 1,     // 删除
+          curr[j - 1] + 1, // 插入
+          prev[j - 1] + cost, // 替换
+        ].reduce((a, b) => a < b ? a : b);
+      }
+      final tmp = prev;
+      prev = curr;
+      curr = tmp;
+    }
+    return prev[l2];
   }
 }
 

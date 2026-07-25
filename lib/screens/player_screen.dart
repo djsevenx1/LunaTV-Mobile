@@ -259,6 +259,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   // Overlay key — 用于强制重建
   final GlobalKey<DanmakuOverlayState> _danmakuKey = GlobalKey<DanmakuOverlayState>();
 
+  // v2.5.51: 弹幕预搜索 — 进播放页时后台并发搜索 6 源 (移植 SeleneTV t14.java:741)
+  //   "进播放页并发搜索, 命中源进「弹幕源」切换; 一次只渲染一个源"
+  //   用户点弹幕按钮时直接使用预搜索结果, 无需等待
+  List<DanmakuMedia> _danmakuPreSearchResults = const [];
+  bool _danmakuPreSearching = false;
+  bool _danmakuPreSearchDone = false;
+
   // UI 控制
   bool _isPlaying = false;
   bool _isControlsVisible = true;
@@ -378,6 +385,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _loadPlaybackRate();
     // v2.5.36: 加载弹幕设置 (移植自 SeleneTV SharedPreferences)
     unawaited(DanmakuSettings.instance.load());
+    // v2.5.51: 弹幕预搜索 — 进播放页时后台并发搜索 6 源
+    //   移植 SeleneTV: "进播放页并发搜索, 命中源进「弹幕源」切换"
+    //   用户点弹幕按钮时直接使用预搜索结果, 实现秒开
+    unawaited(_preSearchDanmakuSources());
     // 加载收藏状态
     _loadFavorite();
     // 一集播完自动播下一集 (避免用户点下一集的繁琐)
@@ -1218,6 +1229,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       year: year,
       kind: _kind,
       currentEpisodeIndex: _currentEpisodeIndex,
+      preSearchResults: _danmakuPreSearchResults,
+      preSearchDone: _danmakuPreSearchDone,
       onDanmakuLoaded: (source, mediaId, mediaTitle, sourceTitle, comments) {
         setState(() {
           _danmakuSelSource = source;
@@ -1250,9 +1263,50 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
+  // v2.5.51: 弹幕预搜索 — 进播放页时后台并发搜索 6 源
+  //   移植 SeleneTV t14.java:741 "进播放页并发搜索, 命中源进「弹幕源」切换"
+  //   不阻塞播放, 不弹 UI, 纯后台搜索 + 评分
+  Future<void> _preSearchDanmakuSources() async {
+    if (_danmakuPreSearchDone || _danmakuPreSearching) return;
+    final title = widget.videoInfo.title.trim();
+    if (title.isEmpty) return;
+
+    setState(() => _danmakuPreSearching = true);
+    try {
+      final results = await DanmakuManager.instance.searchByTitle(title);
+      if (!mounted) return;
+
+      // 用 SeleneTV ph0.java 评分算法排序
+      int? year;
+      final y = widget.videoInfo.year;
+      if (y != null && y.isNotEmpty) {
+        final m = RegExp(r'^(\d{4})').firstMatch(y);
+        if (m != null) year = int.tryParse(m.group(1)!);
+      }
+      final scored = DanmakuScorer.score(title, results, year: year, type: _kind);
+
+      setState(() {
+        _danmakuPreSearchResults = scored.map((e) => e.media).toList();
+        _danmakuPreSearching = false;
+        _danmakuPreSearchDone = true;
+      });
+      debugPrint('[Danmaku] pre-search done: ${results.length} results → '
+          '${_danmakuPreSearchResults.length} matched');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _danmakuPreSearching = false;
+        _danmakuPreSearchDone = true;
+      });
+      debugPrint('[Danmaku] pre-search error: $e');
+    }
+  }
+
   // v2.5.47: 弹幕开关 — 点击后全自动匹配, 不弹手动选择面板
   //   流程: 6源并行搜索 → 评分选最优 → 自动选当前集 → 拉弹幕 → 显示
   //   失败 (无结果/无弹幕) → toast 提示, 不弹面板
+  // ★ v2.5.51: 优先使用预搜索结果 (进播放页时已后台搜索), 秒开
+  //   预搜索无结果时才 fallback 到实时搜索
   Future<void> _toggleDanmaku() async {
     if (_danmakuLoading) return;
     final source = _selectedSource;
@@ -1284,8 +1338,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     setState(() => _danmakuLoading = true);
 
     try {
-      // 1) 6 源并行搜索
-      final results = await DanmakuManager.instance.searchByTitle(title);
+      // 1) 优先使用预搜索结果 (v2.5.51)
+      //    如果预搜索还在进行中, 等它完成
+      List<DanmakuMedia> results;
+      if (_danmakuPreSearchDone) {
+        results = _danmakuPreSearchResults;
+      } else if (_danmakuPreSearching) {
+        // 等预搜索完成
+        while (_danmakuPreSearching && mounted) {
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
+        results = _danmakuPreSearchResults;
+      } else {
+        // 预搜索没跑, 实时搜索
+        results = await DanmakuManager.instance.searchByTitle(title);
+      }
       if (!mounted) return;
 
       if (results.isEmpty) {
@@ -1293,76 +1360,73 @@ class _PlayerScreenState extends State<PlayerScreen>
         return;
       }
 
-      // 2) 评分选最优 (标题包含 + 年份匹配 + 类型匹配)
-      DanmakuMedia? best;
-      int bestScore = -1;
-      for (final m in results) {
-        var s = 0;
-        if (m.title.contains(title) || title.contains(m.title)) s += 10;
-        if (year != null && m.year == year) s += 5;
-        if (kind == m.type) s += 3;
-        if (s > bestScore) {
-          bestScore = s;
-          best = m;
-        }
-      }
-      if (best == null) {
+      // 2) 评分选最优 (v2.5.51: 用 SeleneTV ph0.java 算法)
+      final scored = DanmakuScorer.score(title, results, year: year, type: kind);
+      if (scored.isEmpty) {
         _toast('未找到匹配的弹幕');
         return;
       }
 
-      debugPrint('[Danmaku] auto-match: ${best.source.key} '
-          '"${best.title}" score=$bestScore');
+      // 3) 依次尝试评分最高的 3 个源 (v2.5.50: 失败自动重试)
+      for (var i = 0; i < scored.length && i < 3; i++) {
+        final best = scored[i].media;
+        debugPrint('[Danmaku] auto-match try ${i + 1}: ${best.source.key} '
+            '"${best.title}" score=${scored[i].score}');
 
-      // 3) 拿分集列表
-      final eps = await DanmakuManager.instance.getEpisodes(
-        best.source,
-        best.mediaId,
-      );
-      if (!mounted) return;
+        // 拿分集列表
+        var eps = await DanmakuManager.instance.getEpisodes(
+          best.source,
+          best.mediaId,
+        );
+        if (!mounted) return;
 
-      if (eps.isEmpty) {
-        _toast('${best.source.displayName} 无分集信息');
-        return;
+        // 兜底: 空分集列表时用 mediaId 直接当 episodeId
+        if (eps.isEmpty) {
+          eps = [
+            DanmakuEpisode(
+              source: best.source,
+              episodeId: best.mediaId,
+              order: 1,
+              title: '正片',
+            ),
+          ];
+        }
+
+        // 自动选当前集
+        final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, kind);
+        if (ep == null) continue; // 跳过, 试下一个源
+
+        // 拉弹幕
+        final list = await DanmakuManager.instance.loadDanmaku(
+          best.source,
+          ep.episodeId,
+        );
+        if (!mounted) return;
+
+        if (list.isEmpty) continue; // 空弹幕, 试下一个源
+
+        // 成功! 显示弹幕
+        final selSource = best.source;
+        final selMediaId = best.mediaId;
+        final selTitle = best.title;
+        setState(() {
+          _danmakuSelSource = selSource;
+          _danmakuSelMediaId = selMediaId;
+          _danmakuSelMediaTitle = selTitle;
+          _danmakuSource = selSource.key;
+          _danmakuSourceTitle =
+              '${selSource.displayName} · $selTitle · ${ep.title}';
+          _danmakuCount = list.length;
+          _danmakuComments = list;
+          _danmakuEnabled = true;
+        });
+        _danmakuKey.currentState?.reset();
+        _toast('弹幕 · ${selSource.displayName} · ${list.length}条');
+        return; // 成功, 退出
       }
 
-      // 4) 自动选当前集
-      final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, kind);
-      if (ep == null) {
-        _toast('无法匹配当前集');
-        return;
-      }
-
-      // 5) 拉弹幕
-      final list = await DanmakuManager.instance.loadDanmaku(
-        best.source,
-        ep.episodeId,
-      );
-      if (!mounted) return;
-
-      if (list.isEmpty) {
-        _toast('${best.source.displayName} 暂无弹幕');
-        return;
-      }
-
-      // 6) 显示弹幕
-      // best 在 setState 闭包外提取, 避免 DanmakuMedia? 闭包内丢失类型提升
-      final selSource = best.source;
-      final selMediaId = best.mediaId;
-      final selTitle = best.title;
-      setState(() {
-        _danmakuSelSource = selSource;
-        _danmakuSelMediaId = selMediaId;
-        _danmakuSelMediaTitle = selTitle;
-        _danmakuSource = selSource.key;
-        _danmakuSourceTitle =
-            '${selSource.displayName} · $selTitle · ${ep.title}';
-        _danmakuCount = list.length;
-        _danmakuComments = list;
-        _danmakuEnabled = true;
-      });
-      _danmakuKey.currentState?.reset();
-      _toast('弹幕 · ${selSource.displayName} · ${list.length}条');
+      // 全部失败
+      _toast('多个源均无弹幕, 可手动选择重试');
     } catch (e) {
       _toast('弹幕加载失败');
       debugPrint('[Danmaku] auto-match error: $e');

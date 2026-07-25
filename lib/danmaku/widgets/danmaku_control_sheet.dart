@@ -41,6 +41,10 @@ class DanmakuControlSheet extends StatefulWidget {
   final String kind;
   final int currentEpisodeIndex;
 
+  // v2.5.51: 预搜索结果 (进播放页时已后台搜索)
+  final List<DanmakuMedia> preSearchResults;
+  final bool preSearchDone;
+
   // 回调
   final void Function(
     DanmakuSource source,
@@ -65,6 +69,8 @@ class DanmakuControlSheet extends StatefulWidget {
     this.year,
     required this.kind,
     required this.currentEpisodeIndex,
+    this.preSearchResults = const [],
+    this.preSearchDone = false,
     required this.onDanmakuLoaded,
     required this.onDanmakuDisabled,
     required this.onOpenSettings,
@@ -82,6 +88,8 @@ class DanmakuControlSheet extends StatefulWidget {
     int? year,
     required String kind,
     required int currentEpisodeIndex,
+    List<DanmakuMedia> preSearchResults = const [],
+    bool preSearchDone = false,
     required void Function(
       DanmakuSource source,
       String mediaId,
@@ -107,6 +115,8 @@ class DanmakuControlSheet extends StatefulWidget {
         year: year,
         kind: kind,
         currentEpisodeIndex: currentEpisodeIndex,
+        preSearchResults: preSearchResults,
+        preSearchDone: preSearchDone,
         onDanmakuLoaded: onDanmakuLoaded,
         onDanmakuDisabled: onDanmakuDisabled,
         onOpenSettings: onOpenSettings,
@@ -142,8 +152,14 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
     _selMediaId = widget.currentMediaId;
     _selMediaTitle = widget.currentMediaTitle;
     _danmakuCount = widget.danmakuCount;
-    // 如果已开启, 自动搜索填充源列表
-    if (_enabled) {
+    // v2.5.51: 优先使用预搜索结果
+    if (widget.preSearchDone && widget.preSearchResults.isNotEmpty) {
+      _searchResults = widget.preSearchResults;
+      _loading = false;
+      if (_selSource == null) {
+        _autoSelectBest(_searchResults);
+      }
+    } else if (_enabled) {
       _doSearch();
     }
   }
@@ -152,6 +168,17 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
     final title = widget.videoTitle.trim();
     if (title.isEmpty) {
       setState(() => _statusMsg = '标题为空');
+      return;
+    }
+    // v2.5.51: 优先使用预搜索结果
+    if (widget.preSearchDone) {
+      setState(() {
+        _searchResults = widget.preSearchResults;
+        _loading = false;
+      });
+      if (_selSource == null && _searchResults.isNotEmpty) {
+        _autoSelectBest(_searchResults);
+      }
       return;
     }
     setState(() {
