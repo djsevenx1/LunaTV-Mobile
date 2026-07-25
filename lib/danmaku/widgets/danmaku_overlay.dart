@@ -193,16 +193,32 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
     return _baseFontSize * _settings.fontScale;
   }
 
+  // ★ v2.5.53: 模式过滤 — top/bottom 模式不过滤弹幕类型, 而是强制转固定
+  //   旧逻辑: top 模式只留 mode==5, bottom 只留 mode==4
+  //   问题: 99% 弹幕是 mode==1 (滚动), top/bottom 模式下几乎全被过滤 → 不显示
+  //   新逻辑: top/bottom 模式下所有弹幕都通过, 由 _effectiveRenderMode 决定渲染方式
   bool _shouldShowByMode(int mode) {
     switch (_mode) {
       case DanmakuMode.all:
-        return true;
+      case DanmakuMode.top:
+      case DanmakuMode.bottom:
+        return true; // top/bottom 不过滤, 强制转固定
       case DanmakuMode.scroll:
         return mode == 1;
+    }
+  }
+
+  // ★ v2.5.53: 实际渲染模式 — top/bottom 模式下把所有弹幕转成固定
+  //   mode==1 (滚动) 在 top 模式下 → mode==5 (顶部固定)
+  //   mode==1 (滚动) 在 bottom 模式下 → mode==4 (底部固定)
+  int _effectiveRenderMode(int originalMode) {
+    switch (_mode) {
       case DanmakuMode.top:
-        return mode == 5;
+        return 5; // 全部转顶部固定
       case DanmakuMode.bottom:
-        return mode == 4;
+        return 4; // 全部转底部固定
+      default:
+        return originalMode; // all/scroll 保持原样
     }
   }
 
@@ -341,7 +357,9 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
       if (!_shouldShowByMode(c.mode)) continue;
       if (!_shouldShowByDensity()) continue;
 
-      final track = _pickTrack(c.mode, current, w, layout);
+      // ★ v2.5.53: top/bottom 模式下把弹幕转成固定模式
+      final renderMode = _effectiveRenderMode(c.mode);
+      final track = _pickTrack(renderMode, current, w, layout);
       if (track < 0) continue;
 
       final speed = _effectiveSpeed();
@@ -355,15 +373,17 @@ class DanmakuOverlayState extends State<DanmakuOverlay>
         scrollDurationMs: scrollMs,
         fixedDurationMs: _fixedDurationMs,
         fontSize: _effectiveFontSize(),
+        renderMode: renderMode, // ★ 传入实际渲染模式
       );
       _live.add(bullet);
       _spawnedHashes.add(hash);
 
-      if (c.mode == 1) {
+      // ★ v2.5.53: 用 renderMode 决定记录到哪个轨道
+      if (renderMode == 1) {
         _scrollTracks[track].lastBullet = bullet;
-      } else if (c.mode == 5) {
+      } else if (renderMode == 5) {
         _topTracks[track].lastBullet = bullet;
-      } else if (c.mode == 4) {
+      } else if (renderMode == 4) {
         _bottomTracks[track].lastBullet = bullet;
       }
     }
@@ -455,6 +475,7 @@ class _LiveBullet {
   final int scrollDurationMs;
   final int fixedDurationMs;
   final double fontSize;
+  final int renderMode; // ★ v2.5.53: 实际渲染模式 (top/bottom 模式下可能 != comment.mode)
   double x = 0;
   double textWidth = 0;
   bool done = false;
@@ -468,6 +489,7 @@ class _LiveBullet {
     required this.scrollDurationMs,
     required this.fixedDurationMs,
     required this.fontSize,
+    required this.renderMode,
   });
 
   void advance(int nowMs) {
@@ -476,7 +498,8 @@ class _LiveBullet {
       done = true;
       return;
     }
-    if (comment.mode == 1) {
+    // ★ v2.5.53: 用 renderMode 决定滚动/固定, 而非 comment.mode
+    if (renderMode == 1) {
       final t = (elapsed / scrollDurationMs).clamp(0.0, 1.0);
       x = screenWidth * (1.0 - t);
       if (t >= 1.0) done = true;
@@ -551,11 +574,13 @@ class _DanmakuPainter extends CustomPainter {
 
       b.ensureTextWidth(tp);
 
+      // ★ v2.5.53: 用 bullet.renderMode 决定渲染方式 (top/bottom 模式下滚动弹幕转固定)
+      final m = b.renderMode;
       double y;
-      if (b.comment.mode == 5) {
+      if (m == 5) {
         // 顶部固定: 从顶部往下排
         y = 8 + b.row * lineH;
-      } else if (b.comment.mode == 4) {
+      } else if (m == 4) {
         // 底部固定: 从底部往上排
         y = availH - layout.bottomH + 8 + b.row * lineH;
       } else {
@@ -563,7 +588,8 @@ class _DanmakuPainter extends CustomPainter {
         y = layout.topH + b.row * layout.rowH;
       }
 
-      final dx = b.comment.mode == 1 ? b.x : (width - tp.width) / 2;
+      // ★ v2.5.53: 滚动弹幕用 b.x 移动, 固定弹幕居中
+      final dx = m == 1 ? b.x : (width - tp.width) / 2;
       tp.paint(canvas, Offset(dx, y));
     }
   }
