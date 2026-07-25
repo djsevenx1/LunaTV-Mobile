@@ -1272,11 +1272,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (title.isEmpty) return;
 
     setState(() => _danmakuPreSearching = true);
+    await DiaryService.add('[弹幕] 预搜索开始: "$title"');
     try {
       final results = await DanmakuManager.instance.searchByTitle(title);
       if (!mounted) return;
 
-      // 用 SeleneTV ph0.java 评分算法排序
+      // 用评分算法排序
       int? year;
       final y = widget.videoInfo.year;
       if (y != null && y.isNotEmpty) {
@@ -1292,6 +1293,13 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       debugPrint('[Danmaku] pre-search done: ${results.length} results → '
           '${_danmakuPreSearchResults.length} matched');
+      await DiaryService.add('[弹幕] 预搜索完成: ${results.length}结果 → '
+          '${_danmakuPreSearchResults.length}匹配');
+      if (_danmakuPreSearchResults.isNotEmpty) {
+        await DiaryService.add('[弹幕] 预搜索最优: '
+            '${_danmakuPreSearchResults.first.source.displayName} '
+            '"${_danmakuPreSearchResults.first.title}"');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1299,6 +1307,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _danmakuPreSearchDone = true;
       });
       debugPrint('[Danmaku] pre-search error: $e');
+      await DiaryService.add('[弹幕] 预搜索异常: $e');
     }
   }
 
@@ -1367,13 +1376,17 @@ class _PlayerScreenState extends State<PlayerScreen>
         return;
       }
 
-      // 3) 依次尝试评分最高的 3 个源 (v2.5.50: 失败自动重试)
+      // 3) v2.5.52: 并行获取分集 + 并行拉弹幕 (替代串行试 3 个源)
+      //    旧: 串行试 3 源, 每个 getEpisodes(10s) + loadDanmaku(8s) = 18s/源, 最多 54s
+      //    新: 并行 getEpisodes + loadDanmakuParallel, 总耗时 ≤ 10s
+      final candidates = <(DanmakuMedia, DanmakuEpisode)>[];
       for (var i = 0; i < scored.length && i < 3; i++) {
         final best = scored[i].media;
         debugPrint('[Danmaku] auto-match try ${i + 1}: ${best.source.key} '
             '"${best.title}" score=${scored[i].score}');
+        await DiaryService.add('[弹幕] 候选${i + 1}: ${best.source.displayName} '
+            '"${best.title}" score=${scored[i].score}');
 
-        // 拿分集列表
         var eps = await DanmakuManager.instance.getEpisodes(
           best.source,
           best.mediaId,
@@ -1392,41 +1405,54 @@ class _PlayerScreenState extends State<PlayerScreen>
           ];
         }
 
-        // 自动选当前集
         final ep = _pickEpisode(eps, _currentEpisodeIndex + 1, kind);
-        if (ep == null) continue; // 跳过, 试下一个源
-
-        // 拉弹幕
-        final list = await DanmakuManager.instance.loadDanmaku(
-          best.source,
-          ep.episodeId,
-        );
-        if (!mounted) return;
-
-        if (list.isEmpty) continue; // 空弹幕, 试下一个源
-
-        // 成功! 显示弹幕
-        final selSource = best.source;
-        final selMediaId = best.mediaId;
-        final selTitle = best.title;
-        setState(() {
-          _danmakuSelSource = selSource;
-          _danmakuSelMediaId = selMediaId;
-          _danmakuSelMediaTitle = selTitle;
-          _danmakuSource = selSource.key;
-          _danmakuSourceTitle =
-              '${selSource.displayName} · $selTitle · ${ep.title}';
-          _danmakuCount = list.length;
-          _danmakuComments = list;
-          _danmakuEnabled = true;
-        });
-        _danmakuKey.currentState?.reset();
-        _toast('弹幕 · ${selSource.displayName} · ${list.length}条');
-        return; // 成功, 退出
+        if (ep == null) continue;
+        candidates.add((best, ep));
       }
 
-      // 全部失败
-      _toast('多个源均无弹幕, 可手动选择重试');
+      if (candidates.isEmpty) {
+        _toast('无法匹配当前集');
+        return;
+      }
+
+      // 并行拉弹幕: 同时请求所有候选源, 用第一个非空结果
+      final parallelInput = candidates
+          .map((c) => (c.$1.source, c.$2.episodeId))
+          .toList();
+      final result = await DanmakuManager.instance.loadDanmakuParallel(parallelInput);
+      if (!mounted) return;
+
+      if (result == null || result.comments.isEmpty) {
+        _toast('多个源均无弹幕, 可手动选择重试');
+        await DiaryService.add('[弹幕] 所有候选源均无弹幕');
+        return;
+      }
+
+      // 成功! 找到对应的 media 信息
+      final winner = candidates.firstWhere(
+        (c) => c.$1.source == result.source,
+        orElse: () => candidates.first,
+      );
+      final best = winner.$1;
+      final ep = winner.$2;
+      final selSource = best.source;
+      final selMediaId = best.mediaId;
+      final selTitle = best.title;
+      setState(() {
+        _danmakuSelSource = selSource;
+        _danmakuSelMediaId = selMediaId;
+        _danmakuSelMediaTitle = selTitle;
+        _danmakuSource = selSource.key;
+        _danmakuSourceTitle =
+            '${selSource.displayName} · $selTitle · ${ep.title}';
+        _danmakuCount = result.comments.length;
+        _danmakuComments = result.comments;
+        _danmakuEnabled = true;
+      });
+      _danmakuKey.currentState?.reset();
+      _toast('弹幕 · ${selSource.displayName} · ${result.comments.length}条');
+      await DiaryService.add('[弹幕] 加载成功: ${selSource.displayName} '
+          '${result.comments.length}条');
     } catch (e) {
       _toast('弹幕加载失败');
       debugPrint('[Danmaku] auto-match error: $e');

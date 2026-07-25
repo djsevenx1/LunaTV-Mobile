@@ -23,7 +23,8 @@ import 'package:luna_tv/services/theme_service.dart';
 ///   - 主体 ListView 反向滚动 (新条目在底部, 类似聊天记录), 自动滚到底
 ///   - 空状态: 「暂无日记」+ 副标题「去详情页看剧, 失败时会自动记录」
 class DiaryScreen extends StatefulWidget {
-  const DiaryScreen({super.key});
+  final String? initialFilter;
+  const DiaryScreen({super.key, this.initialFilter});
 
   @override
   State<DiaryScreen> createState() => _DiaryScreenState();
@@ -33,7 +34,14 @@ class _DiaryScreenState extends State<DiaryScreen> {
   final ScrollController _scrollController = ScrollController();
 
   // v2.1.22: 当前选中的分类 chip (null = 全部)
+  // v2.5.52: 支持 initialFilter 预选 (弹幕日记入口)
   String? _filter;
+
+  @override
+  void initState() {
+    super.initState();
+    _filter = widget.initialFilter;
+  }
 
   @override
   void dispose() {
@@ -158,6 +166,7 @@ class _DiaryScreenState extends State<DiaryScreen> {
       break;
     }
     if (tag == null) return '其它';
+    if (tag.startsWith('弹幕')) return '弹幕';
     if (tag.startsWith('tmdb')) return 'TMDB';
     if (tag.startsWith('bangumi')) return 'Bangumi';
     if (tag.startsWith('network') ||
@@ -195,6 +204,7 @@ class _DiaryScreenState extends State<DiaryScreen> {
 
     // 统计各分类条数
     final counts = <String, int>{
+      '弹幕': 0,
       'TMDB': 0,
       'Bangumi': 0,
       '网络': 0,
@@ -269,6 +279,8 @@ class _DiaryScreenState extends State<DiaryScreen> {
               child: Row(
                 children: [
                   _filterChip('全部', _filter == null, all.length, null),
+                  const SizedBox(width: 6),
+                  _filterChip('弹幕', _filter == '弹幕', counts['弹幕'] ?? 0, '弹幕'),
                   const SizedBox(width: 6),
                   _filterChip('TMDB', _filter == 'TMDB', counts['TMDB'] ?? 0, 'TMDB'),
                   const SizedBox(width: 6),

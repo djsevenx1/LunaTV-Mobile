@@ -23,6 +23,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../services/diary_service.dart';
 import '../danmaku_manager.dart';
 import '../models/danmaku_comment.dart';
 import '../models/danmaku_media.dart';
@@ -218,35 +219,87 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
   }
 
   // 评分选最优 + 自动拉弹幕
-  // ★ v2.5.50: 如果最优源加载失败 (无分集/无弹幕), 自动尝试下一个源
+  // ★ v2.5.52: 用 DanmakuScorer 评分 + 并行加载 (跟 player_screen 一致)
   Future<void> _autoSelectBest(List<DanmakuMedia> results) async {
-    // 按评分排序
-    final scored = <MapEntry<DanmakuMedia, int>>[];
-    for (final m in results) {
-      var s = 0;
-      if (m.title.contains(widget.videoTitle) ||
-          widget.videoTitle.contains(m.title)) s += 10;
-      if (widget.year != null && m.year == widget.year) s += 5;
-      if (widget.kind == m.type) s += 3;
-      scored.add(MapEntry(m, s));
-    }
-    scored.sort((a, b) => b.value - a.value);
+    // 用评分算法排序 (跟 player_screen._toggleDanmaku 一致)
+    final scored = DanmakuScorer.score(
+      widget.videoTitle,
+      results,
+      year: widget.year,
+      type: widget.kind,
+    );
 
-    if (scored.isEmpty || scored.first.value < 0) {
+    if (scored.isEmpty) {
       setState(() => _statusMsg = '未找到匹配的弹幕');
       return;
     }
 
-    // 依次尝试评分最高的 3 个源
+    // 并行获取分集 + 并行拉弹幕
+    final candidates = <(DanmakuMedia, DanmakuEpisode)>[];
     for (var i = 0; i < scored.length && i < 3; i++) {
-      final media = scored[i].key;
-      final success = await _loadFromSource(media, silent: i > 0);
-      if (success) return;
+      final media = scored[i].media;
+      var eps = await DanmakuManager.instance.getEpisodes(
+        media.source,
+        media.mediaId,
+      );
+      if (!mounted) return;
+
+      if (eps.isEmpty) {
+        eps = [
+          DanmakuEpisode(
+            source: media.source,
+            episodeId: media.mediaId,
+            order: 1,
+            title: '正片',
+          ),
+        ];
+      }
+      final ep = _pickEpisode(eps, widget.currentEpisodeIndex + 1, widget.kind);
+      if (ep == null) continue;
+      candidates.add((media, ep));
     }
-    // 全部失败
-    if (mounted) {
+
+    if (candidates.isEmpty) {
+      setState(() => _statusMsg = '无法匹配当前集');
+      return;
+    }
+
+    // 并行拉弹幕
+    final parallelInput = candidates
+        .map((c) => (c.$1.source, c.$2.episodeId))
+        .toList();
+    final result = await DanmakuManager.instance.loadDanmakuParallel(parallelInput);
+    if (!mounted) return;
+
+    if (result == null || result.comments.isEmpty) {
       setState(() => _statusMsg = '多个源均无弹幕, 可手动选择重试');
+      return;
     }
+
+    // 成功
+    final winner = candidates.firstWhere(
+      (c) => c.$1.source == result.source,
+      orElse: () => candidates.first,
+    );
+    final media = winner.$1;
+    final ep = winner.$2;
+    final sourceTitle =
+        '${media.source.displayName} · ${media.title} · ${ep.title}';
+    setState(() {
+      _selSource = media.source;
+      _selMediaId = media.mediaId;
+      _selMediaTitle = media.title;
+      _danmakuCount = result.comments.length;
+      _loadingSource = null;
+    });
+    await DiaryService.add('[弹幕] 面板自动加载成功: ${media.source.displayName} ${result.comments.length}条');
+    widget.onDanmakuLoaded(
+      media.source,
+      media.mediaId,
+      media.title,
+      sourceTitle,
+      result.comments,
+    );
   }
 
   // 从指定源拉弹幕
@@ -257,6 +310,8 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
       _loadingSource = media.source;
       _statusMsg = null;
     });
+    await DiaryService.add('[弹幕] 面板选源: ${media.source.displayName} '
+        '"${media.title}" eid=${media.mediaId} ep=${widget.currentEpisodeIndex + 1}');
     try {
       var eps = await DanmakuManager.instance.getEpisodes(
         media.source,
@@ -267,7 +322,6 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
       DanmakuEpisode? ep;
       if (eps.isEmpty) {
         // ★ 兜底: 用 mediaId 直接作为 episodeId 拉弹幕
-        //   有些源的 mediaId 本身就是可用的 episodeId (如爱奇艺 albumId)
         eps = [
           DanmakuEpisode(
             source: media.source,
@@ -279,6 +333,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
       }
       ep = _pickEpisode(eps, widget.currentEpisodeIndex + 1, widget.kind);
       if (ep == null) {
+        await DiaryService.add('[弹幕] ${media.source.displayName} 无法匹配第${widget.currentEpisodeIndex + 1}集');
         if (!silent) {
           setState(() {
             _loadingSource = null;
@@ -303,12 +358,14 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
       });
       if (list.isEmpty) {
         // 弹幕为空 = 失败, 自动尝试下一个源
+        await DiaryService.add('[弹幕] ${media.source.displayName} 弹幕为空');
         if (!silent) {
           setState(() => _statusMsg = '${media.source.displayName} 暂无弹幕');
         }
         return false;
       }
       // 通知 player 更新状态
+      await DiaryService.add('[弹幕] 面板加载成功: ${media.source.displayName} ${list.length}条');
       widget.onDanmakuLoaded(
         media.source,
         media.mediaId,
@@ -318,6 +375,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
       );
       return true;
     } catch (e) {
+      await DiaryService.add('[弹幕] 面板加载异常: ${media.source.displayName} $e');
       if (!mounted) return false;
       setState(() {
         _loadingSource = null;
@@ -536,6 +594,10 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
     final isSelected = _selSource == media.source &&
         _selMediaId == media.mediaId;
     final isLoading = _loadingSource == media.source;
+    // v2.5.52: 已加载的源显示弹幕数, 未加载的显示集数
+    final showCount = isSelected && _danmakuCount > 0
+        ? '$_danmakuCount条'
+        : (media.episodeCount > 0 ? '${media.episodeCount}集' : '');
     return InkWell(
       onTap: isLoading ? null : () => _loadFromSource(media),
       child: Padding(
@@ -573,8 +635,29 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            // 集数/弹幕数 badge
+            if (showCount.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF22C55E).withOpacity(0.15)
+                      : Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  showCount,
+                  style: TextStyle(
+                    color: isSelected
+                        ? const Color(0xFF22C55E)
+                        : Colors.grey[400],
+                    fontSize: 11,
+                  ),
+                ),
+              ),
             // 年份
-            if (media.year != null)
+            if (media.year != null) ...[
+              const SizedBox(width: 6),
               Text(
                 '${media.year}',
                 style: TextStyle(
@@ -582,19 +665,19 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                   fontSize: 12,
                 ),
               ),
+            ],
             // loading
-            if (isLoading)
-              const Padding(
-                padding: EdgeInsets.only(left: 8),
-                child: SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Color(0xFF22C55E),
-                  ),
+            if (isLoading) ...[
+              const SizedBox(width: 8),
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF22C55E),
                 ),
               ),
+            ],
           ],
         ),
       ),

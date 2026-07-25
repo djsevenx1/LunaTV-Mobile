@@ -8,9 +8,12 @@
 //
 // 全局单例, 默认 5 min 缓存.
 
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../services/diary_service.dart';
 import 'models/danmaku_comment.dart';
 import 'models/danmaku_media.dart';
 import 'sources/bilibili_danmaku.dart';
@@ -77,6 +80,7 @@ class DanmakuManager {
     Set<DanmakuSource>? only,
   }) async {
     final list = only ?? _preferred;
+    await DiaryService.add('[弹幕] 搜索: "$title" (${list.length}源并行)');
     final futures = <Future<List<DanmakuMedia>>>[];
     for (final s in list) {
       final src = _sources[s];
@@ -93,13 +97,19 @@ class DanmakuManager {
         if (seen.add(k)) merged.add(m);
       }
     }
+    await DiaryService.add('[弹幕] 搜索完成: ${merged.length}条结果');
     return merged;
   }
 
   Future<List<DanmakuMedia>> _safeSearch(BaseDanmakuSource src, String kw) async {
     try {
-      return await src.searchMedia(kw, dio: _sharedDio);
-    } catch (_) {
+      final r = await src.searchMedia(kw, dio: _sharedDio)
+          .timeout(const Duration(seconds: 10), onTimeout: () => []);
+      await DiaryService.add('[弹幕] ${src.sourceEnum.displayName} 搜索: ${r.length}条'
+          '${r.isEmpty ? " (空/超时)" : ""}');
+      return r;
+    } catch (e) {
+      await DiaryService.add('[弹幕] ${src.sourceEnum.displayName} 搜索异常: $e');
       return const [];
     }
   }
@@ -127,17 +137,22 @@ class DanmakuManager {
     final src = _sources[source];
     if (src == null) return [];
     try {
-      return await src.getEpisodes(mediaId, dio: _sharedDio)
+      final eps = await src.getEpisodes(mediaId, dio: _sharedDio)
           .timeout(const Duration(seconds: 10), onTimeout: () => []);
-    } catch (_) {
+      await DiaryService.add('[弹幕] ${source.displayName} 分集: ${eps.length}集'
+          '${eps.isEmpty ? " (空/超时)" : ""}');
+      return eps;
+    } catch (e) {
+      await DiaryService.add('[弹幕] ${source.displayName} 分集异常: $e');
       return [];
     }
   }
 
   /// 拉弹幕 — 整集
-  /// ★ 不再用 .timeout(onTimeout:()=>[]) 丢弃结果!
-  ///   旧实现: mgtv/le 做 96 段串行请求, 30s 必然超时 → onTimeout 丢弃全部已拉到的弹幕 → "暂无弹幕"
-  ///   新实现: 各源内部已加空段 break (最多拉到内容结束位置), manager 只加诊断日志
+  /// ★ v2.5.52: 8s 超时, 超时返回空 (调用方自动试下一个源)
+  ///   旧问题: Completer + partial 方案中 partial 永远为空 (getDanmaku 一次性返回),
+  ///           超时后返回空列表 = 跟没加一样. 改为直接 timeout, 8s 更短,
+  ///           配合调用方依次尝试 3 个源, 总耗时最多 24s.
   Future<List<DanmakuComment>> loadDanmaku(
     DanmakuSource source,
     String episodeId, {
@@ -148,21 +163,67 @@ class DanmakuManager {
     if (src == null) return [];
     debugPrint('[DanmakuManager] loadDanmaku: source=${source.key} '
         'episodeId=$episodeId startSec=$startSec endSec=$endSec');
+    await DiaryService.add('[弹幕] ${source.displayName} 开始拉取: eid=$episodeId');
     try {
       final result = await src.getDanmaku(
         episodeId,
         startSec: startSec,
         endSec: endSec,
         dio: _sharedDio,
-      );
-      debugPrint('[DanmakuManager] loadDanmaku result: '
-          'source=${source.key} episodeId=$episodeId → ${result.length} comments');
+      ).timeout(const Duration(seconds: 8), onTimeout: () {
+        debugPrint('[DanmakuManager] loadDanmaku TIMEOUT (8s): ${source.key}');
+        return <DanmakuComment>[];
+      });
+      debugPrint('[DanmakuManager] loadDanmaku result: ${source.key} → ${result.length}');
+      await DiaryService.add('[弹幕] ${source.displayName} 拉取完成: ${result.length}条'
+          '${result.isEmpty ? " (空/超时)" : ""}');
       return result;
     } catch (e) {
-      debugPrint('[DanmakuManager] loadDanmaku error: '
-          'source=${source.key} episodeId=$episodeId → $e');
+      debugPrint('[DanmakuManager] loadDanmaku error: ${source.key} → $e');
+      await DiaryService.add('[弹幕] ${source.displayName} 拉取异常: $e');
       return [];
     }
+  }
+
+  /// v2.5.52: 并行试多个源拉弹幕, 用第一个非空结果
+  ///   解决"等半天没弹幕": 不再串行试 3 个源 (每个 8s = 24s),
+  ///   而是同时发 3 个请求, 谁先返回非空就用谁, 总耗时 ≤ 8s.
+  ///   [candidates] = [(source, episodeId), ...] 已按评分排序
+  Future<({DanmakuSource source, List<DanmakuComment> comments})?>
+  loadDanmakuParallel(
+    List<(DanmakuSource, String)> candidates,
+  ) async {
+    if (candidates.isEmpty) return null;
+    await DiaryService.add('[弹幕] 并行加载: ${candidates.length}个候选源');
+    final completer =
+        Completer<({DanmakuSource source, List<DanmakuComment> comments})?>();
+    var remaining = candidates.length;
+
+    for (final (source, episodeId) in candidates) {
+      loadDanmaku(source, episodeId).then((list) {
+        if (!completer.isCompleted && list.isNotEmpty) {
+          completer.complete((source: source, comments: list));
+        } else {
+          remaining--;
+          if (remaining == 0 && !completer.isCompleted) {
+            completer.complete(null);
+          }
+        }
+      }).catchError((e) {
+        remaining--;
+        if (remaining == 0 && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      });
+    }
+
+    return completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        debugPrint('[DanmakuManager] loadDanmakuParallel TIMEOUT (10s)');
+        return null;
+      },
+    );
   }
 
   /// 自动选源: 给定标题 + (可选) 类型 (movie/tv) + (可选) 年份
@@ -182,6 +243,8 @@ class DanmakuManager {
     if (results.isEmpty) return null;
     final scored = DanmakuScorer.score(kw, results, year: year, type: type);
     if (scored.isEmpty) return null;
+    await DiaryService.add('[弹幕] 自动匹配: 最优=${scored.first.media.source.displayName} '
+        '"${scored.first.media.title}" score=${scored.first.score}');
     return DanmakuMatch(media: scored.first.media, score: scored.first.score);
   }
 }
@@ -199,13 +262,15 @@ class DanmakuManager {
 //        - 相似度 ≥85% + 季数一致 → similarity
 //        - 其他 → 0 (丢弃)
 class DanmakuScorer {
-  // 中文黑名单 (SeleneTV ph0.e)
+  // 中文黑名单 — 完整词汇匹配, 不会误杀正常标题
   static final RegExp _cnBlacklist = RegExp(
-    r'特典|预告|广告|花絮|速看|PV|番外|彩蛋|OST|MV|ED|OP',
+    r'特典|预告片|广告|花絮|速看|番外篇|彩蛋',
   );
-  // 英文黑名单 (SeleneTV ph0.f)
+  // 英文黑名单 — 只匹配明确的番外缩写, 加词边界防止误杀
+  // ★ v2.5.52: 修复 OP/ED/SP/PV/MV/CM 误杀英文标题 (如 Operation, Red, Spider)
+  //   只保留足够特殊的复合词 NCOP/NCED/OVA/OAD, 短词加 \b 词边界
   static final RegExp _enBlacklist = RegExp(
-    r'NCOP|NCED|OP|ED|SP|OVA|OAD|PV|MV|CM',
+    r'\bNCOP\b|\bNCED\b|\bOVA\b|\bOAD\b|\bOP版\b|\bED版\b|\bPV版\b|\bopening\b|\bending\b',
     caseSensitive: false,
   );
 

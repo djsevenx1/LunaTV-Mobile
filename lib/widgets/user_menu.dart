@@ -2016,6 +2016,19 @@ class _UserMenuState extends State<UserMenu> {
                   );
                 },
               ),
+              // v2.5.52: 弹幕日记 — 只看 [弹幕] 分类的日记, 方便排查弹幕加载问题
+              _buildActionItem(
+                title: '弹幕日记',
+                icon: LucideIcons.film,
+                iconColor: const Color(0xFF22C55E),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DiaryScreen(initialFilter: '弹幕'),
+                    ),
+                  );
+                },
+              ),
               // v2.1.22: 日记 section 配置 — 退出清空 / 容量上限 / 持久化
               _buildToggleOption(
                 title: '退出 app 自动清空',
