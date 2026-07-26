@@ -81,6 +81,14 @@ jobs:
           timeout_minutes: 60
           command: flutter build apk --release
 
+      # v2.5.55: 上传 APK 作为 artifact
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
       # 之前用 softprops/action-gh-release@v2, 同一个 runner (East US) 调
       # api.github.com/release 端点连续 502/503 — 软错误, 没 retry. v2.2.0+52
       # 三次重跑都卡在这步. 改用 gh CLI + 显式 retry, 命中率高得多.
@@ -88,8 +96,10 @@ jobs:
       # 不能直接 gh release create (会报 "a release with the same tag name already exists"),
       # 改为 gh release upload --clobber 把 APK 挂到现有 release 上, 让 Set release body 步
       # 接着覆盖 body 即可. 这样手动创建空 release 也能被 CI 自动补 APK + changelog.
+      # v2.5.55: continue-on-error 防止 release 失败阻塞
       - name: Create GitHub Release (APK)
         if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -123,8 +133,10 @@ jobs:
 
       # gh release create 用 --generate-notes 自动生成 body, 但跟 .github/changelogs.json
       # 里维护的版本说明不一致, 所以再走一次 github-script 把当前 tag 的 changelog 写回去
+      # v2.5.55: continue-on-error 防止 release 不存在时失败
       - name: Set release body
         if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
         uses: actions/github-script@v6
         with:
           script: |
