@@ -25,8 +25,22 @@ import 'package:luna_tv/services/user_data_service.dart';
 ///   - 漫剧 → wujinapi 63 (3127) ✓
 ///   - AI 漫剧 → lziapi 52 (4858) ✓
 class ShortDramaDirectService {
-  /// v2.5.55: 单源 量子 (速度快 + 稳定 + 页内并发).
+  /// v2.5.55: 3 源互补 (天翼子分类 + 量子主类 + 暴风大全).
   static const List<_DirectSource> _sources = [
+    _DirectSource(
+      name: '天翼影视',
+      apiUrl: 'https://tyyszyapi.com/api.php/provide/vod',
+      srcKey: 'tyyszy',
+      pages: 3,
+      categories: [
+        _SourceCategory(64, '女频恋爱'),
+        _SourceCategory(65, '反转爽剧'),
+        _SourceCategory(66, '古装仙侠'),
+        _SourceCategory(67, '年代穿越'),
+        _SourceCategory(68, '脑洞悬疑'),
+        _SourceCategory(69, '现代都市'),
+      ],
+    ),
     _DirectSource(
       name: '量子',
       apiUrl: 'https://cj.lziapi.com/api.php/provide/vod',
@@ -35,6 +49,22 @@ class ShortDramaDirectService {
       categories: [
         _SourceCategory(46, '短剧'),
         _SourceCategory(52, 'AI 漫剧'),
+      ],
+    ),
+    _DirectSource(
+      name: '暴风',
+      apiUrl: 'https://bfzyapi.com/api.php/provide/vod',
+      srcKey: 'bfzy',
+      pages: 2,
+      categories: [
+        _SourceCategory(58, '短剧大全'),
+        _SourceCategory(65, '重生民国'),
+        _SourceCategory(66, '穿越年代'),
+        _SourceCategory(67, '现代言情'),
+        _SourceCategory(70, '闪婚离婚'),
+        _SourceCategory(71, '都市脑洞'),
+        _SourceCategory(72, '古装仙侠'),
+        _SourceCategory(74, 'AI 漫剧'),
       ],
     ),
   ];
