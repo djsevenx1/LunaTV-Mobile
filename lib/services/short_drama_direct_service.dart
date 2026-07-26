@@ -25,51 +25,26 @@ import 'package:luna_tv/services/user_data_service.dart';
 ///   - 漫剧 → wujinapi 63 (3127) ✓
 ///   - AI 漫剧 → lziapi 52 (4858) ✓
 class ShortDramaDirectService {
-  /// 3 个写死 TVBox 源 (按 2026-07-21 实测可用排序).
+  /// v2.5.55: 单源 暴风 (速度快 + 10 个短剧子分类 + 数据量大).
   ///
   /// 每个源声明自己**实测有数据**的 type_id 列表 + **每 type 拉几页**.
-  /// v2.5.4 起不再假设「短剧主类在所有源都有」, 而是按各源实际情况.
-  /// v2.5.6 起加 `pages`: TVBox 协议每页固定 20 条, 一次拉 1 页只够
-  /// 20 条 → 用户反馈「全部分类(短剧)怎么只有 20 部」. 现在每 type
-  /// 默认拉 3 页 = 60 条/type, 3 源 9 type 聚合 ≈ 540 条原始, 去重
-  /// 后 100-300 条展示.
   static const List<_DirectSource> _sources = [
-    // 天翼影视: 主类 54 / 擦边 73 当前 0, 改用其 6 个子分类
     _DirectSource(
-      name: '天翼影视',
-      apiUrl: 'https://tyyszyapi.com/api.php/provide/vod',
-      srcKey: 'tyyszy', // v2.5.28: CF Worker /sd-api/ 的 source key
-      pages: 3, // 每 type 拉 3 页
+      name: '暴风',
+      apiUrl: 'https://bfzyapi.com/api.php/provide/vod',
+      srcKey: 'bfzy',
+      pages: 2, // 每 type 拉 2 页 (暴风单页数据量大)
       categories: [
-        _SourceCategory(64, '女频恋爱'),
-        _SourceCategory(65, '反转爽剧'),
-        _SourceCategory(66, '古装仙侠'),
-        _SourceCategory(67, '年代穿越'),
-        _SourceCategory(68, '脑洞悬疑'),
-        _SourceCategory(69, '现代都市'),
-      ],
-    ),
-    // 无极: 主类 41 + 擦边 62 + 漫剧 63 (全有数据)
-    _DirectSource(
-      name: '无极',
-      apiUrl: 'https://api.wujinapi.com/api.php/provide/vod',
-      srcKey: 'wujin',
-      pages: 3,
-      categories: [
-        _SourceCategory(41, '短剧'),
-        _SourceCategory(62, '擦边短剧'),
-        _SourceCategory(63, '漫剧'),
-      ],
-    ),
-    // 量子: 主类 46 + AI 漫剧 52 (全有数据)
-    _DirectSource(
-      name: '量子',
-      apiUrl: 'https://cj.lziapi.com/api.php/provide/vod',
-      srcKey: 'lzi',
-      pages: 3,
-      categories: [
-        _SourceCategory(46, '短剧'),
-        _SourceCategory(52, 'AI 漫剧'),
+        _SourceCategory(58, '短剧大全'),
+        _SourceCategory(65, '重生民国'),
+        _SourceCategory(66, '穿越年代'),
+        _SourceCategory(67, '现代言情'),
+        _SourceCategory(68, '反转爽文'),
+        _SourceCategory(69, '女恋总裁'),
+        _SourceCategory(70, '闪婚离婚'),
+        _SourceCategory(71, '都市脑洞'),
+        _SourceCategory(72, '古装仙侠'),
+        _SourceCategory(74, 'AI 漫剧'),
       ],
     ),
   ];
@@ -118,57 +93,93 @@ class ShortDramaDirectService {
     return json.decode(body) as Map<String, dynamic>;
   }
 
+  /// v2.5.55: 拉单个 type 的单页 (TVBox 协议).
+  static Future<List<RawShortDrama>> _fetchSinglePage(
+    String apiBase,
+    String typeId,
+    int page,
+  ) async {
+    final data = await _get(apiBase, 'detail', {
+      't': typeId.toString(),
+      'pg': page.toString(),
+    });
+    final list = (data['list'] as List<dynamic>?) ?? [];
+    return list.map((e) => RawShortDrama.fromVodJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// v2.5.55: 关键字搜索单页.
+  static Future<List<RawShortDrama>> _fetchSearchPage(
+    String apiBase,
+    String keyword,
+    int page,
+  ) async {
+    final data = await _get(apiBase, 'detail', {
+      'wd': keyword,
+      'pg': page.toString(),
+    });
+    final list = (data['list'] as List<dynamic>?) ?? [];
+    return list.map((e) => RawShortDrama.fromVodJson(e as Map<String, dynamic>)).toList();
+  }
+
   /// v2.5.6: 从单个源拉一个 type_id 下的多页列表 (TVBox 协议).
   ///
-  /// 串行拉 pg=startPage..startPage+pages-1, 任一页失败不抛 (跟后端
-  /// Promise.allSettled 1:1). 拼成一条 list 返回. TVBox 每页固定 20
-  /// 条, 这是协议层限制, 加 pagesize/limit 等参数源不识别.
+  /// v2.5.55: 改为页内并发 (多页同时拉), 速度 3 倍提升.
   static Future<List<RawShortDrama>> _fetchFromSource(
     _DirectSource src,
     int typeId, {
     int startPage = 1,
     int pages = 1,
   }) async {
-    final allRaw = <RawShortDrama>[];
-    // v2.5.28: 配了 CF Worker URL 时走 /sd-api/{srcKey} 代理 (5 分钟边缘缓存).
-    //   没配 → 1:1 直连原 apiUrl (跟之前行为一致).
     final apiBase = UserDataService.buildShortDramaApiUrl(src.srcKey) ?? src.apiUrl;
+    // ★ v2.5.55: 多页并发拉取
+    final futures = <Future<List<RawShortDrama>>>[];
     for (int p = startPage; p < startPage + pages; p++) {
-      try {
-        final data = await _get(apiBase, 'detail', {
-          't': typeId.toString(),
-          'pg': p.toString(),
-        });
-        final list = (data['list'] as List<dynamic>?) ?? [];
-        allRaw.addAll(list.map(
-            (e) => RawShortDrama.fromVodJson(e as Map<String, dynamic>)));
-      } catch (e) {
-        // 单页失败不抛, 让其他页/源继续.
-        // ignore: avoid_print
+      futures.add(_fetchSinglePage(apiBase, typeId.toString(), p).catchError((e) {
         print('[ShortDramaDirect] source=${src.name} type=$typeId page=$p error=$e');
-        // 一页失败就停这个 type (源可能挂了/限流, 别再浪费请求)
-        break;
-      }
+        return <RawShortDrama>[];
+      }));
+    }
+    final results = await Future.wait(futures);
+    final allRaw = <RawShortDrama>[];
+    for (final r in results) {
+      allRaw.addAll(r);
     }
     return allRaw;
   }
 
-  /// v2.5.6: 拉全量「短剧」列表 (含 AI 漫剧), 聚合 3 源 + 去重.
+  /// v2.5.55: 关键字搜索多页 (并发).
+  static Future<List<RawShortDrama>> _fetchFromSearch(
+    _DirectSource src,
+    String keyword, {
+    int pages = 2,
+  }) async {
+    final apiBase = UserDataService.buildShortDramaApiUrl(src.srcKey) ?? src.apiUrl;
+    final futures = <Future<List<RawShortDrama>>>[];
+    for (int p = 1; p <= pages; p++) {
+      futures.add(_fetchSearchPage(apiBase, keyword, p).catchError((e) {
+        print('[ShortDramaDirect] search=${src.name} kw=$keyword page=$p error=$e');
+        return <RawShortDrama>[];
+      }));
+    }
+    final results = await Future.wait(futures);
+    final allRaw = <RawShortDrama>[];
+    for (final r in results) {
+      allRaw.addAll(r);
+    }
+    return allRaw;
+  }
+
+  /// v2.5.55: 拉全量「短剧」列表 (含 AI 漫剧), 聚合多源 + 关键字搜索 + 去重.
   ///
   /// 策略:
-  /// 1. 每个源 × 每个 type_id 拉前 [pagesPerType] 页
-  /// 2. 合并所有结果 (~540 条原始, 3 源 9 type × 3 页 × 20)
-  /// 3. 按 name 去重 (Map<name, item>)
+  /// 1. 每个源 × 每个 type_id 拉前 N 页 (页内并发)
+  /// 2. 量子额外走关键字搜索 (wd=短剧) 补充分类不足
+  /// 3. 合并所有结果 + 按 name 去重
   /// 4. 按 update_time 降序
   /// 5. 返回前 [size] 条
-  ///
-  /// 性能: 9 type × 3 页 = 27 个并发 HTTP 请求, 9 个 type 是
-  /// 并发第一层, 每个 type 内部 3 页是串行 (TVBox pg 是顺序的).
-  /// 实测每请求 200-500ms, 27 个 5-10s 完成.
   static Future<List<ShortDrama>> getRecommend({int size = 60}) async {
     final allRaw = <RawShortDrama>[];
 
-    // 每个源并发拉所有 type, 每个 type 内部串行拉多页
     final futures = <Future<List<RawShortDrama>>>[];
     for (final src in _sources) {
       for (final cat in src.categories) {
@@ -178,6 +189,11 @@ class ShortDramaDirectService {
           startPage: 1,
           pages: src.pages,
         ));
+      }
+      // ★ v2.5.55: 量子额外搜索补充 (分类只有 2 个, 用关键字扩展)
+      if (src.srcKey == 'lzi') {
+        futures.add(_fetchFromSearch(src, '短剧', pages: 2));
+        futures.add(_fetchFromSearch(src, '漫剧', pages: 1));
       }
     }
     final results = await Future.wait(futures);
