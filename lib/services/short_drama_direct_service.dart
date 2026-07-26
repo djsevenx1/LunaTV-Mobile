@@ -25,38 +25,8 @@ import 'package:luna_tv/services/user_data_service.dart';
 ///   - 漫剧 → wujinapi 63 (3127) ✓
 ///   - AI 漫剧 → lziapi 52 (4858) ✓
 class ShortDramaDirectService {
-  /// v2.5.55: 3 个写死 TVBox 源 (页内并发优化).
-  ///
-  /// 每个源声明自己**实测有数据**的 type_id 列表 + **每 type 拉几页**.
+  /// v2.5.55: 单源 量子 (速度快 + 稳定 + 页内并发).
   static const List<_DirectSource> _sources = [
-    // 天翼影视: 6 个子分类
-    _DirectSource(
-      name: '天翼影视',
-      apiUrl: 'https://tyyszyapi.com/api.php/provide/vod',
-      srcKey: 'tyyszy',
-      pages: 3,
-      categories: [
-        _SourceCategory(64, '女频恋爱'),
-        _SourceCategory(65, '反转爽剧'),
-        _SourceCategory(66, '古装仙侠'),
-        _SourceCategory(67, '年代穿越'),
-        _SourceCategory(68, '脑洞悬疑'),
-        _SourceCategory(69, '现代都市'),
-      ],
-    ),
-    // 无极: 主类 41 + 擦边 62 + 漫剧 63
-    _DirectSource(
-      name: '无极',
-      apiUrl: 'https://api.wujinapi.com/api.php/provide/vod',
-      srcKey: 'wujin',
-      pages: 3,
-      categories: [
-        _SourceCategory(41, '短剧'),
-        _SourceCategory(62, '擦边短剧'),
-        _SourceCategory(63, '漫剧'),
-      ],
-    ),
-    // 量子: 主类 46 + AI 漫剧 52
     _DirectSource(
       name: '量子',
       apiUrl: 'https://cj.lziapi.com/api.php/provide/vod',
