@@ -14,6 +14,7 @@ import 'package:luna_tv/widgets/short_drama_card.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
 import 'package:luna_tv/widgets/favorites_grid.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/capsule_tab_switcher.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
@@ -299,16 +300,18 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
-  /// 显示短剧菜单 (长按)
+  /// 显示短剧菜单 (长按) — 跟随主题亮色/暗色
   void _showDramaMenu(ShortDrama drama) {
     HapticFeedback.mediumImpact();
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    final isDark = themeService.isDarkMode;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF1A1A2E),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: SafeArea(
           child: Column(
@@ -319,7 +322,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[600],
+                  color: isDark ? Colors.grey[600] : Colors.grey[400],
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -327,23 +330,30 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Text(
                   drama.name,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Divider(color: Color(0xFF2A2A4E), height: 1),
+              Divider(
+                color: isDark ? const Color(0xFF3A3A3A) : Colors.grey[200],
+                height: 1,
+              ),
               ListTile(
                 leading: const Icon(Icons.play_arrow, color: Color(0xFF22C55E)),
-                title: const Text('播放', style: TextStyle(color: Colors.white)),
+                title: Text('播放', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _onDramaTap(drama);
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.info_outline, color: Colors.white70),
-                title: const Text('查看详情', style: TextStyle(color: Colors.white)),
+                leading: Icon(Icons.info_outline, color: isDark ? Colors.white70 : Colors.grey[600]),
+                title: Text('查看详情', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _onDramaTap(drama);
@@ -351,7 +361,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.favorite_border, color: Color(0xFFFB7299)),
-                title: const Text('收藏', style: TextStyle(color: Colors.white)),
+                title: Text('收藏', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _toggleFavorite(drama);
