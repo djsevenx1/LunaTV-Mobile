@@ -12,6 +12,8 @@ import 'package:luna_tv/services/short_drama_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/widgets/short_drama_card.dart';
 import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
+import 'package:luna_tv/widgets/favorites_grid.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/widgets/capsule_tab_switcher.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
@@ -347,12 +349,63 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
                   _onDramaTap(drama);
                 },
               ),
+              ListTile(
+                leading: const Icon(Icons.favorite_border, color: Color(0xFFFB7299)),
+                title: const Text('收藏', style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _toggleFavorite(drama);
+                },
+              ),
               const SizedBox(height: 8),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// 切换收藏
+  Future<void> _toggleFavorite(ShortDrama drama) async {
+    final videoInfo = VideoInfo(
+      id: drama.id.toString(),
+      source: 'shortdrama',
+      title: drama.name,
+      sourceName: '',
+      year: '',
+      cover: drama.cover,
+      index: 0,
+      totalEpisodes: drama.episodeCount,
+      playTime: 0,
+      totalTime: 0,
+      saveTime: 0,
+      searchTitle: drama.name,
+    );
+    try {
+      final result = await PageCacheService().toggleFavorite(
+        'shortdrama',
+        drama.id.toString(),
+        videoInfo.toJson(),
+        context,
+      );
+      if (result.success) {
+        await FavoritesGrid.refreshFavorites();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('已加入收藏'),
+              duration: Duration(seconds: 1),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('收藏失败: $e')),
+        );
+      }
+    }
   }
 
   @override
