@@ -5304,7 +5304,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   thumbShape:
                       const RoundSliderThumbShape(enabledThumbRadius: 6),
                   overlayShape:
-                      const RoundSliderOverlayShape(overlayRadius: 12),
+                      const RoundSliderOverlayShape(overlayRadius: 20),
                 ),
                 child: Slider(
                   value: progress,
