@@ -300,11 +300,12 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
-  /// 显示短剧菜单 (长按) — 跟随主题亮色/暗色
+  /// 显示短剧菜单 (长按) — 跟随主题亮色/暗色, 已收藏显示取消收藏
   void _showDramaMenu(ShortDrama drama) {
     HapticFeedback.mediumImpact();
     final themeService = Provider.of<ThemeService>(context, listen: false);
     final isDark = themeService.isDarkMode;
+    final isFavorited = PageCacheService().isFavoritedSync('shortdrama', drama.id.toString());
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -352,8 +353,14 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.favorite_border, color: Color(0xFFFB7299)),
-                title: Text('收藏', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                leading: Icon(
+                  isFavorited ? Icons.favorite : Icons.favorite_border,
+                  color: const Color(0xFFE74C3C),
+                ),
+                title: Text(
+                  isFavorited ? '取消收藏' : '收藏',
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                ),
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _toggleFavorite(drama);
