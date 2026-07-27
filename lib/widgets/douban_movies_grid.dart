@@ -4,6 +4,7 @@ import 'package:luna_tv/models/douban_movie.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/widgets/video_card.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/shimmer_effect.dart';
@@ -214,7 +215,7 @@ class _DoubanMoviesGridState extends State<DoubanMoviesGrid> {
               from: 'douban',
               cardWidth: itemWidth,
               onGlobalMenuAction: widget.onGlobalMenuAction != null ? (action) => widget.onGlobalMenuAction!(videoInfo, action) : null,
-              isFavorited: false,
+              isFavorited: PageCacheService().isFavoritedSync(videoInfo.source, videoInfo.id),
             );
           },
         );
