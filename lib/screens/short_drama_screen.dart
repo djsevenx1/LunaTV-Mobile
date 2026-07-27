@@ -296,6 +296,64 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
     );
   }
 
+  /// 显示短剧菜单 (长按)
+  void _showDramaMenu(ShortDrama drama) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[600],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  drama.name,
+                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Divider(color: Color(0xFF2A2A4E), height: 1),
+              ListTile(
+                leading: const Icon(Icons.play_arrow, color: Color(0xFF22C55E)),
+                title: const Text('播放', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _onDramaTap(drama);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: Colors.white70),
+                title: const Text('查看详情', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _onDramaTap(drama);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeService>(
@@ -486,6 +544,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
               drama: drama,
               cardWidth: cardWidth,
               onTap: () => _onDramaTap(drama),
+              onLongPress: () => _showDramaMenu(drama),
             );
           },
           childCount: _dramaList.length,
