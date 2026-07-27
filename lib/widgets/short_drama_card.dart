@@ -12,12 +12,14 @@ import 'package:luna_tv/services/luna_cache_manager.dart';
 class ShortDramaCard extends StatefulWidget {
   final ShortDrama drama;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final double? cardWidth;
 
   const ShortDramaCard({
     super.key,
     required this.drama,
     this.onTap,
+    this.onLongPress,
     this.cardWidth,
   });
 
@@ -372,6 +374,7 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
         // 非PC平台
         return GestureDetector(
           onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
           child: cardContent,
         );
       },
