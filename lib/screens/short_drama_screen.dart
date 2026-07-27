@@ -352,19 +352,19 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
                 },
               ),
               ListTile(
-                leading: Icon(Icons.info_outline, color: isDark ? Colors.white70 : Colors.grey[600]),
-                title: Text('查看详情', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _onDramaTap(drama);
-                },
-              ),
-              ListTile(
                 leading: const Icon(Icons.favorite_border, color: Color(0xFFFB7299)),
                 title: Text('收藏', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _toggleFavorite(drama);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.info_outline, color: isDark ? Colors.white70 : Colors.grey[600]),
+                title: Text('查看详情', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _onDramaTap(drama);
                 },
               ),
               const SizedBox(height: 8),
