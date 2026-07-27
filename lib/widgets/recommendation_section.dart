@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/widgets/video_card.dart';
@@ -403,7 +404,7 @@ class _RecommendationSectionState extends State<RecommendationSection> {
                       ? (action) =>
                           widget.onGlobalMenuAction!(videoInfo, action)
                       : null,
-                  isFavorited: false, // 推荐页面默认未收藏
+                  isFavorited: PageCacheService().isFavoritedSync(videoInfo.source, videoInfo.id),
                 ),
               );
             },
