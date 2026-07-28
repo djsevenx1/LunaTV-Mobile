@@ -359,9 +359,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   开播放页时物理音量键走系统默认 (弹音量条是合理的系统反馈).
     _volumeKeyChannel.setMethodCallHandler(_onVolumeKeyCall);
     unawaited(_volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': true}));
-    // ★ v2.5.65: 进入播放页时强制竖屏 (防止横屏进入后转不回来)
+    // ★ v2.5.65: 进入播放页时解锁所有方向 (让设备自由旋转, 平板/手机都友好)
     unawaited(SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
     ]));
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
