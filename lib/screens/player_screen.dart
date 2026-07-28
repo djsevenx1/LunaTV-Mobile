@@ -200,6 +200,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _progressTimer;
   bool _firstRecordSaved = false;
   String? _lastSavedKey; // 避免重复保存同一条
+  // ★ v2.5.65: 高精度进度条更新定时器 (让白点跟实际位置同步)
+  Timer? _positionPollTimer;
 
   // 视频尺寸（用于判断横竖屏全屏）
   int _videoWidth = 0;
@@ -357,6 +359,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   开播放页时物理音量键走系统默认 (弹音量条是合理的系统反馈).
     _volumeKeyChannel.setMethodCallHandler(_onVolumeKeyCall);
     unawaited(_volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': true}));
+    // ★ v2.5.65: 进入播放页时强制竖屏 (防止横屏进入后转不回来)
+    unawaited(SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]));
     // 注意: volume_controller v2.x / screen_brightness v0.2.x 都是单例 .instance API
     () async {
       try {
@@ -446,6 +452,22 @@ class _PlayerScreenState extends State<PlayerScreen>
             _videoHeight = h;
           });
         }
+      }
+    });
+    // ★ v2.5.65: 高精度进度条轮询 (100ms 一次, 让白点跟实际位置同步)
+    _positionPollTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (_isDisposing || !mounted || _scrubbingValue != null) return;
+      final c = _player?.controller;
+      if (c == null || !c.value.isPlaying) return;
+      final newPos = c.value.position;
+      if (newPos != _currentPosition) {
+        setState(() => _currentPosition = newPos);
+      }
+    });
+            _videoWidth = w;
+            _videoHeight = h;
+          });
+        }
         _updateSkipButtonVisibility();
         _maybeAutoPlayNext();
       }
@@ -503,6 +525,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 进程上滑杀时 OS 给 grace period, 大概率能完成网络写盘
     unawaited(_disposeAndSave());
     _progressTimer?.cancel();
+    _positionPollTimer?.cancel(); // ★ v2.5.65
     _hideControlsTimer?.cancel();
     _seekHintTimer?.cancel();
     _centerSwipeSeekThrottle?.cancel();
@@ -1139,7 +1162,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  /// 退出全屏：恢复系统UI + 解除方向锁定
+  /// 退出全屏：恢复系统UI + 强制转回竖屏
   Future<void> _onExitFullscreen() async {
     setState(() => _isFullscreen = false);
     // 恢复系统UI
@@ -1147,12 +1170,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
-    // 解除方向锁定,让系统方向(横屏/竖屏)由系统决定
-    await SystemChrome.setPreferredOrientations(const [
+    // ★ 强制转回竖屏 (不管设备物理方向)
+    await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
     ]);
   }
 
