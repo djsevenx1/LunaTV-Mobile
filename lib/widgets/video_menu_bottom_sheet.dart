@@ -1479,7 +1479,9 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
       );
     }
     
-    // 如果是聚合场景，显示播放和豆瓣详情（如果有）
+    // 如果是聚合场景，显示播放、收藏/取消收藏，如果有豆瓣ID则显示豆瓣详情
+    // v2.5.77: 之前聚合场景只显示"播放"+"豆瓣详情", 没有收藏按钮, 用户长按聚合卡片
+    //   收藏不上. 现在跟搜索场景一致, 在"播放"下补"收藏/取消收藏"项.
     if (widget.from == 'agg') {
       List<Widget> menuItems = [
         // 播放按钮
@@ -1496,8 +1498,23 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
             widget.onActionSelected(VideoMenuAction.play);
           },
         ),
+        // v2.5.77: 收藏 / 取消收藏 — 跟搜索场景逻辑一致
+        _buildDivider(themeService),
+        _buildMenuItem(
+          context,
+          themeService,
+          icon: widget.isFavorited ? Icons.favorite : Icons.favorite_border,
+          iconColor:
+              widget.isFavorited ? const Color(0xFFE74C3C) : const Color(0xFFE74C3C),
+          title: widget.isFavorited ? '取消收藏' : '收藏',
+          onTap: () {
+            widget.onClose();
+            widget.onActionSelected(
+                widget.isFavorited ? VideoMenuAction.unfavorite : VideoMenuAction.favorite);
+          },
+        ),
       ];
-      
+
       // 如果有豆瓣ID且不为0，添加豆瓣详情选项
       if (widget.videoInfo.doubanId != null && widget.videoInfo.doubanId!.isNotEmpty && widget.videoInfo.doubanId != "0") {
         menuItems.addAll([
@@ -1515,7 +1532,7 @@ class _VideoMenuBottomSheetState extends State<VideoMenuBottomSheet>
           ),
         ]);
       }
-      
+
       return Column(children: menuItems);
     }
     

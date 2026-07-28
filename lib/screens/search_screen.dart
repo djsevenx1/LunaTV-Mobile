@@ -254,7 +254,14 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       case VideoMenuAction.play:
         _navigateToPlayer(video);
         break;
+      // v2.5.77: 搜索 / 聚合长按菜单的"收藏"和"取消收藏"都走 toggleFavorite,
+      //   它内部 isFavoritedSync() 检查, 已收藏→removeFavorite, 未收藏→addFavorite.
+      //   之前只有 case VideoMenuAction.favorite, 视频菜单
+      //   (video_menu_bottom_sheet.dart::from=='search'/agg) 已收藏时返回 unfavorite,
+      //   但 search_screen 这里没 case unfavorite → 点了取消收藏没反应.
+      //   现在两个 case 都路由到同一个 toggleFavorite, 行为一致.
       case VideoMenuAction.favorite:
+      case VideoMenuAction.unfavorite:
         unawaited(PageCacheService().toggleFavorite(
           video.source,
           video.id,

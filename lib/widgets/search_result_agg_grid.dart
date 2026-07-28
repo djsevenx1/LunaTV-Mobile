@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/aggregated_search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
+import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/utils/font_utils.dart';
@@ -32,15 +33,27 @@ class SearchResultAggGrid extends StatefulWidget {
   State<SearchResultAggGrid> createState() => _SearchResultAggGridState();
 }
 
-class _SearchResultAggGridState extends State<SearchResultAggGrid> 
+class _SearchResultAggGridState extends State<SearchResultAggGrid>
     with AutomaticKeepAliveClientMixin {
-  
+
   // 聚合结果映射，key为聚合键，value为聚合结果
   Map<String, AggregatedSearchResult> _aggregatedResults = {};
-  
+
   // 按添加顺序排列的聚合键列表
   List<String> _orderedKeys = [];
-  
+
+  // v2.5.77: 用 cacheService 读收藏状态, 不再硬编码 false.
+  //   之前的 `isFavorited: false` 是导致"长按没收藏按钮"的关键根因:
+  //   1) video_menu_bottom_sheet.dart 看见 isFavorited=false 时认为未收藏
+  //      → menu 里只显示 "播放"/"豆瓣详情", 不显示收藏项.
+  //   2) 收藏后 SearchResultsGrid 同样不传 isFavorited 的话, 也展示为未收藏.
+  //   3) 现在跟 SearchResultsGrid 一致, 走 _cacheService.isFavoritedSync.
+  final PageCacheService _cacheService = PageCacheService();
+
+  // 收藏变更后本组件自己 setState 刷新, 不依赖外部 Provider.
+  // 每次 setState 触发 build, build 里每次都重算 _isFavorited.
+  int _favoriteVersion = 0;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -134,15 +147,29 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeOut,
               child: VideoCard(
-                key: ValueKey(key), // 使用聚合键作为唯一key
+                // v2.5.77: key 里塞 _favoriteVersion 强制 VideoCard 每次
+                //   收藏状态变化后整体重建, 不依赖 build 比较 isFavorited.
+                //   这样从已收藏 → 未收藏 → 已收藏 切换时 icon/颜色立刻变.
+                key: ValueKey('${key}#fav=$_favoriteVersion'),
                 videoInfo: videoInfo,
                 onTap: widget.onVideoTap != null ? () => widget.onVideoTap!(videoInfo) : null,
                 from: 'agg', // 标记为聚合卡片
                 cardWidth: itemWidth, // 传递计算出的宽度
-                onGlobalMenuAction: widget.onGlobalMenuAction != null 
-                    ? (action) => widget.onGlobalMenuAction!(videoInfo, action)
+                onGlobalMenuAction: widget.onGlobalMenuAction != null
+                    ? (action) async {
+                        // v2.5.77: 收藏 / 取消收藏等操作完成后, _favoriteVersion++
+                        //   触发本组件 setState 刷新, VideoCard 的 key 变化
+                        //   让内部 isFavorited 重新读.
+                        await Future.value(
+                            widget.onGlobalMenuAction!(videoInfo, action));
+                        if (mounted) {
+                          setState(() => _favoriteVersion++);
+                        }
+                      }
                     : null,
-                isFavorited: false, // 聚合卡片不显示收藏状态
+                // v2.5.77: 不再硬编码 false, 跟 SearchResultsGrid 一致.
+                isFavorited: _cacheService.isFavoritedSync(
+                    videoInfo.source, videoInfo.id),
                 originalResults: aggregatedResult.originalResults,
                 onSourceSelected: widget.onSourceSelected,
               ),

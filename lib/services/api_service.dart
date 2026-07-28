@@ -692,14 +692,22 @@ class ApiService {
   ///   - 重复搜索同关键词直接命中内存, 零网络延迟.
   ///   - 缓存存的是已去重的 List<SearchResult>, 避免重复解析 JSON.
   ///   - sourceKey 用 'server_aggregated' 表示这是后端聚合结果.
+  /// v2.5.77: 在 search 路径上加搜索词归一化:
+  ///   - 全角空格/标点 → 半角
+  ///   - 连续空白 collapse 到单空格
+  ///   - 移除控制字符
+  ///   后端 LunaTV /api/search 接收 q 后用全词匹配 + 模糊, 但搜"ＭＥ！" 跟 "ME!"
+  ///   (全角 vs 半角) 是两个串, 落不到同一条目, 用户体感"搜不到".
+  ///   归一化不改变原 query (UI 显示不变), 只在网络请求时改写.
   static Future<List<SearchResult>> fetchSourcesData(String query) async {
-    final trimmed = query.trim();
-    if (trimmed.isEmpty) return [];
+    final normalized = _normalizeSearchQuery(query);
+    if (normalized.isEmpty) return [];
 
     // v2.5.26: 缓存命中直接返回, 跳过网络请求
+    //   v2.5.77: 缓存 key 用归一化后的 query, 避免 "ME!" 和 "ME! " 走两套缓存.
     const sourceKey = 'server_aggregated';
     final cache = LocalSearchCacheService();
-    final cached = cache.getCachedSearchPage(sourceKey, trimmed, 1);
+    final cached = cache.getCachedSearchPage(sourceKey, normalized, 1);
     if (cached != null && cached.status == CachedPageStatus.ok) {
       // 缓存里存的就是 List<SearchResult>, 直接 cast 返回
       try {
@@ -713,7 +721,7 @@ class ApiService {
       final response = await get<Map<String, dynamic>>(
         '/api/search',
         queryParameters: {
-          'q': trimmed,
+          'q': normalized,
         },
         fromJson: (data) => data as Map<String, dynamic>,
         timeout: _timeoutSearch,
@@ -730,10 +738,11 @@ class ApiService {
         final deduped = _dedupeBySourceKey(parsed);
 
         // v2.5.26: 命中网络后写缓存 (只缓存非空结果, 避免空结果被缓存 10 分钟)
+        //   v2.5.77: 用归一化 key 写缓存, 跟 read 一致.
         if (deduped.isNotEmpty) {
           cache.setCachedSearchPage(
             sourceKey,
-            trimmed,
+            normalized,
             1,
             CachedPageStatus.ok,
             deduped,
@@ -766,6 +775,57 @@ class ApiService {
       }
     }
     return deduped.values.toList();
+  }
+
+  /// v2.5.77: 搜索词归一化.
+  ///   - 全角字母数字空格标点 → 半角
+  ///   - 移除控制字符
+  ///   - 连续空白 collapse 到单空格
+  ///   - trim 首尾空白
+  ///   不动 UI 显示的原 query, 只在网络请求前改写一次.
+  ///   例: "ＭＥ！" → "ME!", "进击  巨人 " → "进击 巨人", "　" → " ".
+  static String _normalizeSearchQuery(String query) {
+    if (query.isEmpty) return '';
+    final buf = StringBuffer();
+    for (final rune in query.runes) {
+      // ASCII 跳过
+      if (rune < 0x80) {
+        // 控制字符 (含 \n \t \r 等) 跳过, 但保留普通空格
+        if (rune < 0x20 && rune != 0x20) continue;
+        buf.writeCharCode(rune);
+        continue;
+      }
+      // 全角空格 (U+3000) → 半角空格
+      if (rune == 0x3000) {
+        buf.writeCharCode(0x20);
+        continue;
+      }
+      // 全角 ASCII 可打印区: 0xFF01..0xFF5E → 半角 0x21..0x7E
+      if (rune >= 0xFF01 && rune <= 0xFF5E) {
+        buf.writeCharCode(rune - 0xFEE0);
+        continue;
+      }
+      // 中文标点 → 半角等价 (仅最常见的 6 个, 不全量映射避免误改)
+      // , , . . ? ? ! !
+      if (rune == 0xFF0C) {
+        buf.write(',');
+      } else if (rune == 0x3002) {
+        buf.write('.');
+      } else if (rune == 0xFF1F) {
+        buf.write('?');
+      } else if (rune == 0xFF01) {
+        buf.write('!');
+      } else if (rune == 0xFF1A) {
+        buf.write(':');
+      } else if (rune == 0xFF1B) {
+        buf.write(';');
+      } else {
+        // 中文字符 / 韩文 / 其它非 ASCII 保留
+        buf.writeCharCode(rune);
+      }
+    }
+    // 连续空白 collapse 到单空格
+    return buf.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   /// 获取搜索资源列表
