@@ -44,7 +44,12 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.41.9'
+          # v2.5.75: 升 3.44.8 (2026-07-23 patch) — 修 3.44.0 Mali GPU 外纹理资源泄漏
+          #   + 3.44.6 Linux native assets CMake 路径崩溃 + 3.44.8 instrument test crash.
+          #   pubspec SDK constraint 已同步到 >=3.5.0 兼容 3.44 自带 Dart 3.9.
+          #   历史: v2.5.71 #1395 跑过 3.44 通道, v2.5.74 #1402 降回 3.41.9 是因为 APK 体积.
+          #   这次升 3.44.8, 若 APK 体积回归再降.
+          flutter-version: '3.44.8'
 
       - run: flutter pub get
 

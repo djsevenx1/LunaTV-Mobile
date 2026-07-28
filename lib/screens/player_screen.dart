@@ -5281,49 +5281,68 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   padding=horizontal(r) 让 thumb 内缩 r, Positioned 负 left/right 让
   //   Slider 外扩 r, 两者抵消, thumb 中心 = [0, W] 精确对齐绿条.
   //   Stack clipBehavior=none 防 thumb 在 0/1 端被裁剪.
+  // v2.5.75: 修"白点挡住绿条上半" — v2.5.74 的 Container.height=5 比
+  //   thumb 直径 12px 小, thumb 圆心被迫对齐 5px 容器中心 (=2.5px),
+  //   thumb 上半浮出容器顶端, 视觉上像"骑在绿条上".
+  //   修法: Container 高度 = thumb 直径 (12) + 上下 4px buffer = 20,
+  //   绿条和灰底色 Container 都用 Align(center) 让 5px 粗条在 20px
+  //   容器里垂直居中, thumb 也居中, 白点圆心 = 绿条中心.
   Widget _buildLunaProgressBar() {
     const thumbRadius = 6.0;
+    const barHeight = 5.0;          // 绿条 / 灰条粗细
+    const containerHeight = 20.0;   // 必须 >= thumb 直径(12) 才能让 thumb 居中
     final dur = _currentDuration.inMilliseconds.toDouble();
     final pos = _scrubbingValue != null
         ? (_scrubbingValue! * dur).toInt()
         : _currentPosition.inMilliseconds;
     final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
     return Container(
-      height: 5,
+      height: containerHeight,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // 底色轨道
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(2.5),
+          // 灰底色轨道（居中, 高 5px）
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.center,
+              child: SizedBox(
+                height: barHeight,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(barHeight / 2),
+                  ),
+                ),
+              ),
             ),
           ),
-          // 进度条
-          FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: progress,
-            child: Container(
-              decoration: BoxDecoration(
-                color: kLunaTheme,
-                borderRadius: BorderRadius.circular(2.5),
+          // 绿色进度条（居中, 高 5px, 宽度按 progress）
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: progress,
+                child: Container(
+                  height: barHeight,
+                  decoration: BoxDecoration(
+                    color: kLunaTheme,
+                    borderRadius: BorderRadius.circular(barHeight / 2),
+                  ),
+                ),
               ),
             ),
           ),
           // 拖动手柄 — padding=horizontal(r) 让 thumb 内缩 r,
           //   Positioned 负 left/right 让 Slider 外扩 r, 两者抵消,
           //   thumb 中心精确落在 [0, W], 与绿条两端对齐.
+          //   SliderThemeData.trackHeight=barHeight 让透明 track 跟绿条
+          //   高度一致, thumb 圆心 = 容器中心 = 绿条中心.
           if (dur > 0)
-            Positioned(
-              left: -thumbRadius,
-              right: -thumbRadius,
-              top: -2,
-              bottom: -2,
+            Positioned.fill(
               child: SliderTheme(
                 data: SliderThemeData(
-                  trackHeight: 5,
+                  trackHeight: barHeight,
                   padding: const EdgeInsets.symmetric(horizontal: thumbRadius),
                   activeTrackColor: Colors.transparent,
                   inactiveTrackColor: Colors.transparent,
