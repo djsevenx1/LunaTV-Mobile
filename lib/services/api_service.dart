@@ -876,6 +876,17 @@ class ApiService {
         buf.write(':');
       } else if (rune == 0xFF1B) {
         buf.write(';');
+      } else if (rune == 0x200B || rune == 0x200C || rune == 0x200D ||
+                 rune == 0xFEFF || rune == 0x2060) {
+        // v2.5.81: 剥零宽字符 (用户复制粘贴站名时常带)
+        //   U+200B 零宽空格, U+200C 零宽非连接符, U+200D 零宽连接符
+        //   U+FEFF BOM/零宽无断空格, U+2060 词组连接符
+        continue;
+      } else if (_isEmojiRune(rune)) {
+        // v2.5.81: 剥 emoji — maccms LIKE 一定搜不到, 白占 query 字符
+        //   例: "进击的巨人 🔥" 剥了 emoji 后变 "进击的巨人"
+        //   注: 不剥汉字/假名/谚文 (那是真字符, 不是 emoji)
+        continue;
       } else {
         // 中文字符 / 韩文 / 其它非 ASCII 保留
         buf.writeCharCode(rune);
@@ -883,6 +894,20 @@ class ApiService {
     }
     // 连续空白 collapse 到单空格 + 全小写 + trim 首尾
     return buf.toString().replaceAll(RegExp(r'\s+'), ' ').toLowerCase().trim();
+  }
+
+  // v2.5.81: 判断一个 rune 是不是 emoji
+  //   主要 emoji 区间:
+  //     U+1F300..U+1FAFF (Misc Symbols and Pictographs, Emoticons, Transport, Supplemental Symbols and Pictographs, Symbols and Pictographs Extended-A)
+  //     U+2600..U+27BF (Misc Symbols, Dingbats, Misc Symbols and Arrows)
+  //     U+1F000..U+1F1FF (Mahjong, Playing Cards, Enclosed Alphanumeric Supplement — 包含旗帜 U+1F1E6..U+1F1FF)
+  //   这些区间都跟汉字/假名/谚文 (U+4E00..U+9FFF / U+3040..U+30FF / U+AC00..U+D7AF) 互不重叠, 直接 range check 即可
+  static bool _isEmojiRune(int rune) {
+    if (rune >= 0x1F300 && rune <= 0x1FAFF) return true;
+    if (rune >= 0x2600 && rune <= 0x27BF) return true;
+    if (rune >= 0x1F000 && rune <= 0x1F1FF) return true;
+    if (rune >= 0x1F200 && rune <= 0x1F2FF) return true;  // Enclosed Ideographic Supplement
+    return false;
   }
 
   /// 获取搜索资源列表
