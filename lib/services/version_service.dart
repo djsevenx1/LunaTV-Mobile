@@ -19,7 +19,16 @@ class VersionService {
   static const String githubApiUrl = 'https://api.github.com/repos/djsevenx1/LunaTV-Mobile/releases/latest';
   static const String _lastCheckKey = 'last_version_check';
   static const String _dismissedVersionKey = 'dismissed_version';
-  
+
+  // v2.5.78: 启动自动检查节流 — 24h 内最多打一次 GitHub API
+  //   之前 user_menu 手动调 checkForUpdate 没节流, 但手动调本来就
+  //   罕见, 弹个 loading 也无所谓; 启动自动调每开 app 一次会触发一次
+  //   网络, 加上 app 冷启 + Worker 路由转发, 体验 + 后端压力都差.
+  //   修: checkForUpdate 入口先看 24h 节流, 跳过则直接 return null
+  //   (跟 dismissed 一起短路). lastCheckKey 在每次成功打网络后写,
+  //   失败/被 dismiss 短路都不写 — 失败可以下次启动重试.
+  static const int _autoCheckThrottleMs = 24 * 60 * 60 * 1000;
+
   /// 检查是否有新版本
   ///
   /// v2.1.46 改: 走 [UserDataService.buildGithubApiUrl] 拼 URL —
@@ -43,10 +52,32 @@ class VersionService {
   ///   == latest 且 current == latest 时才真正 return null (用户
   ///   装了或 user 真的就是这个版本).
   static Future<VersionInfo?> checkForUpdate() async {
+    return checkForUpdateImpl(auto: true);
+  }
+
+  // v2.5.78: 手动入口 — 跳过 24h 节流, 立即打 GitHub API
+  //   user_menu「检查更新」按钮走这个, 启动自动检查走 [checkForUpdate]
+  static Future<VersionInfo?> checkForUpdateManual() async {
+    return checkForUpdateImpl(auto: false);
+  }
+
+  // v2.5.78: 把节流 + 网络 + dismissed 判断放一起, 用 auto 区分两条路径
+  static Future<VersionInfo?> checkForUpdateImpl({required bool auto}) async {
     try {
       // 获取当前版本
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
+
+      // v2.5.78: 启动自动检查节流 — 24h 内最多打一次 GitHub API
+      //   只在「启动自动调用」场景节流; 手动 (auto=false) 不节流
+      //   修: 用 [_shouldThrottleAutoCheck] 走 Prefs, 失败 return null
+      if (auto) {
+        final shouldThrottle = await _shouldThrottleAutoCheck();
+        if (shouldThrottle) {
+          DiaryService.add('[Version] auto check throttled (24h 内已查过)');
+          return null;
+        }
+      }
 
       // v2.1.46: GitHub API URL 走 worker 代理 (配了的话)
       final apiUrl = UserDataService.buildGithubApiUrl(githubApiUrl);
@@ -58,6 +89,9 @@ class VersionService {
           'Accept': 'application/vnd.github.v3+json',
         },
       ).timeout(const Duration(seconds: 10));
+
+      // v2.5.78: 启动自动场景拿到响应后写 _lastCheckKey
+      if (auto) await _markAutoCheckDone();
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as Map<String, dynamic>;
@@ -185,11 +219,37 @@ class VersionService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_dismissedVersionKey, version);
   }
-  
+
   /// 清除忽略记录（用于测试或重置）
   static Future<void> clearDismissedVersion() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_dismissedVersionKey);
+  }
+
+  // v2.5.78: 启动自动检查的 24h 节流 — 检查 24h 内是否已查过
+  //   写在 try 外避免 throw 被吞, 走 Prefs 简单, 不要走 main isolate
+  //   之外的 Channel (PackageInfo 已经在主 isolate 走完了)
+  static Future<bool> _shouldThrottleAutoCheck() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final last = prefs.getInt(_lastCheckKey) ?? 0;
+      if (last <= 0) return false;
+      return (DateTime.now().millisecondsSinceEpoch - last) < _autoCheckThrottleMs;
+    } catch (_) {
+      return false;  // 读失败 → 当作没查过, 放行
+    }
+  }
+
+  // v2.5.78: 启动自动检查成功后写时间戳
+  //   _lastCheckKey 跟 shouldShowUpdatePrompt 共用, 但那个方法已废弃
+  //   (新流程都在 [checkForUpdate] 内做), 互不干扰
+  static Future<void> _markAutoCheckDone() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {
+      // 写失败不影响主流程
+    }
   }
 }
 

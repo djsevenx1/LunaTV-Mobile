@@ -29,6 +29,9 @@ import 'package:luna_tv/services/local_mode_storage_service.dart';
 import 'package:luna_tv/services/subscription_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
+import 'package:luna_tv/services/version_service.dart';
+// v2.5.78: 启动时自动检查更新, 弹 UpdateDialog
+import 'package:luna_tv/widgets/update_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -129,6 +132,32 @@ class _AppWrapperState extends State<AppWrapper> {
     super.initState();
     ContentFilterService.loadUserRules();
     _checkLoginStatus();
+    // v2.5.78: 启动 1.5s 后调自动检查更新
+    //   延后 1.5s 等首屏渲染完, 不阻塞 _checkLoginStatus 跑完
+    //   弹 dialog 时机在用户进入 HomeScreen 后, 不会卡 loading 转圈
+    //   节流在 [VersionService.checkForUpdate] 内部 (24h 内最多 1 次)
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) _autoCheckUpdate();
+    });
+  }
+
+  // v2.5.78: 启动时检查 GitHub release, 有新版本就弹 UpdateDialog
+  //   跟 [VersionService] 的节流 + dismissed 机制联动:
+  //   - 节流: 24h 内已查过 → return null, 不弹, 不写日志
+  //   - dismissed == latest → return null, 不弹
+  //   - current < latest && (dismissed != latest || 没设 dismissed) → 弹 dialog
+  //   - 失败/网络异常 → 静默不弹, 不写 [dismissed]
+  //   - 检查完后不 navigate (用户已通过 _checkLoginStatus 跳到 HomeScreen 或 LoginScreen)
+  void _autoCheckUpdate() async {
+    try {
+      final versionInfo = await VersionService.checkForUpdate();
+      if (versionInfo == null) return;
+      if (!mounted) return;
+      // 已经在 HomeScreen / LoginScreen 上, 弹 dialog 是 root navigator
+      await UpdateDialog.show(context, versionInfo);
+    } catch (_) {
+      // 静默吞: 启动时检查失败不应该影响用户进 app, 万一真没网
+    }
   }
 
   void _checkLoginStatus() async {
