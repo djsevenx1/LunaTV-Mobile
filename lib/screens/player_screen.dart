@@ -455,6 +455,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             _videoHeight = h;
           });
         }
+        _updateSkipButtonVisibility();
+        _maybeAutoPlayNext();
       }
     });
     // ★ v2.5.65: 高精度进度条轮询 (100ms 一次, 让白点跟实际位置同步)
@@ -465,14 +467,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       final newPos = c.value.position;
       if (newPos != _currentPosition) {
         setState(() => _currentPosition = newPos);
-      }
-    });
-            _videoWidth = w;
-            _videoHeight = h;
-          });
-        }
-        _updateSkipButtonVisibility();
-        _maybeAutoPlayNext();
       }
     });
     _durationSub = _player!.durationStream.listen((dur) {
