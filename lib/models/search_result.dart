@@ -15,6 +15,10 @@ class SearchResult {
   final String? typeName;
   final int? doubanId;
 
+  // 非 final — 同剧跨源聚合时, 其他 source 的副本缓存这里 (用于 UI 切源)
+  // 不参与 fromJson/toJson (后端不返这个字段)
+  List<SearchResult>? _extraSources;
+
   SearchResult({
     required this.id,
     required this.title,
@@ -29,6 +33,10 @@ class SearchResult {
     this.typeName,
     this.doubanId,
   });
+
+  /// 跨源同剧的其他 source 副本 (供 UI 切源)
+  List<SearchResult>? get extraSources => _extraSources;
+  set extraSources(List<SearchResult>? v) => _extraSources = v;
 
   /// 从JSON创建SearchResult
   factory SearchResult.fromJson(Map<String, dynamic> json) {

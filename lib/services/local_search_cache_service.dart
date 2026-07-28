@@ -38,8 +38,11 @@ class LocalSearchCacheService {
   int _lastCleanupTime = 0;
 
   /// 生成搜索缓存键：source + query + page
+  ///   v2.5.83+: 加 _cacheSchemaVersion — dedupe 逻辑改后旧缓存 (14 条)
+  ///   跟新缓存 (几百条) 数据格式不一致, 加 version 让旧缓存全失效
+  static const int _cacheSchemaVersion = 2;
   String _makeSearchCacheKey(String sourceKey, String query, int page) {
-    return '$sourceKey::${query.trim()}::$page';
+    return 'v$_cacheSchemaVersion::$sourceKey::${query.trim()}::$page';
   }
 
   /// 获取缓存的搜索页面数据

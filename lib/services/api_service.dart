@@ -759,19 +759,36 @@ class ApiService {
     }
   }
 
-  /// 按 source key 去重,同一 key 保留集数最多的;空 key 不参与去重
+  /// 按 (title + year + 类型) 聚合跨源同剧,同一剧保留集数最多的 source;
+  /// 之前版本按 source 去重 → 96 源返 628 个结果被压到 26 条
+  /// (1 条/source, 真正有"凡人"剧的源只有 26 个, 用户看到就剩 14 条渲染)
+  /// 现在按剧聚合: "凡人修仙传" 在 30 个源都有, 保留集数最多的那个 source 即可
+  /// 其它 source 进 _extraSources 列表, UI 切源时能直接切
   static List<SearchResult> _dedupeBySourceKey(List<SearchResult> results) {
     final deduped = <String, SearchResult>{};
     for (final r in results) {
-      if (r.source.isEmpty) {
+      if (r.source.isEmpty || r.title.isEmpty) {
+        // 缺关键字段 → 单独留, 不参与聚合
         deduped['__nokey_${deduped.length}'] = r;
         continue;
       }
-      final existing = deduped[r.source];
+      // 跟 AggregatedSearchResult.generateKey 一致: title + year + tv/movie
+      final type = r.episodes.length > 1 ? 'tv' : 'movie';
+      final key = '${r.title}_${r.year}_$type';
+      final existing = deduped[key];
       if (existing == null) {
-        deduped[r.source] = r;
+        deduped[key] = r;
       } else if (r.episodes.length > existing.episodes.length) {
-        deduped[r.source] = r;
+        // 当前结果集数更多, 当主 source, 旧的进 _extraSources
+        final oldExtras = List<SearchResult>.from(existing.extraSources ?? const []);
+        oldExtras.add(existing);
+        r.extraSources = oldExtras;
+        deduped[key] = r;
+      } else {
+        // 当前集数少, 进现有 entry 的 _extraSources
+        final extras = List<SearchResult>.from(existing.extraSources ?? const []);
+        extras.add(r);
+        existing.extraSources = extras;
       }
     }
     return deduped.values.toList();
