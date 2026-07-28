@@ -5276,7 +5276,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 进度条 (5px 矩形, 绿进度, LunaTV Web 风格)
+  // v2.5.73: 修复白点超出右边缘 — Material 3 默认 trackHorizontalPadding=0,
+  //   导致 Slider thumb 在 value=0/1 时跑到 Positioned(left:-r,right:-r) 的
+  //   外缘 (即 -r 和 W+r), 超出绿条范围. 显式设 trackHorizontalPadding=r,
+  //   thumb 中心范围 = [r, W+r-r] = [r, W], 相对 Stack = [0, W], 精确对齐.
   Widget _buildLunaProgressBar() {
+    const thumbRadius = 6.0;
     final dur = _currentDuration.inMilliseconds.toDouble();
     final pos = _scrubbingValue != null
         ? (_scrubbingValue! * dur).toInt()
@@ -5296,6 +5301,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
           // 进度条
           FractionallySizedBox(
+            alignment: Alignment.centerLeft,
             widthFactor: progress,
             child: Container(
               decoration: BoxDecoration(
@@ -5304,16 +5310,19 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
           ),
-          // 拖动手柄
+          // 拖动手柄 — trackHorizontalPadding=r 让 thumb 内缩 r,
+          //   Positioned 负 left/right 让 Slider 外扩 r, 两者抵消,
+          //   thumb 中心精确落在 [0, W], 与绿条两端对齐.
           if (dur > 0)
             Positioned(
-              left: 0,
-              right: 0,
+              left: -thumbRadius,
+              right: -thumbRadius,
               top: -2,
               bottom: -2,
               child: SliderTheme(
                 data: SliderThemeData(
                   trackHeight: 5,
+                  trackHorizontalPadding: thumbRadius,
                   activeTrackColor: Colors.transparent,
                   inactiveTrackColor: Colors.transparent,
                   thumbColor: Colors.white,
