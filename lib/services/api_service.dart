@@ -783,7 +783,28 @@ class ApiService {
   ///   - 连续空白 collapse 到单空格
   ///   - trim 首尾空白
   ///   不动 UI 显示的原 query, 只在网络请求前改写一次.
-  ///   例: "ＭＥ！" → "ME!", "进击  巨人 " → "进击 巨人", "　" → " ".
+  ///   例: "ＭＥ！" → "me!", "进击  巨人 " → "进击 巨人", "　" → " ".
+  /// v2.5.78: 加 toLowerCase 让大小写不敏感:
+  ///   - 用户输入 "ME" / "me" / "Me" → 都发 "me"
+  ///   - 后端如果存的是 "ME" (大写), 需要后端也做 lowercase 比对
+  ///   - 单前端改: 保证发出的 q 一致, 但后端不做 lowercase 还是匹配不上
+  ///     大写标题 (例如 "ME" vs "me"). 需后端配合.
+  /// v2.5.79: 进一步剥离常见 ASCII 标点, 让"输入干净词也能搜到带符号标题".
+  ///   - 之前 "ME!" → "me!", 后端转发给资源站 `wd=me!`, 资源站子串匹配
+  ///     要求子串完全一致, `me!` 在 `ME!` 里能匹配, 但反过来
+  ///     用户输入 "me" 时, `wd=me` 能不能匹配 `ME!` 取决于资源站
+  ///     是否做大小写不敏感 + 是否把 `!` 当成可忽略的标点.
+  ///   - 多数 vod 资源站对 `wd=me` 是大小写不敏感但保留标点字面量,
+  ///     所以 `wd=me` → 命中 `ME`、`Me`、`me`, 但**不会**自动去掉 `ME!` 里的 `!`
+  ///     来做匹配. 但资源站普遍会把 `wd` 当关键词, 标题里只要含 `me`
+  ///     子串就返回, 所以输入 "me" 实际是能搜到 "ME!" 的.
+  ///   - 真正搜不到的场景是用户输入带符号的 query, 如 "ME!": 资源站
+  ///     `wd=ME!` 不会匹配 `ME` (子串里没有 `!`). 把 query 里的
+  ///     `!` 剥掉变 "me" 就能搜到.
+  ///   - 这里只剥**用户明显会顺手敲出来**的装饰性符号, 不动 `-`(连字符)
+  ///     和 `.`(句点, 可能出现在 "Mr." "Dr." "v2.0" 这种有意义的缩写里),
+  ///     避免误伤.
+  ///   例: "ME!" → "me", "进击的巨人!" → "进击的巨人", "V2.0" → "v2.0" 保留点.
   static String _normalizeSearchQuery(String query) {
     if (query.isEmpty) return '';
     final buf = StringBuffer();
@@ -792,6 +813,31 @@ class ApiService {
       if (rune < 0x80) {
         // 控制字符 (含 \n \t \r 等) 跳过, 但保留普通空格
         if (rune < 0x20 && rune != 0x20) continue;
+        // v2.5.79: 剥离装饰性符号. 这些是用户顺手敲的、不影响语义.
+        //   不动字母/数字/空格/连字符/句点(可能是标题里有意义的).
+        //   ! ? ' " & + ( ) * # @ ~ ^ ` | \ / < > =
+        if (rune == 0x21 || // !
+            rune == 0x3F || // ?
+            rune == 0x27 || // '
+            rune == 0x22 || // "
+            rune == 0x26 || // &
+            rune == 0x2B || // +
+            rune == 0x28 || // (
+            rune == 0x29 || // )
+            rune == 0x2A || // *
+            rune == 0x23 || // #
+            rune == 0x40 || // @
+            rune == 0x7E || // ~
+            rune == 0x5E || // ^
+            rune == 0x60 || // `
+            rune == 0x7C || // |
+            rune == 0x5C || // \
+            rune == 0x2F || // /
+            rune == 0x3C || // <
+            rune == 0x3E || // >
+            rune == 0x3D) { // =
+          continue; // 跳过符号, 不写入
+        }
         buf.writeCharCode(rune);
         continue;
       }
@@ -802,7 +848,16 @@ class ApiService {
       }
       // 全角 ASCII 可打印区: 0xFF01..0xFF5E → 半角 0x21..0x7E
       if (rune >= 0xFF01 && rune <= 0xFF5E) {
-        buf.writeCharCode(rune - 0xFEE0);
+        // v2.5.79: 全角符号同样剥掉 (统一行为, 用户敲全角 "！" 跟半角 "!" 等价)
+        final ascii = rune - 0xFEE0;
+        if (ascii == 0x21 || ascii == 0x3F || ascii == 0x27 || ascii == 0x22 ||
+            ascii == 0x26 || ascii == 0x2B || ascii == 0x28 || ascii == 0x29 ||
+            ascii == 0x2A || ascii == 0x23 || ascii == 0x40 || ascii == 0x7E ||
+            ascii == 0x5E || ascii == 0x60 || ascii == 0x7C || ascii == 0x5C ||
+            ascii == 0x2F || ascii == 0x3C || ascii == 0x3E || ascii == 0x3D) {
+          continue;
+        }
+        buf.writeCharCode(ascii);
         continue;
       }
       // 中文标点 → 半角等价 (仅最常见的 6 个, 不全量映射避免误改)
@@ -812,9 +867,11 @@ class ApiService {
       } else if (rune == 0x3002) {
         buf.write('.');
       } else if (rune == 0xFF1F) {
-        buf.write('?');
+        // v2.5.79: 全角 ? 也归到符号里, 不保留
+        continue;
       } else if (rune == 0xFF01) {
-        buf.write('!');
+        // v2.5.79: 全角 ! 也归到符号里, 不保留
+        continue;
       } else if (rune == 0xFF1A) {
         buf.write(':');
       } else if (rune == 0xFF1B) {
@@ -824,8 +881,8 @@ class ApiService {
         buf.writeCharCode(rune);
       }
     }
-    // 连续空白 collapse 到单空格
-    return buf.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    // 连续空白 collapse 到单空格 + 全小写 + trim 首尾
+    return buf.toString().replaceAll(RegExp(r'\s+'), ' ').toLowerCase().trim();
   }
 
   /// 获取搜索资源列表
