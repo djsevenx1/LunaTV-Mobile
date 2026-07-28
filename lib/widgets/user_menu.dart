@@ -84,10 +84,6 @@ class _UserMenuState extends State<UserMenu> {
   //   内部用 UserDataService.getTmdbProxyDomainSync() 读.
   String _tmdbProxyDomain = '';
 
-  // v2.1.22: 日记 section 配置 (跟 DiaryService 同步)
-  bool _diaryClearOnExit = true;
-  int _diaryMaxEntries = 500;
-  bool _diaryPersist = false;
 
   @override
   void initState() {
@@ -143,11 +139,6 @@ class _UserMenuState extends State<UserMenu> {
     //   服务 TMDB / Bangumi / GitHub 三套路由 (v2.1.49 合并 GitHub 字段)
     final tmdbProxyDomain = await UserDataService.getTmdbProxyDomain();
 
-    // v2.1.22: 日记 section 配置
-    final diaryClearOnExit = DiaryService.clearOnExit;
-    final diaryMaxEntries = DiaryService.maxEntries;
-    final diaryPersist = DiaryService.persist;
-
     if (mounted) {
       setState(() {
         _isLocalMode = isLocalMode;
@@ -166,9 +157,6 @@ class _UserMenuState extends State<UserMenu> {
         _tmdbConfigured = tmdbConfigured;
         _tmdbDataSource = tmdbDataSource;
         _tmdbProxyDomain = tmdbProxyDomain;
-        _diaryClearOnExit = diaryClearOnExit;
-        _diaryMaxEntries = diaryMaxEntries;
-        _diaryPersist = diaryPersist;
       });
     }
   }
@@ -1998,80 +1986,6 @@ class _UserMenuState extends State<UserMenu> {
                 icon: LucideIcons.trash2,
                 iconColor: const Color(0xFFf59e0b),
                 onTap: _handleClearDoubanCache,
-              ),
-              _buildDivider(),
-              // v2.0.99.2: 日记 — 跳到 DiaryScreen, 看全流程运行日志
-              //   (TMDB 失败 / 网络错 / 关键事件). 跟 adb logcat 互补,
-              //   不用接电脑. 跟 v2.0.91 删的「log UI」区别: 那个是开发者
-              //   log 实时浮层, 这次是独立日记页 (按时间序, 用户主动点开).
-              _buildActionItem(
-                title: '日记',
-                icon: LucideIcons.fileText,
-                iconColor: const Color(0xFF8b5cf6),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const DiaryScreen(),
-                    ),
-                  );
-                },
-              ),
-              // v2.5.52: 弹幕日记 — 只看 [弹幕] 分类的日记, 方便排查弹幕加载问题
-              _buildActionItem(
-                title: '弹幕日记',
-                icon: LucideIcons.film,
-                iconColor: const Color(0xFF22C55E),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const DiaryScreen(initialFilter: '弹幕'),
-                    ),
-                  );
-                },
-              ),
-              // v2.1.22: 日记 section 配置 — 退出清空 / 容量上限 / 持久化
-              _buildToggleOption(
-                title: '退出 app 自动清空',
-                subtitle: '关掉后日记会保留, 但重启 app 不会丢',
-                value: _diaryClearOnExit,
-                onChanged: (value) async {
-                  await DiaryService.setClearOnExit(value);
-                  if (!mounted) return;
-                  setState(() {
-                    _diaryClearOnExit = value;
-                  });
-                },
-                icon: LucideIcons.logOut,
-                iconColor: const Color(0xFF8b5cf6),
-              ),
-              _buildOptionSelector(
-                title: '容量上限',
-                currentValue: '${_diaryMaxEntries} 条',
-                options: const ['100 条', '500 条', '1000 条', '2000 条'],
-                onChanged: (s) async {
-                  final n = int.parse(s.split(' ')[0]);
-                  await DiaryService.setMaxEntries(n);
-                  if (!mounted) return;
-                  setState(() {
-                    _diaryMaxEntries = n;
-                  });
-                },
-                icon: LucideIcons.hardDrive,
-                iconColor: const Color(0xFF8b5cf6),
-              ),
-              _buildToggleOption(
-                title: '持久化日记',
-                subtitle: '开启后写进 SharedPreferences, 跨会话保留',
-                value: _diaryPersist,
-                onChanged: (value) async {
-                  await DiaryService.setPersist(value);
-                  if (!mounted) return;
-                  setState(() {
-                    _diaryPersist = value;
-                  });
-                },
-                icon: LucideIcons.save,
-                iconColor: const Color(0xFF8b5cf6),
               ),
               _buildDivider(),
               // 检查更新按钮
