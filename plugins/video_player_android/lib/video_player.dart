@@ -17,6 +17,8 @@ export 'package:video_player_platform_interface/video_player_platform_interface.
         VideoPlayerOptions,
         VideoViewType;
 
+export 'video_player_android.dart' show AndroidVideoPlayer;
+
 /// The duration, current position, buffering state, error state and settings
 /// of a [VideoPlayerController].
 @immutable
