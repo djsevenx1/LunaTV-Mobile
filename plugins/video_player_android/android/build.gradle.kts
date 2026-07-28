@@ -2,15 +2,13 @@ group = "io.flutter.plugins.videoplayer"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    val kotlinVersion = "2.3.0"
     repositories {
         google()
         mavenCentral()
     }
-
     dependencies {
-        classpath("com.android.tools.build:gradle:8.13.1")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
+        classpath("com.android.tools.build:gradle:8.7.3")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0")
     }
 }
 
@@ -21,19 +19,12 @@ allprojects {
     }
 }
 
-plugins {
-    id("com.android.library")
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
-    }
-}
+apply(plugin = "com.android.library")
+apply(plugin = "kotlin-android")
 
 android {
     namespace = "io.flutter.plugins.videoplayer"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 34
 
     defaultConfig {
         minSdk = 24
@@ -52,8 +43,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     dependencies {
-        val exoplayerVersion = "1.9.2"
+        val exoplayerVersion = "1.4.1"
         implementation("androidx.media3:media3-exoplayer:${exoplayerVersion}")
         implementation("androidx.media3:media3-exoplayer-hls:${exoplayerVersion}")
         implementation("androidx.media3:media3-exoplayer-dash:${exoplayerVersion}")
@@ -76,10 +71,6 @@ android {
                     events("passed", "skipped", "failed", "standardOut", "standardError")
                     showStandardStreams = true
                 }
-                // The org.gradle.jvmargs property that may be set in gradle.properties does not impact
-                // the Java heap size when running the Android unit tests. The following property here
-                // sets the heap size to a size large enough to run the robolectric tests across
-                // multiple SDK levels.
                 it.jvmArgs("-Xmx4G")
             }
         }
