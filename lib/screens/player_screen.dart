@@ -279,6 +279,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _isDisposing = false;
   // v2.5.20: 中间区域水平拖动的 seek 节流 (最多 100ms 调一次, 防止 ExoPlayer message queue 堆积)
   Timer? _centerSwipeSeekThrottle;
+  // 底部栏水平拖动 (拖进度条) — 起始 progress value + 底部栏宽度, 用来 delta → value 换算
+  //   v2.5.86 新增. 中间区域水平拖动是按"整屏 60s/半屏"算, 底部栏只占屏幕
+  //   60%~85% 宽, 用底部栏宽度算才准. 拖动过程中更新 _scrubbingValue
+  //   (Slider 同步), 节流 seek, end 时 flush.
+  double? _bottomBarDragStartValue;
+  double? _bottomBarDragStartWidth;
+  Timer? _bottomBarSwipeThrottle;
   // v2.5.20: playingStream / completedStream / bufferingStream 的 subscription 字段
   //   之前 v2.3.14 ~ v2.5.19 这 3 个 listener 没存字段, dispose 时没法 cancel,
   //   切集 / 退出时残留 listener 触发业务逻辑 (_autoPlayNextEpisode) 跟新 episode 打架
@@ -526,6 +533,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _hideControlsTimer?.cancel();
     _seekHintTimer?.cancel();
     _centerSwipeSeekThrottle?.cancel();
+    _bottomBarSwipeThrottle?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
     // v2.5.20: 之前 dispose 漏 cancel 这 3 个 listener, 切集 / 退出时残留
@@ -1807,6 +1815,92 @@ class _PlayerScreenState extends State<PlayerScreen>
     _centerSwipeSeekThrottle?.cancel();
     _centerSwipeSeekThrottle = null;
     unawaited(_player!.seek(_currentPosition));
+  }
+
+  // v2.5.86: 底部栏水平拖动开始 — 记录起始 value (当前进度) + 底部栏宽度,
+  //   delta.dx / 底部栏宽度 = 进度变化. 顺便取消自动隐藏控件计时器,
+  //   防止拖到一半控件消失了.
+  void _onBottomBarSwipeStart(DragStartDetails details) {
+    if (_isDisposing) return;
+    if (_currentDuration.inMilliseconds <= 0) return;
+    _bottomBarSwipeThrottle?.cancel();
+    _bottomBarSwipeThrottle = null;
+    _hideControlsTimer?.cancel();
+    // 当前进度: 优先用 _scrubbingValue (用户已经在拖 Slider), 否则用 position
+    final dur = _currentDuration.inMilliseconds.toDouble();
+    final startVal = _scrubbingValue ??
+        (_currentPosition.inMilliseconds / dur).clamp(0.0, 1.0);
+    _bottomBarDragStartValue = startVal;
+    // 底部栏宽度 = LayoutBuilder 可以拿到, 但我们已经在 buildLunaBottomBar
+    //   算过 maxW, 这里重新算 (mediaQuery 一致). 用 estimatedContainerWidth:
+    //   ConstrainedBox(maxWidth: maxW), 实际宽度 = min(maxW, 屏幕宽 - 24).
+    final screenW = MediaQuery.of(context).size.width;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+    final maxW = isLandscape ? screenW * 0.6 : screenW * 0.85;
+    _bottomBarDragStartWidth = (screenW - 24).clamp(0.0, maxW);
+    // 跟中间 swipe 一样保持控件显示
+    setState(() {
+      _isControlsVisible = true;
+      _scrubbingValue = startVal; // 让 Slider 立即响应拖动
+    });
+  }
+
+  // v2.5.86: 底部栏水平拖动更新 — delta.dx / 底部栏宽度 = 进度变化.
+  //   拖动过程中更新 _scrubbingValue (Slider 同步显示), 跟 _onCenterSwipeUpdate
+  //   一样 100ms 节流 seek, 防止 ExoPlayer message queue 堆积.
+  void _onBottomBarSwipeUpdate(DragUpdateDetails details) {
+    if (_isDisposing) return;
+    final startVal = _bottomBarDragStartValue;
+    final width = _bottomBarDragStartWidth;
+    final dur = _currentDuration.inMilliseconds;
+    if (startVal == null || width == null || width <= 0 || dur <= 0) return;
+    // 累积 delta (Listener/DragUpdateDetails 的 delta 是单帧增量, 累加防丢)
+    // 这里没有累积变量, 用 _scrubbingValue 当前值当锚点:
+    //   newVal = startVal + (累计 dx) / width
+    // DragUpdateDetails 的 delta.dx 是单帧, 直接累加到 _scrubbingValue:
+    final current = _scrubbingValue ?? startVal;
+    final newVal = (current + details.delta.dx / width).clamp(0.0, 1.0);
+    setState(() {
+      _scrubbingValue = newVal;
+    });
+    // 100ms 节流 seek (跟 _onCenterSwipeUpdate 一致, 避免 ExoPlayer 乱跳)
+    _bottomBarSwipeThrottle?.cancel();
+    _bottomBarSwipeThrottle = Timer(const Duration(milliseconds: 100), () {
+      if (_isDisposing) return;
+      final newMs = (newVal * dur).toInt();
+      unawaited(_player!.seek(Duration(milliseconds: newMs)));
+      // 同步 _currentPosition, 中间 swipe 节流也是这么做的
+      if (mounted) {
+        setState(() {
+          _currentPosition = Duration(milliseconds: newMs);
+        });
+      }
+    });
+  }
+
+  // v2.5.86: 底部栏水平拖动结束 — flush pending seek, 清理 state.
+  //   跟中间 swipe 不同: 中间 swipe 结束后保持 _currentPosition 让 Slider
+  //   显示; 这里 _scrubbingValue 维持, 让 Slider 停在用户拖到的位置,
+  //   然后 _onScrubEnd 风格的清尾.
+  void _onBottomBarSwipeEnd(DragEndDetails details) {
+    if (_isDisposing) return;
+    _bottomBarSwipeThrottle?.cancel();
+    _bottomBarSwipeThrottle = null;
+    final v = _bottomBarDragStartValue;
+    final dur = _currentDuration.inMilliseconds;
+    _bottomBarDragStartValue = null;
+    _bottomBarDragStartWidth = null;
+    if (v == null || dur <= 0) return;
+    // 用当前 _scrubbingValue 调 seek (跟 _onScrubEnd 一样, 确保 final 位置 seek)
+    final finalVal = (_scrubbingValue ?? v).clamp(0.0, 1.0);
+    final newMs = (finalVal * dur).toInt();
+    unawaited(_player!.seek(Duration(milliseconds: newMs)));
+    setState(() {
+      _currentPosition = Duration(milliseconds: newMs);
+      _scrubbingValue = null; // 跟 _onScrubEnd 一样, 让 Slider 回到 _currentPosition 驱动
+    });
+    if (_isPlaying) _scheduleHideControls();
   }
 
   // 中间区域水平拖动 = 快进快退
@@ -5178,9 +5272,21 @@ class _PlayerScreenState extends State<PlayerScreen>
                   borderRadius: BorderRadius.circular(8),
                 ),
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 5),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                // v2.5.86: 底部栏整体接收水平拖动 = 拖进度条.
+                //   中间 Expanded(flex:2) 区域也是水平拖, 但只占屏幕中间
+                //   一条. 用户反馈"屏幕下方"也想要拖动. 这里用 Column
+                //   整层接 horizontal drag, 子级按钮 (InkWell tap) 跟
+                //   HorizontalDragGestureRecognizer 不冲突, button tap
+                //   照常生效. HitTestBehavior.translucent 让 child tap
+                //   透下去.
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragStart: _onBottomBarSwipeStart,
+                  onHorizontalDragUpdate: _onBottomBarSwipeUpdate,
+                  onHorizontalDragEnd: _onBottomBarSwipeEnd,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                     // 顶部: 进度条 (5px 矩形, LunaTV Web 风格)
                     _buildLunaProgressBar(),
                     // 底部: 左中右按钮行
@@ -5265,7 +5371,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ],
                       ),
                     ),
-                  ],
+                    ],
+                  ),
+                ),
                 ),
               ),
             ),
