@@ -4690,7 +4690,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 左: 快退6s 按钮(文字 -6) (v1.0.49: 60 → 6, 60秒跳过太多)
+          // 左: 快退30s 按钮(文字 -30) (v2.5.76: 6 → 30, 6s 跳太少用户感知不到)
           Positioned(
             left: sideOffset,
             top: 0,
@@ -4698,12 +4698,12 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Center(
               child: _buildSeekCircleButton(
                 size: size,
-                onTap: () => _seekBySeconds(-6, '快退6s'),
-                child: const _SeekLabel(label: '-6'),
+                onTap: () => _seekBySeconds(-30, '快退30s'),
+                child: const _SeekLabel(label: '-30'),
               ),
             ),
           ),
-          // 右: 快进6s 按钮(文字 +6) (v1.0.49: 60 → 6, 60秒跳过太多)
+          // 右: 快进30s 按钮(文字 +30) (v2.5.76: 6 → 30)
           Positioned(
             right: sideOffset,
             top: 0,
@@ -4711,8 +4711,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Center(
               child: _buildSeekCircleButton(
                 size: size,
-                onTap: () => _seekBySeconds(6, '快进6s'),
-                child: const _SeekLabel(label: '+6'),
+                onTap: () => _seekBySeconds(30, '快进30s'),
+                child: const _SeekLabel(label: '+30'),
               ),
             ),
           ),
@@ -4820,7 +4820,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   /// 圆弧箭头图标 (已废弃, 快进/快退按钮改用 _SeekLabel 文字)
   // ignore: unused_element
   Widget _buildSeekIcon({required bool forward}) {
-    return _SeekLabel(label: forward ? '+6' : '-6');
+    return _SeekLabel(label: forward ? '+30' : '-30');
   }
 
   /// 圆形小按钮 (40x40, LunaTV Web 控制按钮)
