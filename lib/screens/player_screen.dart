@@ -2101,10 +2101,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  /// 启动进度上报定时器(每 10 秒)
+  /// 启动进度上报定时器(每 60 秒)
+  /// v2.5.87: 之前 10s 一次太频繁, 看半部电影就 300+ 次网络写入.
+  ///   改为 60s, 一小时最多 60 次. 退出/暂停/切集时仍会 force save,
+  ///   不影响进度准确性.
   void _startProgressTimer() {
     _progressTimer?.cancel();
-    _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    _progressTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       _saveCurrentProgress();
     });
   }
