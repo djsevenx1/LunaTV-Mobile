@@ -1938,19 +1938,21 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_isPlaying) _scheduleHideControls();
   }
 
-  // 中间区域水平拖动 = 快进快退
-  // v2.5.20: 加 100ms 节流. 之前每帧 DragUpdateDetails (60-120 次/秒) 都直接
+  // v2.6.2: 主流方案 — 整屏滑动 = 60s, 半屏 = 30s. 跟 YouTube/爱奇艺/B站
+  //   体验一致 (他们也是 60~90s/整屏). 之前 v2.6.1 改成 300s/屏太激进, 滑
+  //   一点点就跳好几分钟, 不符合"小步快调"的用户预期. 现在 60s/屏, 用户
+  //   横滑小段距离调几秒, 整屏滑到底调一分钟, 体感自然.
+  // v2.5.20: 100ms 节流 — 之前每帧 DragUpdateDetails (60-120 次/秒) 都直接
   //   _player!.seek(), ExoPlayer message queue 堆积多个 seek, 完成顺序不固定,
   //   导致 position stream 发射的 position 乱跳 (进度条来回乱跳), ExoPlayer
-  //   进入内部 state 不一致 (再点暂停/退出 audio 还在播).
-  //   现在 100ms 最多调一次 seek, drag 过程中只更新 _currentPosition 跟
-  //   _seekHintText (UI 反馈), drag 结束时 _onCenterSwipeEnd 调一次最终 seek.
+  //   进入内部 state 不一致. 现在 100ms 最多调一次 seek, drag 中只更新
+  //   _currentPosition 跟 _seekHintText (UI 反馈), drag 结束时 _onCenterSwipeEnd
+  //   调一次最终 seek.
   void _onCenterSwipeUpdate(DragUpdateDetails details) {
     if (_isDisposing) return;
     final screenWidth = MediaQuery.of(context).size.width;
-    // v2.6.0: 整屏滑动 = 300s, 半屏 = 150s
-    //   之前 60s/整屏太慢, 中间手势区只有 1/2 屏宽, 实际滑满才 30s, 体感"才动几秒"
-    final deltaMs = (details.delta.dx / screenWidth * 300000).round();
+    // v2.6.2: 整屏滑动 = 60s, 半屏 = 30s (主流 YouTube/爱奇艺 体验)
+    final deltaMs = (details.delta.dx / screenWidth * 60000).round();
     final newMs = (_currentPosition.inMilliseconds + deltaMs)
         .clamp(0, _currentDuration.inMilliseconds)
         .toInt();
@@ -1972,6 +1974,48 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_isDisposing) return;
       unawaited(_player!.seek(Duration(milliseconds: newMs)));
     });
+  }
+
+  // ==================== v2.6.2: 双击快进/快退/播放 全屏监听 ====================
+  // 主流方案 (YouTube/爱奇艺/B站) 双击行为:
+  //   - 双击左半屏 → 快退 10s
+  //   - 双击右半屏 → 快进 10s
+  //   - 双击中央 1/3 → 播放/暂停
+  // 用 globalPosition (屏幕绝对坐标) 判断落点, 不依赖 onDoubleTapDown
+  //   localPosition (相对 GestureDetector 自身, 这里就是相对全屏, 因为
+  //   Positioned.fill 撑满整个播放器). 中间 1/3 区域: x in [W/3, 2W/3].
+  // 双击第二下 (onDoubleTap) 才真正执行 seek/playPause, 第一下
+  //   (onDoubleTapDown) 只记录落点, 防止误触 (用户可能只是快单击).
+  // _pendingDoubleTapSide: -1=左, 0=中, 1=右, null=无 pending.
+  int? _pendingDoubleTapSide;
+
+  void _onGlobalDoubleTapDown(TapDownDetails details) {
+    if (_isDisposing) return;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final x = details.localPosition.dx;
+    int side;
+    if (x < screenWidth / 3) {
+      side = -1; // 左半 (快退)
+    } else if (x > screenWidth * 2 / 3) {
+      side = 1; // 右半 (快进)
+    } else {
+      side = 0; // 中间 (播放/暂停)
+    }
+    _pendingDoubleTapSide = side;
+  }
+
+  void _onGlobalDoubleTap() {
+    if (_isDisposing) return;
+    final side = _pendingDoubleTapSide;
+    _pendingDoubleTapSide = null;
+    if (side == null) return;
+    if (side == 0) {
+      // 中间双击 = 播放/暂停
+      _togglePlayPause();
+    } else {
+      // 左右双击 = ±10s (跟主流方案一致, 替代原 ±30s 按钮)
+      _seekBySeconds(side * 10, side > 0 ? '快进10s' : '快退10s');
+    }
   }
 
   // ==================== 进度条拖动 ====================
@@ -4803,53 +4847,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  /// 中央控制区: 左右快退/快进6s 按钮 + 中间播放/暂停
-  /// 跟控件一起显隐, 点击后短暂显示提示文字
+  /// 中央控制区: v2.6.2 主流方案 — 只剩中间播放/暂停按钮, ±30s 按钮
+  ///   全部移除 (左右双击屏幕触发 ±10s, 体感更直接, 跟 YouTube/爱奇艺
+  ///   体验一致). 控件一起显隐, 双击 / 拖动 seek 提示文字还在.
   Widget _buildSideSeekButtons() {
     if (!_isControlsVisible) return const SizedBox.shrink();
-    // 按屏幕宽度算按钮尺寸和偏移, 避免竖屏 (360~400px 宽) 三个按钮挤一起重叠
-    // 横屏全屏 (宽 > 600) 用 64/140; 竖屏 (含竖屏全屏 / 竖屏非全屏) 都用 44/72
+    // 按屏幕宽度算按钮尺寸: 横屏全屏 (宽 > 600) 用 64, 竖屏用 44.
+    //   不再用 sideOffset (左右按钮已删, 不需要算偏移)
     final screenWidth = MediaQuery.of(context).size.width;
-    final double size;
-    final double sideOffset;
-    if (screenWidth > 600) {
-      size = 64.0;
-      sideOffset = 140.0;
-    } else {
-      // 竖屏 (无论全屏 / 非全屏): 统一用 44/72, 360px 宽下左-中-右各留 42px 间隙
-      size = 44.0;
-      sideOffset = 72.0;
-    }
+    final double size = screenWidth > 600 ? 64.0 : 44.0;
     return Positioned.fill(
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // 左: 快退30s 按钮(文字 -30) (v2.5.76: 6 → 30, 6s 跳太少用户感知不到)
-          Positioned(
-            left: sideOffset,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _buildSeekCircleButton(
-                size: size,
-                onTap: () => _seekBySeconds(-30, '快退30s'),
-                child: const _SeekLabel(label: '-30'),
-              ),
-            ),
-          ),
-          // 右: 快进30s 按钮(文字 +30) (v2.5.76: 6 → 30)
-          Positioned(
-            right: sideOffset,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _buildSeekCircleButton(
-                size: size,
-                onTap: () => _seekBySeconds(30, '快进30s'),
-                child: const _SeekLabel(label: '+30'),
-              ),
-            ),
-          ),
           // 中间: 播放/暂停按钮 (v1.0.49: 颜色跟底部 _iconBtn 播控按钮一致用 Colors.white)
           _buildSeekCircleButton(
             size: size,
@@ -4860,7 +4870,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               size: 32,
             ),
           ),
-          // 快进/快退提示文字 (点击后短暂显示)
+          // 快进/快退提示文字 (双击 / 拖动 后短暂显示, 让用户知道生效了)
           if (_seekHintText != null)
             Positioned(
               bottom: 120,
@@ -5648,12 +5658,17 @@ class _PlayerScreenState extends State<PlayerScreen>
             onTap: _toggleControls,
           ),
         ),
-        // 亮度/音量/快进 快退 手势层 (v1.0.40 修复: 主播放器之前根本没接)
-        // 左 1/4 上下 = 亮度, 右 1/4 上下 = 音量, 中间 1/2 左右 = 快进快退
+        // 亮度/音量/快进快退 手势层 (v2.6.2 主流方案: 左右半屏上下滑 = 亮度/音量,
+        //   全屏左右滑 = 快进/快退, 双击左半屏 = 快退10s, 双击右半屏 = 快进10s,
+        //   跟 YouTube / 爱奇艺 / Bilibili 体验一致.)
+        // v2.6.1 之前: 左 1/4 上下 = 亮度, 右 1/4 上下 = 音量, 中间 1/2 左右 = 快进快退.
+        //   问题: 1) 快进快退只能拖中间半屏, 全屏拖快进幅度小; 2) 屏幕分割明显
+        //   用户能感觉到; 3) 中间放 30s 按钮, 跟左右滑动抢手势焦点.
+        // v2.6.2: 改为两半屏布局, 快进快退扩到全屏, ±10s 改用双击触发.
         Positioned.fill(
           child: Row(
             children: [
-              // 左: 亮度
+              // 左半屏: 上下 = 亮度, 左右 = 快进/快退
               Expanded(
                 flex: 1,
                 child: GestureDetector(
@@ -5661,19 +5676,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                   onVerticalDragStart: _onBrightnessSwipeStart,
                   onVerticalDragUpdate: _onBrightnessSwipeUpdate,
                   onVerticalDragEnd: _onBrightnessSwipeEnd,
-                ),
-              ),
-              // 中: 快进快退
-              Expanded(
-                flex: 2,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
                   onHorizontalDragStart: _onCenterSwipeStart,
                   onHorizontalDragUpdate: _onCenterSwipeUpdate,
                   onHorizontalDragEnd: _onCenterSwipeEnd,
                 ),
               ),
-              // 右: 音量
+              // 右半屏: 上下 = 音量, 左右 = 快进/快退
               Expanded(
                 flex: 1,
                 child: GestureDetector(
@@ -5681,9 +5689,22 @@ class _PlayerScreenState extends State<PlayerScreen>
                   onVerticalDragStart: _onVolumeSwipeStart,
                   onVerticalDragUpdate: _onVolumeSwipeUpdate,
                   onVerticalDragEnd: _onVolumeSwipeEnd,
+                  onHorizontalDragStart: _onCenterSwipeStart,
+                  onHorizontalDragUpdate: _onCenterSwipeUpdate,
+                  onHorizontalDragEnd: _onCenterSwipeEnd,
                 ),
               ),
             ],
+          ),
+        ),
+        // v2.6.2: 双击快进/快退/播放 全屏监听 (放最上层, 用 globalPosition
+        //   区分左半/中间/右半. 跟下方左右 GestureDetector 不冲突 — onDoubleTap
+        //   在这里优先命中, 不影响 onVerticalDrag/onHorizontalDrag)
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onDoubleTapDown: _onGlobalDoubleTapDown,
+            onDoubleTap: _onGlobalDoubleTap,
           ),
         ),
         // 亮度浮窗指示器 (左侧, 竖屏横屏都显示)
