@@ -225,6 +225,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   bool _isDisposed = false;
   Completer<void>? _creatingCompleter;
   Completer<void>? _initializingCompleter;
+  // v2.5.91: 播放期间定时轮询 position (对齐官方 video_player 2.10.1 行为).
+  //   原生插件只在状态变化 (buffering / isPlaying / completed) 时发事件,
+  //   播放期间不发 position 更新. 官方包靠这个 500ms 定时器调
+  //   getPosition() 同步 value.position, 自研版本之前漏了 → 进度条不动.
+  Timer? _positionTimer;
 
   /// The id of a video player.
   int? get playerId => _playerId;
@@ -274,6 +279,23 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       return;
     }
     await _videoPlayerPlatform.play(_playerId!);
+    // v2.5.91: 启动 500ms 定时器轮询 position (对齐官方包行为).
+    //   原生 ExoPlayer 只在状态变化时发事件, 播放期间不主动推 position.
+    //   没有 this → value.position 永远不更新 → 进度条不动.
+    if (_positionTimer == null) {
+      _positionTimer = Timer.periodic(
+        const Duration(milliseconds: 500),
+        (_) async {
+          if (_isDisposed || _playerId == null) return;
+          final Duration newPosition =
+              await _videoPlayerPlatform.getPosition(_playerId!);
+          if (_isDisposed) return;
+          if (newPosition != value.position) {
+            value = value.copyWith(position: newPosition);
+          }
+        },
+      );
+    }
   }
 
   /// Pauses the video.
@@ -281,6 +303,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     if (_isDisposed || _playerId == null) {
       return;
     }
+    // v2.5.91: 暂停时停掉 position 轮询 (没必要继续 poll)
+    _positionTimer?.cancel();
+    _positionTimer = null;
     await _videoPlayerPlatform.pause(_playerId!);
   }
 
@@ -327,6 +352,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       return;
     }
     _isDisposed = true;
+    // v2.5.91: 清理 position 轮询定时器
+    _positionTimer?.cancel();
+    _positionTimer = null;
     await _eventSubscription?.cancel();
     if (_playerId != null) {
       await _videoPlayerPlatform.dispose(_playerId!);
@@ -357,6 +385,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         _initializingCompleter?.complete();
         break;
       case platform_interface.VideoEventType.completed:
+        // v2.5.91: 播放结束时停掉 position 轮询
+        _positionTimer?.cancel();
+        _positionTimer = null;
         value = value.copyWith(
           isCompleted: true,
           position: value.duration,
@@ -373,7 +404,28 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         value = value.copyWith(isBuffering: false);
         break;
       case platform_interface.VideoEventType.isPlayingStateUpdate:
-        value = value.copyWith(isPlaying: event.isPlaying ?? false);
+        final playing = event.isPlaying ?? false;
+        // v2.5.91: 原生端通知播放/暂停状态变化时同步 position 轮询定时器.
+        //   场景: 缓冲结束自动恢复播放 (native→Dart) / 耳机按键暂停.
+        //   play()/pause() 已各自启停定时器, 这里处理 native 主动通知的情况.
+        if (playing && _positionTimer == null) {
+          _positionTimer = Timer.periodic(
+            const Duration(milliseconds: 500),
+            (_) async {
+              if (_isDisposed || _playerId == null) return;
+              final Duration newPosition =
+                  await _videoPlayerPlatform.getPosition(_playerId!);
+              if (_isDisposed) return;
+              if (newPosition != value.position) {
+                value = value.copyWith(position: newPosition);
+              }
+            },
+          );
+        } else if (!playing) {
+          _positionTimer?.cancel();
+          _positionTimer = null;
+        }
+        value = value.copyWith(isPlaying: playing);
         break;
       case platform_interface.VideoEventType.unknown:
         break;
