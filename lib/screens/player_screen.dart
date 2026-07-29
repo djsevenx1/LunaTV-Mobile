@@ -546,11 +546,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     _episodesPageController.dispose();
     _pageControllerNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
-    // 恢复系统UI,方向交由系统控制
+    // 恢复系统UI, 解锁所有方向 (让系统自由旋转)
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
+    // ★ 解锁方向: 退出播放器后不再强制竖屏, 让系统传感器决定
+    unawaited(SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]));
     // v1.0.54: 还原 volume_controller 的 showSystemUI 标志
     // initState 设了 false 屏蔽系统音量弹窗, dispose 要还原成 true
     // 跟 mobile_player_controls.dart:160 同模板, 否则其他场景 (detail 页面
@@ -1167,7 +1174,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  /// 退出全屏：恢复系统UI + 强制转回竖屏
+  /// 退出全屏：恢复系统UI + 解锁方向 (让系统自由旋转)
   Future<void> _onExitFullscreen() async {
     setState(() => _isFullscreen = false);
     // 恢复系统UI
@@ -1175,9 +1182,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
-    // ★ 强制转回竖屏 (不管设备物理方向)
+    // ★ 解锁所有方向, 让系统传感器决定 (不再强制竖屏)
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
     ]);
   }
 
