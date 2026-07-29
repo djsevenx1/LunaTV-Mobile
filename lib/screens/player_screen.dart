@@ -277,8 +277,26 @@ class _PlayerScreenState extends State<PlayerScreen>
   double? _scrubbingValue;
   // v2.5.20: widget 正在销毁中, 阻止所有 stream listener 的副作用 (切集 / autoPlay / setState)
   bool _isDisposing = false;
-  // v2.5.20: 中间区域水平拖动的 seek 节流 (最多 100ms 调一次, 防止 ExoPlayer message queue 堆积)
+  // v2.5.20: 中间区域水平拖动的 seek 节流
+  //   v2.6.2 重写: 之前用 cancel+restart 100ms timer, 长滑动时每帧
+  //   (60-120 次/秒) 都 cancel 同一个 timer, timer 永远不 fire,
+  //   ExoPlayer 一帧都不 seek, 长滑动看起来"不动". 改用"first-fire
+  //   + skip"模式: 第一次立刻 fire, 之后 30ms 内 skip (不 restart),
+  //   30ms 后才允许再 fire. 保证 30ms 至少一次 seek, 用户能实时
+  //   看到进度跟随手指. 短滑动 (30ms 内) 一次 seek 到位, 跟之前一样.
   Timer? _centerSwipeSeekThrottle;
+  bool _centerSwipeThrottleBusy = false;
+  // v2.6.2: 滑动起始 position + 累计 delta, 用绝对位置算 newMs,
+  //   不依赖 _currentPosition (position stream 会用旧值覆盖).
+  //   长滑动时 position stream 跟用户的预期对不上, 用绝对定位就
+  //   不会有"松手后跳回去"的问题.
+  Duration? _swipeStartPosition;
+  double _swipeCumulativeDx = 0;
+  // v2.6.2: 滑动中锁 — position stream 和 100ms 轮询在用户拖动期间
+  //   不能覆盖 _currentPosition, 否则进度条会"来回调" (stream 用
+  //   实际播放位置覆盖了用户拖到的位置, 下一次 update 又从实际位置
+  //   开始算, 累计漂移). end 时解锁.
+  bool _isSwiping = false;
   // 底部栏水平拖动 (拖进度条) — 起始 progress value + 底部栏宽度, 用来 delta → value 换算
   //   v2.5.86 新增. 中间区域水平拖动是按"整屏 60s/半屏"算, 底部栏只占屏幕
   //   60%~85% 宽, 用底部栏宽度算才准. 拖动过程中更新 _scrubbingValue
@@ -450,6 +468,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     _positionSub = _player!.positionStream.listen((pos) {
       if (_isDisposing) return;
       if (!mounted) return;
+      // v2.6.2: 滑动中不更新 _currentPosition, 否则 position stream
+      //   用"实际播放位置"(旧值)覆盖了用户拖到的位置, 进度条"来回调"
+      if (_isSwiping) return;
       if (_scrubbingValue == null) {
         // v2.5.90: seek guard 已移除, position stream 直接更新 _currentPosition
         _currentPosition = pos;
@@ -475,6 +496,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     // ★ v2.5.65: 高精度进度条轮询 (100ms 一次, 让白点跟实际位置同步)
     _positionPollTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (_isDisposing || !mounted || _scrubbingValue != null) return;
+      // v2.6.2: 滑动中不更新, 同 position stream 处理
+      if (_isSwiping) return;
       // v2.5.90: 用 _isPlaying 代替 c.value.isPlaying,
       //   后者在某些情况下跟实际播放状态不一致
       if (!_isPlaying) return;
@@ -1822,12 +1845,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     _toggleControls();
   }
 
-  // v2.5.20: 水平拖动开始 — 取消未触发的 seek 节流, 防止 stale timer 在 drag 中
-  //   突然 fire 把当前位置 seek 走
+  // v2.5.20: 水平拖动开始 — 记录起始 position + 累计 delta, 取消未触发的 seek
+  //   节流, 防止 stale timer 在 drag 中突然 fire 把当前位置 seek 走.
+  //   v2.6.2: 用 _swipeStartPosition + _swipeCumulativeDx 做绝对定位, 不依赖
+  //   _currentPosition (position stream 会用旧值覆盖, 长滑动会"来回调").
+  //   加 _isSwiping 锁, position stream 和 100ms 轮询期间不能覆盖 _currentPosition.
   void _onCenterSwipeStart(DragStartDetails details) {
     if (_isDisposing) return;
     _centerSwipeSeekThrottle?.cancel();
     _centerSwipeSeekThrottle = null;
+    _centerSwipeThrottleBusy = false;
+    _swipeStartPosition = _currentPosition;
+    _swipeCumulativeDx = 0;
+    _isSwiping = true;
   }
 
   // v2.5.90: _setSeekGuard / _clearSeekGuard 已移除
@@ -1835,13 +1865,20 @@ class _PlayerScreenState extends State<PlayerScreen>
   //   导致进度条不动. seek 后立即设 _currentPosition 为目标值即可.
 
   // v2.5.20: 水平拖动结束 — flush pending seek 节流, 确保最后 drag 位置 seek 到
-  //   player 上 (drag 中节流可能让最后一次位置还没 seek, 玩家还在旧位置)
+  //   player 上. v2.6.2: 不再依赖节流 timer (可能还没 fire), 直接用
+  //   _currentPosition 调一次 seek. 同步清掉 _swipeStartPosition 和
+  //   _isSwiping 锁 (让 position stream 接管).
   void _onCenterSwipeEnd(DragEndDetails details) {
     if (_isDisposing) return;
     _centerSwipeSeekThrottle?.cancel();
     _centerSwipeSeekThrottle = null;
+    _centerSwipeThrottleBusy = false;
+    final finalPos = _currentPosition;
+    _swipeStartPosition = null;
+    _swipeCumulativeDx = 0;
+    _isSwiping = false;
     // v2.5.90: seek guard 已移除
-    unawaited(_player!.seek(_currentPosition));
+    unawaited(_player!.seek(finalPos));
   }
 
   // v2.5.86: 底部栏水平拖动开始 — 记录起始 value (当前进度) + 底部栏宽度,
@@ -1939,24 +1976,34 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   // v2.6.2: 主流方案 — 整屏滑动 = 60s, 半屏 = 30s. 跟 YouTube/爱奇艺/B站
-  //   体验一致 (他们也是 60~90s/整屏). 之前 v2.6.1 改成 300s/屏太激进, 滑
-  //   一点点就跳好几分钟, 不符合"小步快调"的用户预期. 现在 60s/屏, 用户
-  //   横滑小段距离调几秒, 整屏滑到底调一分钟, 体感自然.
-  // v2.5.20: 100ms 节流 — 之前每帧 DragUpdateDetails (60-120 次/秒) 都直接
-  //   _player!.seek(), ExoPlayer message queue 堆积多个 seek, 完成顺序不固定,
-  //   导致 position stream 发射的 position 乱跳 (进度条来回乱跳), ExoPlayer
-  //   进入内部 state 不一致. 现在 100ms 最多调一次 seek, drag 中只更新
-  //   _currentPosition 跟 _seekHintText (UI 反馈), drag 结束时 _onCenterSwipeEnd
-  //   调一次最终 seek.
+  //   体验一致. 之前 v2.6.1 改成 300s/屏太激进, 现在 60s/屏, 横滑小段
+  //   距离调几秒, 整屏滑到底调一分钟, 体感自然.
+  //
+  // 关键修复 (v2.6.2): 节流策略从 cancel+restart 改成 first-fire+skip.
+  //   - 旧: 100ms timer, 每次 update 都 cancel + restart, 长滑动时 timer
+  //     永远不 fire, ExoPlayer 一帧都不 seek, 用户看到"长滑动不动".
+  //   - 新: 30ms "first-fire+skip" — 第一次 fire 立即 seek (短滑动
+  //     一次到位), 之后 30ms 内 skip (不 restart), 30ms 后才允许再
+  //     fire. 保证 30ms 至少一次 seek, 用户能实时看到进度跟随手指.
+  //
+  // 绝对定位 (v2.6.2): 用 _swipeStartPosition + 累计 dx 算 newMs,
+  //   不再 _currentPosition + deltaMs. 因为 position stream 会用
+  //   "实际播放位置" (旧值) 覆盖 _currentPosition, 导致长滑动时
+  //   newMs 累计漂移, 松手后位置"来回调".
   void _onCenterSwipeUpdate(DragUpdateDetails details) {
     if (_isDisposing) return;
+    final startPos = _swipeStartPosition;
+    if (startPos == null) return; // 不是 start 后第一次 update, 防御
     final screenWidth = MediaQuery.of(context).size.width;
-    // v2.6.2: 整屏滑动 = 60s, 半屏 = 30s (主流 YouTube/爱奇艺 体验)
-    final deltaMs = (details.delta.dx / screenWidth * 60000).round();
-    final newMs = (_currentPosition.inMilliseconds + deltaMs)
+    if (screenWidth <= 0) return;
+    // 整屏滑动 = 60s, 半屏 = 30s (跟 YouTube/爱奇艺 一致)
+    _swipeCumulativeDx += details.delta.dx;
+    final deltaMs = (_swipeCumulativeDx / screenWidth * 60000).round();
+    final newMs = (startPos.inMilliseconds + deltaMs)
         .clamp(0, _currentDuration.inMilliseconds)
         .toInt();
     final isForward = deltaMs >= 0;
+    // 1) UI 立即更新 — 进度条 / 时间标签 / 提示文字跟手 (无延迟)
     setState(() {
       _currentPosition = Duration(milliseconds: newMs);
       _seekHintText =
@@ -1968,11 +2015,13 @@ class _PlayerScreenState extends State<PlayerScreen>
         setState(() => _seekHintText = null);
       }
     });
-    // 100ms 节流: 同一个 timer 多次 cancel + restart, 只在最后一次 100ms 后调 seek
-    _centerSwipeSeekThrottle?.cancel();
-    _centerSwipeSeekThrottle = Timer(const Duration(milliseconds: 100), () {
-      if (_isDisposing) return;
-      unawaited(_player!.seek(Duration(milliseconds: newMs)));
+    // 2) 节流 seek — first-fire+skip 30ms. 第一次 fire, 之后 30ms 内
+    //    skip, 30ms 后才允许再 fire.
+    if (_centerSwipeThrottleBusy) return;
+    _centerSwipeThrottleBusy = true;
+    unawaited(_player!.seek(Duration(milliseconds: newMs)));
+    _centerSwipeSeekThrottle = Timer(const Duration(milliseconds: 30), () {
+      _centerSwipeThrottleBusy = false;
     });
   }
 

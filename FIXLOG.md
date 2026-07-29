@@ -1,39 +1,46 @@
 # LunaTV-Mobile 修复日记
 
-## v2.6.2 (2026-07-29) — 滑动快进主流方案: 左右半屏 + 全屏左右滑 + 双击 ±10s
+## v2.6.3 (2026-07-29) — 长滑动"不动" + "来回调" 根因修复
 
 ### 现象
 
-1. 整屏滑动只快进 3 秒, 体感"没动几秒"
-2. 屏幕分三段 (1:2:1) 用户能感觉到"中间区"
-3. ±30s 按钮挡中间, 跟左右滑动抢手势焦点
+v2.6.2 发了之后用户反馈:
+- 短滑动 (30ms 内完成) → 正常 seek 一次到位
+- **长滑动 (1 秒以上)** → ExoPlayer 一帧都不 seek, 看起来"不动"
+- 松手后位置**来回跳** (1 秒内反复), 跟用户预期对不上
 
-### 排查
+### 根因
 
-主流播放器 (YouTube/爱奇艺/B站) 都用「**两半屏 + 全屏左右滑 + 双击 ±10s**」方案:
-- 左右半屏: 上下滑 = 亮度/音量
-- 全屏: 左右滑 = 快进/快退, 灵敏度 60s/整屏 (整屏滑到底调 1 分钟)
-- 双击: 左半 = 快退 10s, 右半 = 快进 10s, 中间 1/3 = 播放/暂停
+v2.6.2 用了 100ms `cancel+restart` 节流, 两个 bug 叠加:
 
-v2.6.1 改的 300s/整屏 + 中间 1/2 屏快进 + ±30s 按钮全错:
-- 300s/屏 → 滑一点点跳几分钟, 太激进
-- 中间 1/2 屏快进 → 实际有效滑动区域只有半屏, 全屏拖也只调半屏幅度
-- ±30s 按钮 → 跟左右滑动抢焦点, 用户拖到中间经常先点中按钮
+**根因 A — 长滑动 timer 永远不 fire**:
+```dart
+_centerSwipeSeekThrottle?.cancel();
+_centerSwipeSeekThrottle = Timer(100ms, () => seek());
+```
+拖动 60fps, 每帧都 cancel 同一个 timer, timer 永远不 fire,
+ExoPlayer 一帧都没 seek, 进度条卡住不动.
 
-### 修复
+**根因 B — 绝对位置错, 松手后"来回调"**:
+新 newMs = `_currentPosition + deltaMs`. 但拖动期间 position stream
+和 100ms 轮询都会用"实际播放位置"(旧值)覆盖 _currentPosition. 下次
+update 算 newMs 时基于被覆盖的旧值, 累计漂移, 松手 seek 到错误位置.
 
-1. **手势区域**: 三等分 (1:2:1) → 两等分 (1:1), 左右半屏独立处理
-2. **左右滑动**: 中间半屏 → 全屏 (两个 GestureDetector 都接 onHorizontalDrag*)
-3. **灵敏度**: 300s/整屏 → 60s/整屏 (跟 YouTube/爱奇艺 一致)
-4. **±10s**: 改用双击触发 (新加全屏 Positioned.fill + onDoubleTapDown),
-   通过 globalPosition 落点 x 坐标分左/中/右
-5. **±30s 按钮**: 完全删除, 只保留中间播放/暂停
+### 修复 (v2.6.3)
+
+1. **节流改 first-fire+skip 30ms**: 第一次立刻 fire, 之后 30ms 内
+   skip, 30ms 后才允许再 fire. 取消 cancel+restart, 30ms 至少一次
+   seek, 短滑动一次到位, 长滑动 30ms 节流跟手.
+2. **绝对定位**: 记录 `_swipeStartPosition` + 累计 `_swipeCumulativeDx`,
+   newMs = start + 累计 dx, 不再依赖 _currentPosition.
+3. **滑动中锁 `_isSwiping`**: position stream 和 100ms 轮询在拖动期间
+   不能覆盖 _currentPosition, 松手后才解锁.
 
 ### 影响
 
-- 跟主流播放器体验一致, 用户不用学
-- 全屏任意位置左右滑都能调进度, 滑动幅度更合理
-- 双击 ±10s 替代 ±30s 按钮, 视觉更干净, 不用找按钮
+- 长滑动能跟手, 30ms 节流 = 33fps 跟手率, 体感丝滑
+- 短滑动一次 seek 到位, 跟之前一样
+- 松手后位置准确, 不会再"来回调"
 
 > 增量修复记录,每个版本按「现象 → 排查 → 根因 → 修复 → 影响」展开。CI 完成后把对应的 changelog (`https://github.com/djsevenx1/LunaTV-Mobile/releases/tag/<ver>`) 作为发布说明同步到 GitHub Release。
 >
