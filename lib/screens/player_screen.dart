@@ -2123,15 +2123,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  /// 启动进度上报定时器(每 60 秒)
-  /// v2.5.87: 之前 10s 一次太频繁, 看半部电影就 300+ 次网络写入.
-  ///   改为 60s, 一小时最多 60 次. 退出/暂停/切集时仍会 force save,
-  ///   不影响进度准确性.
+  /// v2.5.88: 定时器已删除. 所有退出路径都保存进度:
+  ///   返回键/返回箭头/切后台/切集/DLNA投屏/dispose兜底
+  ///   不再需要定时器轮询写入, 减少网络请求.
   void _startProgressTimer() {
     _progressTimer?.cancel();
-    _progressTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      _saveCurrentProgress();
-    });
+    // 不再启动定时写入, 退出时统一保存
   }
 
   /// 启动后云记忆里查到的 episode, 准备在 _playEpisode 时 seek 过去
@@ -4736,9 +4733,12 @@ class _PlayerScreenState extends State<PlayerScreen>
               _iconBtn(
                 icon: Icons.arrow_back,
                 onTap: () {
-                  // 重点:从播放视图点返回箭头时也要先 stop,否则 player
-                  // 还在后台继续播,detail 视图上还能听到声音
+                  // v2.5.88: 返回箭头退出也要先保存进度, 跟返回键路径一致
+                  //   之前直接 stop 没保存, 退出后进度丢失
                   () async {
+                    if (_currentPosition > Duration.zero) {
+                      await _saveCurrentProgress(force: true);
+                    }
                     try {
                       await _player!.stop();
                     } catch (_) {}
@@ -5168,6 +5168,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         _isCasting = true;
         _currentCastDevice = device as DLNADevice;
       });
+      // v2.5.88: 投屏前先保存本地播放进度, 跟退出路径一致
+      if (_currentPosition > Duration.zero) {
+        await _saveCurrentProgress(force: true);
+      }
       // 停本地 player (TV 已经在播, 避免双声道 / 浪费流量)
       try {
         await _player!.stop();
