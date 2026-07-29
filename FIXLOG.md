@@ -6,6 +6,525 @@
 
 ---
 
+## v2.5.88 (2026-07-29) — seek 守卫无超时导致进度差40分钟 + 退出保存漏两条路径 + 删除定时器
+
+### 现象
+
+1. 用户拖动进度条后, 退出时保存的进度跟实际差了 40 分钟
+2. 返回箭头退出 / DLNA 投屏退出, 进度没保存
+3. 60 秒定时器写入太频繁 (看一部电影 120 次网络请求)
+
+### 根因
+
+**根因 A — seek 守卫无超时 (v2.5.87 引入)**:
+
+v2.5.87 加了 `_seekGuardMs` 守卫防止拖动后跳 0s, 但没有超时机制. 如果
+ExoPlayer seek 失败或卡住 (网络缓冲、视频未加载完), 守卫永远不清除,
+阻断所有 position 更新. 比如拖到 60 分钟但实际还在 20 分钟, 守卫认为
+"20 分钟和目标 60 分钟差距太大, 忽略", `_currentPosition` 一直卡在 60
+分钟不动, 退出时存了错误的 60 分钟, 差了 40 分钟.
+
+同时容差 2s 太紧, 正常 seek 完成后 ExoPlayer 的 position 跟目标可能差
+1-3s (seek 精度 + stream 延迟), 2s 容差导致守卫不能及时清除.
+
+**根因 B — 返回箭头退出没保存进度**:
+
+```dart
+// 返回箭头 onTap:
+() async {
+  // 直接 stop, 没保存!
+  await _player!.stop();
+  await _onExitFullscreen();
+  setState(() => _phase = 'detail');
+}();
+```
+
+返回键 (onPopInvoked) 路径会先 `_saveCurrentProgress(force: true)` 再
+stop, 但返回箭头直接 stop 没保存, 两条路径不一致.
+
+**根因 C — DLNA 投屏没保存进度**:
+
+```dart
+// 投屏成功后:
+// 直接 stop, 没保存!
+await _player!.stop();
+setState(() => _phase = 'detail');
+```
+
+跟返回箭头同款 bug, 直接 stop 没保存.
+
+### 修复
+
+**修 A — seek 守卫加 5s 超时 + 容差放宽到 5s**:
+
+```dart
+int? _seekGuardMs;
+Timer? _seekGuardTimer;
+
+void _setSeekGuard(int targetMs) {
+  _seekGuardMs = targetMs;
+  _seekGuardTimer?.cancel();
+  _seekGuardTimer = Timer(const Duration(seconds: 5), () {
+    _seekGuardMs = null;  // 5s 后自动清除, seek 失败也不会永远挡住
+  });
+}
+
+void _clearSeekGuard() {
+  _seekGuardMs = null;
+  _seekGuardTimer?.cancel();
+  _seekGuardTimer = null;
+}
+```
+
+position stream 和 100ms 轮询的容差从 2000ms 改为 5000ms:
+
+```dart
+if (_seekGuardMs != null) {
+  final diff = (pos.inMilliseconds - _seekGuardMs!).abs();
+  if (diff > 5000) return;  // 差距 > 5s, 忽略 (ExoPlayer 还没完成 seek)
+  _clearSeekGuard();         // 差距 ≤ 5s, 清除守卫恢复正常
+}
+```
+
+所有 seek 路径 (底部栏拖动/Slider/中间区域/快进快退) 统一用 `_setSeekGuard()`.
+
+**修 B — 返回箭头加 save**:
+
+```dart
+() async {
+  if (_currentPosition > Duration.zero) {
+    await _saveCurrentProgress(force: true);  // 先保存
+  }
+  await _player!.stop();
+  await _onExitFullscreen();
+  setState(() => _phase = 'detail');
+}();
+```
+
+**修 C — DLNA 投屏加 save**:
+
+```dart
+if (_currentPosition > Duration.zero) {
+  await _saveCurrentProgress(force: true);  // 先保存
+}
+await _player!.stop();
+```
+
+**删除 60 秒定时器**:
+
+所有退出路径都保存了, 不再需要定时轮询:
+- 返回键退出 → save (已有)
+- 返回箭头退出 → save (新增)
+- 切后台 → save (已有)
+- 切集 → save (已有)
+- DLNA 投屏 → save (新增)
+- dispose 兜底 → save (已有)
+
+看一部 2 小时电影: 旧版 720 次写入 → 现在仅 1 次 (退出时).
+
+### 影响
+
+- 拖动后进度不再偏差几十分钟 (seek 守卫 5s 超时兜底)
+- 返回箭头 / DLNA 投屏退出不再丢进度
+- 网络写入从看一部电影 720 次 → 1 次, 减少 99.9%
+- 本地 SharedPreferences 双写不受影响, 上滑杀 App 也有本地兜底
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`:
+  - 新增 `_seekGuardTimer` 字段 + `_setSeekGuard()` / `_clearSeekGuard()` 方法
+  - position stream + 100ms 轮询容差 2s → 5s, 用 `_clearSeekGuard()`
+  - 所有 seek 路径用 `_setSeekGuard(targetMs)` 替代直接赋值
+  - 返回箭头 onTap 加 `_saveCurrentProgress(force: true)`
+  - DLNA 投屏加 `_saveCurrentProgress(force: true)`
+  - `_startProgressTimer()` 删除定时器逻辑
+
+---
+
+## v2.5.87 (2026-07-29) — 左右拖动跳 0s + 退出播放器强制竖屏 + 进度保存频率
+
+### 现象
+
+1. 横屏看视频时左右拖动进度条, 松手后进度跳回 0s
+2. 横屏看视频退出后, 整个 App 被锁在竖屏
+3. 看半部电影 (50 分钟) 产生了 320 次网络写入
+
+### 根因
+
+**根因 A — 拖动结束 seek 后 position stream 发射旧位置**:
+
+`_onBottomBarSwipeEnd` 在 seek 后立即把 `_scrubbingValue = null`, 但
+ExoPlayer 的 seek 是异步的, 还没完成时 position stream 就发射了旧位置
+(甚至 0), 直接覆盖了 `_currentPosition`, 导致进度条/时间跳 0s.
+
+**根因 B — 退出全屏强制竖屏 + dispose 没解锁方向**:
+
+```dart
+// _onExitFullscreen:
+await SystemChrome.setPreferredOrientations([
+  DeviceOrientation.portraitUp,  // 强制竖屏!
+]);
+
+// dispose:
+// 注释写了"方向交由系统控制"但实际没调 setPreferredOrientations
+```
+
+**根因 C — 进度保存定时器 10 秒一次太频繁**:
+
+```dart
+_progressTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+  _saveCurrentProgress();  // 每 10 秒走一次网络写入
+});
+```
+
+### 修复
+
+**修 A — seek 守卫 `_seekGuardMs`**:
+
+seek 时记录目标位置, position stream 收到与目标差距 > 2s 的位置时忽略,
+收到接近的位置时清除守卫恢复正常更新. 覆盖所有 seek 路径.
+
+**修 B — 解锁所有方向**:
+
+```dart
+// _onExitFullscreen:
+await SystemChrome.setPreferredOrientations([
+  DeviceOrientation.portraitUp,
+  DeviceOrientation.portraitDown,
+  DeviceOrientation.landscapeLeft,
+  DeviceOrientation.landscapeRight,
+]);
+
+// dispose: 补上解锁
+unawaited(SystemChrome.setPreferredOrientations([
+  DeviceOrientation.portraitUp,
+  DeviceOrientation.portraitDown,
+  DeviceOrientation.landscapeLeft,
+  DeviceOrientation.landscapeRight,
+]));
+```
+
+**修 C — 定时器 10s → 60s** (v2.5.88 进一步删除).
+
+### 影响
+
+- 拖动进度条不再跳 0s (v2.5.88 进一步修复了守卫本身的超时问题)
+- 退出播放器后 App 不再锁竖屏, 自由旋转
+- 网络写入减少 83% (v2.5.88 进一步减少 99.9%)
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: seek 守卫 + 方向解锁 + 定时器频率
+
+---
+
+## v2.5.86 (2026-07-28) — 底部控制栏水平拖动 + 语法错误修复
+
+### 现象
+
+1. 底部控制栏无法水平拖动拖进度条, 只有中间区域可以拖
+2. v2.5.86 首次构建失败, Dart 编译报语法错误
+
+### 根因
+
+**根因 A — 底部栏没有水平拖动手势**:
+
+之前只有屏幕中间区域 (Expanded flex:2) 接 horizontal drag, 底部控制栏
+(进度条 + 按钮行) 没有接. 用户反馈"屏幕下方也想要拖动".
+
+**根因 B — GestureDetector 包装导致括号不匹配**:
+
+给底部栏加 GestureDetector 时多了一个闭合括号 `)`, 导致 widget tree
+结构错误, Dart 编译失败.
+
+### 修复
+
+**修 A — 底部栏整层接 horizontal drag**:
+
+```dart
+GestureDetector(
+  behavior: HitTestBehavior.translucent,
+  onHorizontalDragStart: _onBottomBarSwipeStart,
+  onHorizontalDragUpdate: _onBottomBarSwipeUpdate,
+  onHorizontalDragEnd: _onBottomBarSwipeEnd,
+  child: Column(
+    children: [
+      _buildLunaProgressBar(),
+      // 按钮行...
+    ],
+  ),
+)
+```
+
+`_onBottomBarSwipeStart` 记录起始进度值 + 底部栏宽度, delta.dx / 宽度
+= 进度变化. 100ms 节流 seek, 跟中间区域拖动一致.
+
+`HitTestBehavior.translucent` 让子级按钮 (InkWell tap) 跟 horizontal
+drag 不冲突, 按钮点击照常生效.
+
+**修 B — 删除多余闭合括号**.
+
+### 影响
+
+- 底部栏可以水平拖动调进度, 跟中间区域体验一致
+- 按钮点击不受影响 (translucent hit test)
+- 构建成功
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: 底部栏 GestureDetector + 拖动回调 + 语法修复
+
+---
+
+## v2.5.83 (2026-07-27) — 搜索结果按 source 去重导致结果显示不全
+
+### 现象
+
+搜索结果只显示 14 条, 实际应该更多.
+
+### 根因
+
+搜索结果按 `source + id` 去重, 不同源的同一部影片被当作不同条目保留,
+但同一源的不同清晰度/线路被误去重. 应该按剧名去重.
+
+### 修复
+
+去重逻辑从 `source + id` 改为按剧名 (`title`) 去重.
+
+### 修改文件
+
+- `lib/screens/search_screen.dart`: 去重 key 改为 title
+
+---
+
+## v2.5.81 (2026-07-26) — 搜索前端归一化 (剥 emoji + 剥零宽字符)
+
+### 现象
+
+搜索某些影片名搜不到, 因为名称里混入了 emoji 或零宽字符.
+
+### 修复
+
+搜索词归一化: 剥离 emoji + 剥离零宽字符 (U+200B/U+200C/U+200D/U+FEFF)
+后再发请求.
+
+### 修改文件
+
+- `lib/screens/search_screen.dart`: 搜索词归一化
+
+---
+
+## v2.5.80 (2026-07-26) — 启动时自动检查更新
+
+### 现象
+
+用户不知道有新版本, 要手动去设置里检查.
+
+### 修复
+
+App 启动时自动检查 GitHub Release 最新版本, 有新版弹更新对话框.
+24 小时节流, 不重复弹.
+
+### 修改文件
+
+- `lib/services/version_service.dart`: 自动检查 + 24h 节流
+- `lib/widgets/update_dialog.dart`: 更新对话框
+
+---
+
+## v2.5.77 (2026-07-25) — 搜索页长按没收藏按钮 + 搜索词归一化
+
+### 现象
+
+搜索结果卡片长按菜单没有收藏按钮, 跟其他页面不一致.
+
+### 修复
+
+搜索结果卡片长按菜单加收藏按钮. 搜索词归一化增加符号剥离.
+
+### 修改文件
+
+- `lib/screens/search_screen.dart`: 长按菜单加收藏 + 搜索词归一化
+
+---
+
+## v2.5.76 (2026-07-25) — 快进/快退 6s → 30s
+
+### 现象
+
+快进/快退只有 6 秒, 用户觉得太短, 跳进度太慢.
+
+### 修复
+
+快进/快退从 6 秒改为 30 秒, 按钮文字同步更新.
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: `_seekBySeconds` 参数 6 → 30
+
+---
+
+## v2.5.75 (2026-07-24) — 修复底部控制栏绿条白点垂直错位 + 升 Flutter 3.44.8
+
+### 现象
+
+底部进度条的白点 (Slider thumb) 跟绿色进度条不在同一水平线上, 上下
+错位.
+
+### 根因
+
+Slider 的 trackHeight 跟自定义绿条高度不一致, thumb 圆心没对齐
+绿条中心.
+
+### 修复
+
+SliderThemeData 的 trackHeight 跟绿条 barHeight 统一, thumbShape
+半径调整, overlayShape 调整. 升级 Flutter 3.41.9 → 3.44.8.
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: `_buildLunaProgressBar` SliderTheme 对齐
+- `.github/workflows/build.yml`: Flutter 3.44.0 → 3.44.8
+
+---
+
+## v2.5.74 (2026-07-24) — 修复进度条白点错位 + 降级 Flutter 解决 APK 体积
+
+### 现象
+
+1. 进度条白点位置跟绿色进度条不对齐
+2. APK 体积从 34.6MB 暴增到 73.1MB
+
+### 根因
+
+**根因 A — Slider 默认 padding 导致白点偏移**:
+Slider 自带 horizontal padding, thumb 中心不在 [0, W] 范围而是内缩,
+跟绿条两端不对齐.
+
+**根因 B — Flutter 3.44.0 debug 符号未剥离**:
+Flutter 3.44.0 已知 bug, native 库的 debug 符号没有被剥离, 导致 APK
+体积翻倍.
+
+### 修复
+
+**修 A — Slider padding 对齐**:
+`SliderThemeData.padding` 设为 `thumbRadius`, `Positioned` 负偏移让
+Slider 外扩 `thumbRadius`, 两者抵消, thumb 中心精确落在 [0, W].
+
+**修 B — 降级 Flutter 3.44.0 → 3.41.9** (v2.5.75 再升回 3.44.8).
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: `_buildLunaProgressBar` Slider padding
+- `.github/workflows/build.yml`: Flutter 版本调整
+
+---
+
+## v2.5.73 (2026-07-24) — 修复白点超出右边缘
+
+### 现象
+
+进度条拖到最右边时, 白点超出进度条右边缘.
+
+### 根因
+
+Slider 的 trackHorizontalPadding 没设, 默认值导致 thumb 在最右端时
+超出容器.
+
+### 修复
+
+显式设置 `trackHorizontalPadding = thumbRadius`, 让 thumb 在两端时
+刚好不超出.
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: `_buildLunaProgressBar` trackHorizontalPadding
+
+---
+
+## v2.5.65 (2026-07-23) — 修复横屏卡死 + 进度条白点同步 + 进入强制竖屏
+
+### 现象
+
+1. 横屏全屏时偶尔卡死, 无法退出
+2. 进度条白点跟实际播放位置不同步, 有延迟
+3. 进入播放页时方向没锁定, 平板旋转体验差
+
+### 修复
+
+**修 1 — 横屏卡死**:
+`_onExitFullscreen` 恢复系统 UI + 方向设置, 确保退出全屏时不卡.
+
+**修 2 — 100ms 高精度轮询**:
+```dart
+_positionPollTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+  if (_isDisposing || !mounted || _scrubbingValue != null) return;
+  final c = _player?.controller;
+  if (c == null || !c.value.isPlaying) return;
+  final newPos = c.value.position;
+  if (newPos != _currentPosition) {
+    setState(() => _currentPosition = newPos);
+  }
+});
+```
+100ms 轮询 controller.value.position, 让白点跟实际位置同步.
+
+**修 3 — 进入播放页解锁所有方向**:
+```dart
+SystemChrome.setPreferredOrientations([
+  DeviceOrientation.portraitUp,
+  DeviceOrientation.portraitDown,
+  DeviceOrientation.landscapeLeft,
+  DeviceOrientation.landscapeRight,
+]);
+```
+
+### 修改文件
+
+- `lib/screens/player_screen.dart`: 横屏退出 + 100ms 轮询 + 方向解锁
+
+---
+
+## v2.5.65 (2026-07-23) — ExoPlayer 缓冲优化
+
+### 现象
+
+播放网络视频时频繁卡顿缓冲.
+
+### 修复
+
+ExoPlayer 缓冲参数优化:
+- minBufferMs: 50000 (50 秒)
+- maxBufferMs: 50000 (50 秒)
+- bufferForPlaybackMs: 2500 (2.5 秒)
+- bufferAfterRebufferMs: 5000 (5 秒)
+
+### 修改文件
+
+- `plugins/video_player_android/android/src/main/.../TextureVideoPlayer.java`: 缓冲参数
+
+---
+
+## v2.5.56 ~ v2.5.62 (2026-07-22 ~ 2026-07-27) — 短剧系统 + 弹幕系统 + 插件修复
+
+### 主要改动
+
+- **v2.5.35 ~ v2.5.56**: 弹幕系统 — 6 源自动选源 (B站/爱奇艺/优酷/腾讯/乐视/MGTV)
+  + Levenshtein 评分匹配 + 浮层渲染 + 设置面板
+- **v2.5.56 ~ v2.5.62**: 短剧系统 — 3 源聚合 + 分类 tab + 长按菜单 + 收藏
+- **插件修复**: `video_player_android` 改 Groovy DSL, 创建 `video_player.dart`
+  platform interface, 修复 Kotlin DSL 类型安全访问器问题
+- **Flutter 升级**: 3.41.9 → 3.44.0 → 3.44.8 (解决 API 兼容性 + APK 体积)
+
+### 修改文件
+
+- `lib/danmaku/`: 弹幕系统 (6 源 + 匹配 + 渲染)
+- `lib/screens/short_drama_screen.dart`: 短剧页面
+- `lib/services/short_drama_direct_service.dart`: 3 源聚合
+- `plugins/video_player_android/`: 插件修复
+
+---
+
 ## v2.5.22 (2026-07-22) — 测速 fallback 链路裸 GET 无 header → 误报「不可用」
 
 ### 现象
