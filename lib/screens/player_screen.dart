@@ -1948,8 +1948,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _onCenterSwipeUpdate(DragUpdateDetails details) {
     if (_isDisposing) return;
     final screenWidth = MediaQuery.of(context).size.width;
-    // 整屏 1:1 映射, 60s/半屏
-    final deltaMs = (details.delta.dx / screenWidth * 60000).round();
+    // v2.6.0: 整屏滑动 = 300s, 半屏 = 150s
+    //   之前 60s/整屏太慢, 中间手势区只有 1/2 屏宽, 实际滑满才 30s, 体感"才动几秒"
+    final deltaMs = (details.delta.dx / screenWidth * 300000).round();
     final newMs = (_currentPosition.inMilliseconds + deltaMs)
         .clamp(0, _currentDuration.inMilliseconds)
         .toInt();
