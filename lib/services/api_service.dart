@@ -772,9 +772,12 @@ class ApiService {
         deduped['__nokey_${deduped.length}'] = r;
         continue;
       }
-      // 跟 AggregatedSearchResult.generateKey 一致: title + year + tv/movie
-      final type = r.episodes.length > 1 ? 'tv' : 'movie';
-      final key = '${r.title}_${r.year}_$type';
+      // v2.5.81: 改用 title + year + source 作 key.
+      //   旧逻辑 title_year_类型 (tv/movie) 会让 kkys 这种站点返回的
+      //   "同剧 tv 19 集 + movie 1 集" 算成两条, app 上出现重复源
+      //   改 title_year_source 后, 同源的多版本 (tv/movie/不同集数)
+      //   只保留集数最多的, 其它进 extraSources 切源用
+      final key = '${r.title}_${r.year}_${r.source}';
       final existing = deduped[key];
       if (existing == null) {
         deduped[key] = r;
