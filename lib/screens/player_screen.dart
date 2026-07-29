@@ -2006,8 +2006,16 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 1) UI 立即更新 — 进度条 / 时间标签 / 提示文字跟手 (无延迟)
     setState(() {
       _currentPosition = Duration(milliseconds: newMs);
-      _seekHintText =
-          isForward ? '快进${(deltaMs / 1000).round()}s' : '快退${(-deltaMs / 1000).round()}s';
+      // v2.6.3 改: 之前 (deltaMs / 1000).round() 把 < 500ms 都吃成 0,
+      //   短位移 (1-2px) 提示"快进0s"但实际已经动. 改 1 位小数:
+      //   < 1000ms 显示 "0.Xs", >= 1000ms 显示 "Xs" (去尾 .0)
+      //   短滑动立即看到提示, 长滑动整数位也不拖泥带水.
+      final absMs = deltaMs.abs();
+      final absSec = absMs / 1000.0;
+      final secStr = absSec == absSec.truncate()
+          ? absSec.toInt().toString()
+          : absSec.toStringAsFixed(1);
+      _seekHintText = isForward ? '快进${secStr}s' : '快退${secStr}s';
     });
     _seekHintTimer?.cancel();
     _seekHintTimer = Timer(const Duration(seconds: 1), () {
