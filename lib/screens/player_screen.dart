@@ -360,8 +360,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     // v1.0.54: 关闭系统音量弹窗, 自己接管音量 UI (右侧指示器)
     // volume_controller 2.0.2+ Android / 2.0.6+ iOS 都支持 showSystemUI 静态字段
     // 默认 true, 每次 setVolume 都会弹系统音量窗口遮挡视频
-    // mobile_player_controls.dart:110 同模板, 但 player_screen 是另一个 widget
-    // 自己的 _onVolumeSwipeUpdate → setVolume 路径没人设过这个字段, 所以会弹
+    // v2.5.91: 只要在播放器界面就隐藏, 退出播放器 (dispose) 恢复显示
     VolumeController.instance.showSystemUI = false;
     // v2.5.18: 物理音量键拦截 — 物理 KEYCODE_VOLUME_UP/DOWN/MUTE 走
     //   Activity.dispatchKeyEvent → AudioManager.adjustStreamVolume (默认
@@ -476,8 +475,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     // ★ v2.5.65: 高精度进度条轮询 (100ms 一次, 让白点跟实际位置同步)
     _positionPollTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (_isDisposing || !mounted || _scrubbingValue != null) return;
+      // v2.5.90: 用 _isPlaying 代替 c.value.isPlaying,
+      //   后者在某些情况下跟实际播放状态不一致
+      if (!_isPlaying) return;
       final c = _player?.controller;
-      if (c == null || !c.value.isPlaying) return;
+      if (c == null) return;
       final newPos = c.value.position;
       // v2.5.90: seek guard 已移除, 100ms 轮询直接更新
       if (newPos != _currentPosition) {
@@ -1916,7 +1918,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     final dur = _currentDuration.inMilliseconds;
     _bottomBarDragStartValue = null;
     _bottomBarDragStartWidth = null;
-    if (v == null || dur <= 0) return;
+    if (v == null || dur <= 0) {
+      // v2.5.90: 即使提前 return 也要清除 _scrubbingValue,
+      //   否则 position stream 和 100ms 轮询永远不更新 _currentPosition
+      if (_scrubbingValue != null) {
+        setState(() => _scrubbingValue = null);
+      }
+      return;
+    }
     // 用当前 _scrubbingValue 调 seek (跟 _onScrubEnd 一样, 确保 final 位置 seek)
     final finalVal = (_scrubbingValue ?? v).clamp(0.0, 1.0);
     final newMs = (finalVal * dur).toInt();
@@ -5320,6 +5329,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                   onHorizontalDragStart: _onBottomBarSwipeStart,
                   onHorizontalDragUpdate: _onBottomBarSwipeUpdate,
                   onHorizontalDragEnd: _onBottomBarSwipeEnd,
+                  // v2.5.90: 手势被取消时也清除 _scrubbingValue,
+                  //   防止 position 更新被永久阻止
+                  onHorizontalDragCancel: () {
+                    if (_scrubbingValue != null) {
+                      setState(() => _scrubbingValue = null);
+                    }
+                  },
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
