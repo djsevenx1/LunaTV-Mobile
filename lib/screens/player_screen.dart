@@ -286,14 +286,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   double? _bottomBarDragStartValue;
   double? _bottomBarDragStartWidth;
   Timer? _bottomBarSwipeThrottle;
-  // v2.5.87: seek 守卫 — seek 后 ExoPlayer 异步完成, 期间 position stream
-  //   可能发射旧位置 (甚至 0), 导致进度条/时间跳 0s. 设 _seekGuardMs = 目标 ms,
-  //   position stream 收到与目标差距 > 5s 的位置时忽略, 收到接近的位置时清除守卫.
-  //   v2.5.88: 加 5s 超时自动清除, 防止 seek 失败时守卫永远挡住 position 更新.
-  //   之前 2s 容差太紧 + 无超时, ExoPlayer seek 失败时 _currentPosition 卡在
-  //   seek 目标值不动, 退出时存的进度跟实际差几十分钟.
-  int? _seekGuardMs;
-  Timer? _seekGuardTimer;
+  // v2.5.90: seek guard 已移除 — 它阻止 position stream 和 100ms 轮询更新
+  //   _currentPosition, 导致进度条不动. 回到 v2.5.86 行为: seek 后立即设
+  //   _currentPosition 为目标值, position stream 正常更新 (即使短暂跳回
+  //   旧位置, ExoPlayer seek 完成后会恢复).
+  // int? _seekGuardMs;
+  // Timer? _seekGuardTimer;
   // v2.5.20: playingStream / completedStream / bufferingStream 的 subscription 字段
   //   之前 v2.3.14 ~ v2.5.19 这 3 个 listener 没存字段, dispose 时没法 cancel,
   //   切集 / 退出时残留 listener 触发业务逻辑 (_autoPlayNextEpisode) 跟新 episode 打架
@@ -454,17 +452,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (_isDisposing) return;
       if (!mounted) return;
       if (_scrubbingValue == null) {
-        // v2.5.88: seek 守卫 — seek 后 ExoPlayer 可能短暂发射旧位置 (甚至 0),
-        //   如果与 seek 目标差距 > 5s, 忽略这个位置更新, 防止进度条/时间跳 0s.
-        //   收到接近目标的位置 (差距 <= 5s) 时清除守卫, 恢复正常更新.
-        //   5s 超时兜底 (_seekGuardTimer): seek 失败时守卫自动清除.
-        if (_seekGuardMs != null) {
-          final diff = (pos.inMilliseconds - _seekGuardMs!).abs();
-          if (diff > 5000) {
-            return;
-          }
-          _clearSeekGuard();
-        }
+        // v2.5.90: seek guard 已移除, position stream 直接更新 _currentPosition
         _currentPosition = pos;
         if (pos > Duration.zero) {
           _lastKnownPosition = pos;
@@ -491,12 +479,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       final c = _player?.controller;
       if (c == null || !c.value.isPlaying) return;
       final newPos = c.value.position;
-      // v2.5.88: seek 守卫同样作用于轮询, 防止轮询拿到 ExoPlayer 的旧位置
-      if (_seekGuardMs != null) {
-        final diff = (newPos.inMilliseconds - _seekGuardMs!).abs();
-        if (diff > 5000) return;
-        _clearSeekGuard();
-      }
+      // v2.5.90: seek guard 已移除, 100ms 轮询直接更新
       if (newPos != _currentPosition) {
         setState(() => _currentPosition = newPos);
       }
@@ -559,7 +542,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _seekHintTimer?.cancel();
     _centerSwipeSeekThrottle?.cancel();
     _bottomBarSwipeThrottle?.cancel();
-    _clearSeekGuard(); // v2.5.88: 清理 seek 守卫 + 超时 timer
+    // v2.5.90: seek guard 已移除
+    // _clearSeekGuard();
     _positionSub?.cancel();
     _durationSub?.cancel();
     // v2.5.20: 之前 dispose 漏 cancel 这 3 个 listener, 切集 / 退出时残留
@@ -1844,24 +1828,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     _centerSwipeSeekThrottle = null;
   }
 
-  /// v2.5.88: 统一设置 seek 守卫 + 5s 超时自动清除.
-  ///   seek 后 ExoPlayer 异步完成, 期间 position stream 可能发射旧位置.
-  ///   守卫阻止差距 > 5s 的位置更新, 收到接近的位置 (≤5s) 时自动清除.
-  ///   5s 超时兜底: seek 失败/卡住时守卫不会永远挡住 position 更新.
-  void _setSeekGuard(int targetMs) {
-    _seekGuardMs = targetMs;
-    _seekGuardTimer?.cancel();
-    _seekGuardTimer = Timer(const Duration(seconds: 5), () {
-      _seekGuardMs = null;
-    });
-  }
-
-  /// v2.5.88: 清除 seek 守卫 (position 已接近目标, 或不再需要)
-  void _clearSeekGuard() {
-    _seekGuardMs = null;
-    _seekGuardTimer?.cancel();
-    _seekGuardTimer = null;
-  }
+  // v2.5.90: _setSeekGuard / _clearSeekGuard 已移除
+  //   seek guard 阻止 position stream 和 100ms 轮询更新 _currentPosition,
+  //   导致进度条不动. seek 后立即设 _currentPosition 为目标值即可.
 
   // v2.5.20: 水平拖动结束 — flush pending seek 节流, 确保最后 drag 位置 seek 到
   //   player 上 (drag 中节流可能让最后一次位置还没 seek, 玩家还在旧位置)
@@ -1869,8 +1838,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_isDisposing) return;
     _centerSwipeSeekThrottle?.cancel();
     _centerSwipeSeekThrottle = null;
-    // v2.5.88: 设 seek 守卫 (5s 超时), 防止 ExoPlayer seek 完成前 position stream 发射旧位置
-    _setSeekGuard(_currentPosition.inMilliseconds);
+    // v2.5.90: seek guard 已移除
     unawaited(_player!.seek(_currentPosition));
   }
 
@@ -1953,8 +1921,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final finalVal = (_scrubbingValue ?? v).clamp(0.0, 1.0);
     final newMs = (finalVal * dur).toInt();
     unawaited(_player!.seek(Duration(milliseconds: newMs)));
-    // v2.5.88: 设 seek 守卫 (5s 超时), 防止 ExoPlayer seek 完成前 position stream 发射旧位置
-    _setSeekGuard(newMs);
+    // v2.5.90: seek guard 已移除
     setState(() {
       _currentPosition = Duration(milliseconds: newMs);
       _scrubbingValue = null; // 跟 _onScrubEnd 一样, 让 Slider 回到 _currentPosition 驱动
@@ -2019,8 +1986,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (dur > 0) {
       final pos = (value.clamp(0.0, 1.0)) * dur;
       _player!.seek(Duration(milliseconds: pos.toInt()));
-      // v2.5.88: 设 seek 守卫 (5s 超时), 防止 ExoPlayer seek 完成前 position stream 发射旧位置
-      _setSeekGuard(pos.toInt());
+      // v2.5.90: seek guard 已移除
     }
     setState(() {
       _scrubbingValue = null;
@@ -4917,8 +4883,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         ? (newPos < Duration.zero ? Duration.zero : newPos)
         : (newPos > _currentDuration ? _currentDuration : newPos);
     _player!.seek(clampedPos);
-    // v2.5.88: 设 seek 守卫 (5s 超时), 防止 ExoPlayer seek 完成前 position stream 发射旧位置
-    _setSeekGuard(clampedPos.inMilliseconds);
+    // v2.5.90: seek guard 已移除
     // 显示提示文字, 1秒后消失
     _seekHintTimer?.cancel();
     setState(() {
