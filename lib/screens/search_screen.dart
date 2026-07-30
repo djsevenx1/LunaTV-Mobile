@@ -162,6 +162,26 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     if (mounted) setState(() => _exactSearch = v);
   }
 
+  // v2.6.24: fire-and-forget 拉源列表. 主搜索 /api/search/ws 启动不阻塞
+  //   这个 getSearchResources (80 源配置读 DB, 后端 0.5-2s). 失败时
+  //   _sourceKeyToName 保持空 Map, debug 面板不显示, 不影响搜索.
+  Future<void> _loadSourceKeyToName(int gen) async {
+    try {
+      final isLocalMode = await UserDataService.getIsLocalMode();
+      final resources = isLocalMode
+          ? await LocalModeStorageService.getSearchSources()
+          : await ApiService.getSearchResources();
+      if (!mounted || gen != _searchGeneration) return;
+      setState(() {
+        _sourceKeyToName = {
+          for (final r in resources.where((r) => !r.disabled)) r.key: r.name
+        };
+      });
+    } catch (_) {
+      // 兜底, 失败不污染状态
+    }
+  }
+
   Future<void> _loadSearchHistory() async {
     final result = await PageCacheService().getSearchHistory(context);
     if (mounted) {
@@ -203,19 +223,12 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     });
 
     // v2.6.16: 拿源列表建 key→name 映射, 用于显示每个源的结果数
-    try {
-      final isLocalMode = await UserDataService.getIsLocalMode();
-      final resources = isLocalMode
-          ? await LocalModeStorageService.getSearchSources()
-          : await ApiService.getSearchResources();
-      if (mounted && gen == _searchGeneration) {
-        setState(() {
-          _sourceKeyToName = {
-            for (final r in resources.where((r) => !r.disabled)) r.key: r.name
-          };
-        });
-      }
-    } catch (_) {}
+    // v2.6.24: 不 await, 跟 SSE 主路并发跑. 之前 await 这个 getSearchResources
+    //   阻塞了 _performSearch 主路径, 主搜索 /api/search/ws 启动被串行拖慢
+    //   0.5-2s (80 源配置读 DB 的耗时), Selene 体感 3s, LunaTV 体感 5s+ 根因之一.
+    //   _sourceKeyToName 是搜索完成后 debug 面板用, 不影响搜索体验, fire-and-forget
+    //   即可. 失败时 try/catch 兜底返回空, 不会污染状态.
+    unawaited(_loadSourceKeyToName(gen));
 
     // 增量结果: 每个 source 完成搜索就推回一批, addAll 到 _searchResults.
     //   SearchResultAggGrid 内部按 title+year+类型 聚合并 join 所有源名,
