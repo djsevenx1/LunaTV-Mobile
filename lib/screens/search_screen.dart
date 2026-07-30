@@ -170,30 +170,16 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   void _onSearchQueryChanged(String query) {
-    _searchQuery = query;
-    if (_updateTimer?.isActive ?? false) _updateTimer!.cancel();
-    // v2.5.26: debounce 800→400ms. 800ms 偏长, 用户输入完到触发搜索的等待感明显.
-    // 400ms 既能避免逐字抖动, 又让搜索更"跟手".
-    // v2.5.27: 用户继续输入时, 让进行中的旧搜索结果作废, 避免覆盖新状态.
-    // v2.6.19: debounce 400→100ms, 对齐 Selene 回车即搜的"跟手感".
-    //   100ms 既能防连打误触, 又让用户感觉"边输边立刻搜". 跟 Selene 体感对齐.
-    // v2.6.19: 输入时立刻显示 loading 状态 (有 query 但未触发), 避免空窗期
-    //   看到旧结果. 等真正触发 _performSearch 时 _isLoading 会被覆盖.
-    if (query.trim().isNotEmpty) {
-      _searchGeneration++;
-      if (mounted) setState(() => _isLoading = true);
-    }
-    _updateTimer = Timer(const Duration(milliseconds: 100), () {
-      if (query.trim().isEmpty) {
-        if (mounted) {
-          setState(() {
-            _hasSearched = false;
-            _isLoading = false;
-          });
-        }
-        return;
-      }
-      _performSearch(query.trim());
+    // v2.6.20: 对齐 Selene 行为 — 输入只更新文本, 不触发主搜索.
+    //   之前 100ms debounce + 边输边搜虽然"看起来跟手", 但实际每次按键
+    //   都递增 _searchGeneration + cancel 旧 SSE + 重启新 SSE, 浪费
+    //   网络/CPU. Selene 是回车/点搜索按钮才搜, 体感"快"是因为不浪费
+    //   请求, 单次搜索能跑完所有源. LunaTV-Mobile 之前 5 源没结果用户
+    //   体感"慢", 根因是重复打断正在搜的 SSE, 不是搜索本身慢.
+    //   现在: 输入只更新 _searchQuery, 触发 main_layout 内的 suggestions
+    //   搜索建议. 主搜索只在 onSearchSubmitted 触发, 跟 Selene 一致.
+    setState(() {
+      _searchQuery = query;
     });
   }
 
