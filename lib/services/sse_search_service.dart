@@ -202,23 +202,33 @@ class SSESearchService {
       }
     });
 
-    // 检查是否启用本地搜索或本地模式
-    final isLocalMode = await UserDataService.getIsLocalMode();
+    // v2.6.25: 4 个 await UserDataService.* → 4 个同步读. 之前 4 个串行
+    //   await SharedPreferences.getInstance() (磁盘 IO) 拖慢 SSE 启动
+    //   0.5-2s, 体感比 Selene 慢根因. 现在:
+    //   - getIsLocalModeSync / getLocalSearchSync: 走 _isLocalModeCache /
+    //     _localSearchCache 内存, 0ms
+    //   - _serverUrlCache / _cookiesCache: 走 UserDataService 内部 sync
+    //     getter, 0ms (原代码 line 120-127 已有 _serverUrlCache,
+    //     line 147-154 已有 _cookiesCache)
+    //   warmup 阶段 (UserDataService.warmupUserDataConfig 启动时调一次)
+    //   已经预热这 4 个缓存, 这里同步读全是 0ms.
+    final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       localSearch(query);
       return;
     }
 
-    final isLocalSearch = await UserDataService.getLocalSearch();
+    final isLocalSearch = UserDataService.getLocalSearchSync();
     if (isLocalSearch) {
       localSearch(query);
       return;
     }
 
     try {
-      // 获取服务器地址和认证信息
-      final baseUrl = await UserDataService.getServerUrl();
-      final cookies = await UserDataService.getCookies();
+      // 获取服务器地址和认证信息 — 同步读, 走 _serverUrlCache / _cookiesCache
+      //   (warmup 已预热). 之前 await 是串行, 现在 0ms.
+      final baseUrl = UserDataService.getServerUrlSync();
+      final cookies = UserDataService.getCookiesSync();
 
       if (baseUrl == null) {
         throw Exception('服务器地址未配置，请先登录');

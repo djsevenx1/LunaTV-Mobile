@@ -69,6 +69,10 @@ class UserDataService {
 
   // 内存缓存
   static bool? _isLocalModeCache;
+  // v2.6.25: 跟 _isLocalModeCache 平行, getLocalSearch 也要内存缓存
+  //   (搜索主路径 4 个 await SharedPreferences 之一, 每次冷启动首调
+  //   走磁盘 IO ~50-200ms, 拖慢 SSE 启动, 体感比 Selene 慢 0.5-2s 根因)
+  static bool? _localSearchCache;
   // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 视频代理开关) 整个删了
   //   - _cfWorkerEnabledCache  (优选 IP 开关缓存)
   //   - _cfWorkerDomainCache   (视频代理 worker 域名缓存)
@@ -338,9 +342,12 @@ class UserDataService {
   }
 
   // 保存本地搜索设置
+  // 保存本地搜索设置
   static Future<void> saveLocalSearch(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_localSearchKey, enabled);
+    // v2.6.25: 同步更新内存缓存, 跟 saveIsLocalMode 一致
+    _localSearchCache = enabled;
   }
 
   // 获取本地搜索设置（默认为 false）
@@ -1469,6 +1476,19 @@ class UserDataService {
       final prefs = await SharedPreferences.getInstance();
       final v = prefs.getString(_cookiesKey);
       _cookiesCache = (v == null || v.isEmpty) ? null : v;
+    }
+    // v2.6.25: 预热 _isLocalModeCache + _localSearchCache. 搜索主路径
+    //   (SSESearchService.startSearch) 用同步版 (getIsLocalModeSync /
+    //   getLocalSearchSync) 替代 async 版, 彻底消除这俩 await 的磁盘 IO.
+    //   之前 warmup 只预热 serverUrl + cookies, 没预热这俩, 搜索主路径
+    //   每次都 await SharedPreferences.getInstance() 拖慢 SSE 启动.
+    if (_isLocalModeCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _isLocalModeCache = prefs.getBool(_isLocalModeKey) ?? false;
+    }
+    if (_localSearchCache == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _localSearchCache = prefs.getBool(_localSearchKey) ?? false;
     }
   }
 }
