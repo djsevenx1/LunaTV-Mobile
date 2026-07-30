@@ -82,10 +82,11 @@ class _MainLayoutState extends State<MainLayout> {
   Timer? _debounceTimer;
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
-  // v2.6.23: 搜索建议总开关 — 点弹层右上角 × 后本 session 关掉, 跟 Selene 1:1
-  //   (Selene 搜索页只显示搜索结果, 不弹建议下拉). 状态在 main_layout 内存
-  //   里维护, 退出 app 重置回 true. 后续版可加 SharedPreferences 持久化.
-  bool _suggestionsEnabled = true;
+  // v2.6.23: 弹层加 × 按钮, 用户可手动关掉当前弹层. 行为:
+  //   - 输入新 query → 弹层继续弹 (跟改前一样)
+  //   - 点 × → 只关掉当前这次弹层, 下次输入继续弹
+  //   - 点空白 / 点外部 → 弹层消失 (跟改前一样)
+  //   不维护「永久关掉」状态, 候选栏行为完全不变, 只多一个手动 × 入口.
 
   @override
   void dispose() {
@@ -191,11 +192,6 @@ class _MainLayoutState extends State<MainLayout> {
   void _showSuggestionsOverlay() {
     _removeOverlay();
 
-    // v2.6.23: 用户在弹层点了 × 后, 本 session 内不再弹建议栏
-    if (!_suggestionsEnabled) {
-      return;
-    }
-
     if (_searchSuggestions.isEmpty) {
       return;
     }
@@ -260,10 +256,8 @@ class _MainLayoutState extends State<MainLayout> {
                         ),
                         InkWell(
                           onTap: () {
-                            // v2.6.23: 点 × 关掉本 session 建议栏, 跟 Selene 1:1
-                            setState(() {
-                              _suggestionsEnabled = false;
-                            });
+                            // v2.6.23: 点 × 只关掉当前这次弹层, 不影响下次输入.
+                            //   候选栏行为不变 (每次新 query 仍弹), 只多一个手动 × 入口.
                             _removeOverlay();
                           },
                           borderRadius: BorderRadius.circular(12),
