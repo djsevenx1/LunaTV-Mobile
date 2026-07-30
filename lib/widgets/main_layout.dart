@@ -246,6 +246,7 @@ class _MainLayoutState extends State<MainLayout> {
                           child: Text(
                             '搜索建议',
                             style: FontUtils.poppins(
+                              context,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                               color: themeService.isDarkMode
@@ -308,6 +309,7 @@ class _MainLayoutState extends State<MainLayout> {
                                   child: Text(
                                     suggestion,
                                     style: FontUtils.poppins(
+                                      context,
                                       fontSize: 14,
                                       color: themeService.isDarkMode
                                           ? const Color(0xFFffffff)
