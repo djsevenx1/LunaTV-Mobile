@@ -39,6 +39,8 @@ class _UserMenuState extends State<UserMenu> {
   String _role = 'user';
   String _doubanDataSource = '直连';
   String _doubanImageSource = '直连';
+  // v2.6.18: 服务器地址 — 设置页可直接查看/修改, 不用退出登录回登录页改
+  String _serverUrl = '';
   // v2.1.42 改: 跟 v2.1.41 TMDB 一样, 字段存 key 值 ('bangumi_proxy' / 'direct'),
   //   UI 显示时调 [getBangumiDataSourceDisplayName] 转. v2.1.40 这里存的是
   //   显示名 ('直连'), 跟新模式不一致, 这次改回 key.
@@ -122,6 +124,8 @@ class _UserMenuState extends State<UserMenu> {
     final githubDataSource = await UserDataService.getGithubDataSourceKey();
     final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
+    // v2.6.18: 服务器地址
+    final serverUrl = await UserDataService.getServerUrl() ?? '';
     // v2.3.0: 视频加速 (CF Worker 视频代理 + 优选 IP + 视频代理开关 + CF Worker 域名) 整个删了
     //   之前的 _preferIpEnabled / _videoProxyEnabled / _cfWorkerDomain / _cfSummary / _cfBestIp
     //   字段全删, _loadUserInfo 不再读这些 SharedPreferences key.
@@ -157,6 +161,7 @@ class _UserMenuState extends State<UserMenu> {
         _tmdbConfigured = tmdbConfigured;
         _tmdbDataSource = tmdbDataSource;
         _tmdbProxyDomain = tmdbProxyDomain;
+        _serverUrl = serverUrl;
       });
     }
   }
@@ -527,6 +532,125 @@ class _UserMenuState extends State<UserMenu> {
     );
 
     controller.dispose();
+  }
+
+  // v2.6.18: 弹出服务器地址输入对话框 — 不用退出登录就能改
+  Future<void> _openServerUrlDialog() async {
+    final controller = TextEditingController(text: _serverUrl);
+    controller.selection =
+        TextSelection(baseOffset: 0, extentOffset: _serverUrl.length);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor:
+            widget.isDarkMode ? const Color(0xFF2c2c2c) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(LucideIcons.server, size: 20, color: Color(0xFF3b82f6)),
+            const SizedBox(width: 8),
+            Text(
+              '服务器地址',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 18,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '后端 API 服务器地址, 改完即时生效 (内存缓存自动更新).',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 12,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 1,
+              contextMenuBuilder: chineseTextSelectionToolbarBuilder,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              style: FontUtils.sourceCodePro(
+                ctx,
+                fontSize: 13,
+                color: widget.isDarkMode
+                    ? const Color(0xFFffffff)
+                    : const Color(0xFF1f2937),
+              ),
+              decoration: InputDecoration(
+                hintText: 'https://your-server.example.com',
+                hintStyle: FontUtils.sourceCodePro(
+                  ctx,
+                  fontSize: 12,
+                  color: widget.isDarkMode
+                      ? const Color(0xFF6b7280)
+                      : const Color(0xFF9ca3af),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              '取消',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: widget.isDarkMode
+                    ? const Color(0xFF9ca3af)
+                    : const Color(0xFF6b7280),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final input = controller.text.trim();
+              await UserDataService.saveServerUrl(input);
+              if (!ctx.mounted) return;
+              Navigator.of(ctx).pop();
+              if (!mounted) return;
+              setState(() {
+                _serverUrl = input;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(input.isEmpty
+                      ? '已清除服务器地址'
+                      : '已保存服务器地址'),
+                ),
+              );
+            },
+            child: Text(
+              '保存',
+              style: FontUtils.poppins(
+                ctx,
+                fontSize: 14,
+                color: const Color(0xFF3b82f6),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // v2.1.41: 弹出 TMDB 代理 URL 输入对话框
@@ -1517,6 +1641,21 @@ class _UserMenuState extends State<UserMenu> {
         children: [
           // ===== 用户信息头部卡片 =====
           _buildUserHeader(),
+          // ===== 服务器 =====
+          // v2.6.18: 服务器地址配置入口 — 之前只能在登录页填, 进 app 后没法改.
+          //   现在设置页顶部直接显示当前地址, 点开弹窗修改, 即时生效.
+          _buildSectionHeader('服务器'),
+          _buildCard(
+            children: [
+              _buildInputOption(
+                title: '服务器地址',
+                currentValue: _serverUrl,
+                onTap: _openServerUrlDialog,
+                icon: LucideIcons.server,
+                iconColor: const Color(0xFF3b82f6),
+              ),
+            ],
+          ),
           // ===== 数据源 =====
           _buildSectionHeader('数据源'),
           _buildCard(
