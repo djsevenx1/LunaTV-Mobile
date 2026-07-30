@@ -772,12 +772,14 @@ class ApiService {
         deduped['__nokey_${deduped.length}'] = r;
         continue;
       }
-      // v2.5.81: 改用 title + year + source 作 key.
-      //   旧逻辑 title_year_类型 (tv/movie) 会让 kkys 这种站点返回的
-      //   "同剧 tv 19 集 + movie 1 集" 算成两条, app 上出现重复源
-      //   改 title_year_source 后, 同源的多版本 (tv/movie/不同集数)
-      //   只保留集数最多的, 其它进 extraSources 切源用
-      final key = '${r.title}_${r.year}_${r.source}';
+      // v2.6.5: 用 title+year+类型 (tv/movie) 作 key, 跨源同剧聚合.
+      //   v2.5.81 试过 title+year+source, 但会把同源不同标题版本
+      //   (如 "凡人修仙传" + "凡人修仙传 新版") 错误合并成同剧.
+      //   真正的"可可影视"重复 (tv 19 集 + movie 1 集) 由
+      //   player_screen.dart 的 bySource 聚合解决 — 同源同剧保留
+      //   集数最多的一条. api_service.dart 这层只做跨源同剧合并.
+      final type = r.episodes.length > 1 ? 'tv' : 'movie';
+      final key = '${r.title}_${r.year}_$type';
       final existing = deduped[key];
       if (existing == null) {
         deduped[key] = r;

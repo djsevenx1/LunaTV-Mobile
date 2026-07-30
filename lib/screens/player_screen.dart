@@ -2283,39 +2283,77 @@ class _PlayerScreenState extends State<PlayerScreen>
         '[History] _pendingResumeAt: ${_pendingResumeAt?.inMilliseconds ?? "null"}ms');
 
     try {
-      final results = await ApiService.fetchSourcesData(title);
+      // v2.5.82: 照 web play/page.tsx 逻辑:
+      //   1) /api/search 已经在后端并行搜了所有 18 个源, 返回的就是各源命中结果
+      //   2) 客户端只做一件事: 按 source 聚合, 同源保留集数最多的一条
+      //   3) 不做标题相似度过滤 (web 也不做, 资源站标题千差万别,
+      //      相似度阈值会把大部分源砍掉, 导致 app 源数远少于 web)
+      //   4) /api/search/resources 拉全源列表, 没命中的源补占位
+      //   最终展示数 = resources 列表长度 (18 个)
+      final resultsFut = ApiService.fetchSourcesData(title);
+      final resourcesFut = ApiService.getSearchResources();
+      final results = await resultsFut;
+      final resources = await resourcesFut;
       if (!mounted) return;
-      if (results.isEmpty) {
-        setState(() {
-          _sourceResults = [];
-          _sourcesLoading = false;
-          _error = '没有找到可用的播放源';
-        });
-        return;
-      }
 
-      // (按 source key 去重已经在 ApiService.fetchSourcesData 里做了,
-      // 这里不用再 dedupe)
-      
-      // 过滤不相关的源：标题相似度 + 年份匹配
+      // 按 source 聚合: 同源保留集数最多的一条 (跟 web 一致)
+      // 注: fetchSourcesData 已按 title_year_source 去重, 同一 source 的多个
+      // 标题版本 (如 "凡人修仙传" + "凡人修仙传 新版") 也只留集数最多的
+      final bySource = <String, SearchResult>{};
+      for (final r in results) {
+        final k = r.source;
+        if (k.isEmpty) continue;
+        final prev = bySource[k];
+        if (prev == null || r.episodes.length > prev.episodes.length) {
+          bySource[k] = r;
+        }
+      }
       final searchYear = widget.videoInfo.year;
-      final filteredResults = _filterRelevantSources(title, searchYear, results);
       DiaryService.add(
-          '[SourceFilter] 原始源数: ${results.length}, 过滤后: ${filteredResults.length}, '
-          '标题: "$title", 年份: "$searchYear"');
-      
+          '[SourceFilter] /api/search 命中: ${results.length}, 按源聚合后: ${bySource.length}, '
+          '全源数: ${resources.length}, 标题: "$title"');
+
+      // 按 resources 顺序合并: 全源都展示, 命中的用真实数据, 没命中的占位
+      final merged = <SearchResult>[];
+      for (final res in resources) {
+        if (res.key.isEmpty || res.disabled) continue;
+        final hit = bySource[res.key];
+        if (hit != null) {
+          merged.add(hit);
+        } else {
+          // 占位: 没命中的源也显示, 让用户看到"这个源搜不到"
+          merged.add(SearchResult(
+            id: '',
+            title: title,
+            poster: '',
+            episodes: const [],
+            episodesTitles: const [],
+            source: res.key,
+            sourceName: res.name,
+            year: searchYear,
+          ));
+        }
+      }
+      DiaryService.add(
+          '[SourceFilter] 合并后展示源数: ${merged.length} '
+          '(命中 ${bySource.length}, 占位 ${merged.length - bySource.length})');
+
       setState(() {
-        _sourceResults = filteredResults;
+        _sourceResults = merged;
         _sourcesLoading = false;
+        if (bySource.isEmpty) {
+          _error = '没有源匹配 "$title", 仅展示源列表';
+        }
       });
 
       // 选源优先级:
       // 1. 云记忆里有这个 video 的源 (resume.source)
       // 2. 入口传过来的 preferredSource
-      // 3. 第一个
-      SearchResult toSelect = filteredResults.first;
+      // 3. 第一个 (从 bySource 取, 不用占位)
+      if (bySource.isEmpty) return;
+      SearchResult toSelect = bySource.values.first;
       if (resumeSourceKey.isNotEmpty) {
-        for (final r in results) {
+        for (final r in bySource.values) {
           if (r.source == resumeSourceKey) {
             toSelect = r;
             break;
@@ -2323,7 +2361,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
       }
       if (widget.preferredSource != null && widget.preferredSource!.isNotEmpty) {
-        for (final r in results) {
+        for (final r in bySource.values) {
           if (r.source == widget.preferredSource) {
             toSelect = r;
             break;
