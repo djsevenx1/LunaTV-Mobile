@@ -197,16 +197,20 @@ class SearchResultRanker {
     return matchesQuery(r.title, query);
   }
 
-  /// v2.6.14: 播放详情页联合去重 — title substring 匹配 + year 严格匹配.
-  ///   跟 resultMatchesQuery (子序列) 区别:
-  ///   - resultMatchesQuery 子序列: 「凡人修仙传」可匹配「凡人修仙传之风起」
-  ///     (适合搜索页, 子系列也展示)
-  ///   - resultMatchesQueryStrict substring: 「凡人修仙传」只能匹配
-  ///     「凡人修仙传」「凡人修仙传 新版」「凡人修仙传之风起」以外的同 IP 子系列
-  ///   联合 year: 即使 title 子串匹配, 年份不一样 (2023 vs 2024) 也排除
-  ///   目标: 播放详情页必须命中用户点的那部剧, 不出衍生剧/不同年份版本
+  /// v2.6.15: 播放详情页「严格匹配」 — 跟 resultMatchesQuery (子序列, 搜索页)
+  ///   和 v2.6.14 resultMatchesQueryStrict (substring 包含, 还是会出 xxx凡人修仙传)
+  ///   都不够, 改用:
   ///
-  /// expectedYear 可传空或 'unknown' 跳过 year 检查 (资源站没年份信息时)
+  ///   1. title 完全等于 query (归一化后)
+  ///   2. title 以 query 开头, 后面是已知版本标识 (第X季/新版/重制/电影/年份等)
+  ///
+  ///   不接受:
+  ///   - 「xxx凡人修仙传」 (有任意前缀, 跟前不接)
+  ///   - 「凡人修仙传xxx」 (任意后缀不是版本标识)
+  ///   - 「凡人修仙传之风起」 (中间夹字)
+  ///
+  ///   联合 year: 年份不一样 (2023 vs 2024) 也排除
+  ///   目标: 播放详情页必须命中用户点的那部剧, 不出衍生剧/前缀/后缀变体
   static bool resultMatchesQueryStrict(
     SearchResult r,
     String query,
@@ -214,19 +218,66 @@ class SearchResultRanker {
   ) {
     if (r.title.isEmpty || query.isEmpty) return true;
 
-    // 1. title substring 匹配 (归一化后连续包含 query, 不允许中间夹字符)
-    final normTitle = _normalize(r.title);
-    final normQuery = _normalize(query);
-    if (!normTitle.contains(normQuery)) return false;
-
-    // 2. year 严格匹配 (双方都有年份才比, 缺年份的放行)
+    // 1. year 严格匹配 (双方都有年份才比, 缺年份的放行)
     if (expectedYear.isNotEmpty && expectedYear != 'unknown') {
       final rYear = r.year;
       if (rYear.isNotEmpty && rYear != 'unknown' && rYear != expectedYear) {
         return false;
       }
     }
-    return true;
+
+    // 2. title 严格匹配 (归一化后)
+    final normTitle = _normalize(r.title);
+    final normQuery = _normalize(query);
+    if (normQuery.isEmpty) return true;
+
+    // 2.1 完全相等
+    if (normTitle == normQuery) return true;
+
+    // 2.2 query 开头 + 合法版本后缀
+    if (normTitle.startsWith(normQuery)) {
+      final rest = normTitle.substring(normQuery.length);
+      if (_isValidVersionSuffix(rest)) return true;
+    }
+
+    // 2.3 query 结尾 + 合法版本前缀 (罕见, 比如「剧场版 凡人修仙传」)
+    if (normTitle.endsWith(normQuery)) {
+      final prefix = normTitle.substring(0, normTitle.length - normQuery.length);
+      if (_isValidVersionPrefix(prefix)) return true;
+    }
+
+    return false;
+  }
+
+  /// 合法版本后缀 — 第X季/新版/重制/电影/TV/Plus/+ 等等.
+  /// 用白名单不用黑名单, 避免「之风起」「之灵界」这种 IP 子系列钻空子.
+  static bool _isValidVersionSuffix(String s) {
+    if (s.isEmpty) return true;  // 完全等于 query, 已在上一步 return
+    // 第X季: 第 + 中文数字或阿拉伯数字 + 季
+    if (RegExp(r'^第[\d零一二三四五六七八九十百千万]+季$').hasMatch(s)) return true;
+    // 第X部
+    if (RegExp(r'^第[\d零一二三四五六七八九十百千万]+部$').hasMatch(s)) return true;
+    // 新版/重制版/加长版/未删减版/完整版/剧场版/修复版/高清版
+    if (RegExp(r'^(新版|重制版?|加长版?|未删减版?|完整版?|剧场版?|修复版?|高清版?)$').hasMatch(s)) return true;
+    // 电影/电影版/电视剧/TV版/TV/TV版
+    if (RegExp(r'^(电影版?|电视剧|tv版?|tv)$').hasMatch(s)) return true;
+    // Plus (英文不区分大小写)
+    if (RegExp(r'^plus$', caseSensitive: false).hasMatch(s)) return true;
+    // 单 + 符号
+    if (s == '+') return true;
+    // 4位年份 (e.g., 2024, 2023)
+    if (RegExp(r'^\d{4}$').hasMatch(s)) return true;
+    // 单数字 (e.g., 1, 2 — 部分源「第1部」会省略「第」)
+    if (RegExp(r'^[\d]+$').hasMatch(s)) return true;
+    return false;
+  }
+
+  /// 合法版本前缀 (罕见). 比如「剧场版 凡人修仙传」「OVA 凡人修仙传」.
+  static bool _isValidVersionPrefix(String s) {
+    if (s.isEmpty) return true;
+    // 剧场版/电影/OVA/TV/TV版/Plus 等在前
+    if (RegExp(r'^(剧场版|电影|电影版|电视剧|tv版?|tv|ova|plus)$', caseSensitive: false).hasMatch(s)) return true;
+    return false;
   }
 
   /// 对结果按相关性排序. 跟 web 端 rankSearchResults 1:1.
