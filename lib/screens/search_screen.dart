@@ -175,8 +175,15 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     // v2.5.26: debounce 800→400ms. 800ms 偏长, 用户输入完到触发搜索的等待感明显.
     // 400ms 既能避免逐字抖动, 又让搜索更"跟手".
     // v2.5.27: 用户继续输入时, 让进行中的旧搜索结果作废, 避免覆盖新状态.
-    _searchGeneration++;
-    _updateTimer = Timer(const Duration(milliseconds: 400), () {
+    // v2.6.19: debounce 400→100ms, 对齐 Selene 回车即搜的"跟手感".
+    //   100ms 既能防连打误触, 又让用户感觉"边输边立刻搜". 跟 Selene 体感对齐.
+    // v2.6.19: 输入时立刻显示 loading 状态 (有 query 但未触发), 避免空窗期
+    //   看到旧结果. 等真正触发 _performSearch 时 _isLoading 会被覆盖.
+    if (query.trim().isNotEmpty) {
+      _searchGeneration++;
+      if (mounted) setState(() => _isLoading = true);
+    }
+    _updateTimer = Timer(const Duration(milliseconds: 100), () {
       if (query.trim().isEmpty) {
         if (mounted) {
           setState(() {
