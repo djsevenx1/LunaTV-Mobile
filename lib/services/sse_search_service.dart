@@ -10,7 +10,11 @@ import 'package:luna_tv/services/local_mode_storage_service.dart';
 
 /// SSE 搜索服务
 class SSESearchService {
-  http.Client? _client;
+  // http.Client? _client; // v2.6.26: 删除 _client 字段, 改用 ApiService
+  //   共享的 _httpClient (保持 keep-alive 连接池). 之前每次搜索都新建
+  //   http.Client() = 新 IOClient = 新 HttpClient, 每次都要重新建 TCP 握手
+  //   + TLS 协商, 冷启首搜 200-1000ms. 共享 client 后同 host 请求走同连接池,
+  //   首搜省掉这层握手, 体感更跟手.
   StreamSubscription? _subscription;
   StreamController<List<SearchResult>>? _incrementalResultsController;
   StreamController<String>? _errorController;
@@ -247,8 +251,13 @@ class SSESearchService {
         },
       );
 
-      // 创建 HTTP 客户端并开始 SSE 连接
-      _client = http.Client();
+      // v2.6.26: 用 ApiService.sharedHttpClient 共享 client 发起 SSE 请求
+      //   (保连接池 + keep-alive). 之前 _client = http.Client() 每次新建
+      //   IOClient → 新 HttpClient → 冷启首搜要重做 TCP 握手 + TLS 协商,
+      //   200-1000ms 延迟, 体感首搜比 Selene 慢 200-1000ms 根因之一. 现在
+      //   跟普通 GET/POST 一样走共享 client, 多次搜索间复用同 host 连接池,
+      //   首搜省 0.2-1s.
+      final client = ApiService.sharedHttpClient;
       final request = http.Request('GET', sseUri);
       request.headers.addAll({
         'Accept': 'text/event-stream',
@@ -256,7 +265,7 @@ class SSESearchService {
         'Cookie': cookies,
       });
 
-      _subscription = _client!.send(request).asStream().listen(
+      _subscription = client.send(request).asStream().listen(
         _handleSSEResponse,
         onError: (error) {
           // 静默处理连接关闭错误，不显示给用户
@@ -452,8 +461,8 @@ class SSESearchService {
     _isConnected = false;
     _timeoutTimer?.cancel();
     _timeoutTimer = null;
-    _client?.close();
-    _client = null;
+    // v2.6.26: 共享 ApiService._httpClient, 不调 client.close() (会关掉整
+    //   个共享 client 影响其他请求). 取消 subscription 让 SSE 流自然关闭.
   }
 
   /// 处理 SSE 错误
@@ -487,8 +496,9 @@ class SSESearchService {
     _timeoutTimer?.cancel();
     _timeoutTimer = null;
 
-    _client?.close();
-    _client = null;
+    // v2.6.26: 共享 ApiService._httpClient, 不调 client.close() (会关掉
+    //   整个共享 client, 影响其他请求). 取消 subscription + 依赖 stream
+    //   onDone 自然结束即可.
 
     _isConnected = false;
     _currentQuery = null;

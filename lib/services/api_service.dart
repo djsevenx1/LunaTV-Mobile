@@ -48,6 +48,12 @@ class ApiService {
   //   复用后同 host 的请求走同一个连接池, 省掉 TLS 握手开销.
   static final http.Client _httpClient = http.Client();
 
+  // v2.6.26: 把 _httpClient 公开给 SSE 搜索复用. 共享连接池省掉每次搜索
+  //   冷启首搜的 TCP 握手 + TLS 协商 (200-1000ms). 调用方 (SSESearchService)
+  //   不得 close() 这个 client, 否则会破坏其他请求的 keep-alive. SSE 长连接
+  //   取消 subscription 让流自然结束即可.
+  static http.Client get sharedHttpClient => _httpClient;
+
   // v2.5.25: 分场景超时 — 之前全部 30s, 列表/搜索卡住时用户等太久.
   //   - 普通 GET/POST (列表/收藏/历史): 15s
   //   - 搜索 (fetchSourcesData): 20s (后端聚合多源, 需要更久)
