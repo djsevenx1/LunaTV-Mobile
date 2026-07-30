@@ -77,6 +77,7 @@ class DoubanMovieDetails {
   final String? imdbId;
   final int? totalEpisodes;
   final List<DoubanRecommendItem> recommends;
+  final List<String> aka; // v2.6.18: 别名列表 (豆瓣 aka 字段)
 
   const DoubanMovieDetails({
     required this.id,
@@ -99,6 +100,7 @@ class DoubanMovieDetails {
     this.imdbId,
     this.totalEpisodes,
     this.recommends = const [],
+    this.aka = const [],
   });
 
   /// 从JSON创建DoubanMovieDetails实例
@@ -267,6 +269,7 @@ class DoubanMovieDetails {
       imdbId: nonEmptyString(json['imdbId'] ?? json['imdb']),
       totalEpisodes: totalEpisodes,
       recommends: recommends,
+      aka: stringList(json['aka']),
     );
   }
 
@@ -293,6 +296,7 @@ class DoubanMovieDetails {
       'imdbId': imdbId,
       'totalEpisodes': totalEpisodes,
       'recommends': recommends.map((r) => r.toJson()).toList(),
+      'aka': aka,
     };
   }
 }
