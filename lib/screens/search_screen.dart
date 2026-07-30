@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/search_result_ranker.dart';
 import 'package:luna_tv/services/sse_search_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/models/search_result.dart';
@@ -86,7 +87,18 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   bool _isClearHistoryButtonHovered = false;
 
   List<SearchResult> get _filteredSearchResults {
-    List<SearchResult> results = List.from(_searchResults);
+    // v2.6.7: 过滤 0 集源 — 下游 DownstreamService.searchPage 和后端
+    //   /api/search/ws 都过滤了 episodes.isEmpty, 但 SSE 增量结果 addAll
+    //   (line 169) 和 SearchResultAggGrid 聚合都没二次过滤. 一旦某个
+    //   SearchResult 漏过 (例如未来加新 source / 后端 SSE 改动 / 缓存里
+    //   存进 0 集) 就会显示"0集"卡片污染结果. 这里兜底过滤.
+    List<SearchResult> results =
+        _searchResults.where((r) => r.episodes.isNotEmpty).toList();
+    // v2.6.7: 相关性排序, 跟 web 端 search-ranking.ts 1:1. 之前 SSE 拿到
+    //   结果直接 addAll, 不相关卡片 (搜"凡人修仙传" 出现"凡人修仙之风起" /
+    //   "仙林外传" 等) 跟相关卡片混在一起显示. 跟 web 行为对齐:
+    //   完全匹配 100 / 开头匹配 80 / 包含 60 / 模糊 20-40 + 年份/豆瓣加分.
+    results = SearchResultRanker.rankSearchResults(results, _searchQuery);
     if (_selectedSource != 'all') results = results.where((r) => r.sourceName == _selectedSource).toList();
     if (_selectedYear != 'all') results = results.where((r) => r.year == _selectedYear).toList();
     if (_selectedTitle != 'all') results = results.where((r) => r.title == _selectedTitle).toList();
@@ -165,8 +177,16 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         .listen((incrementalResults) {
       if (!mounted || gen != _searchGeneration) return;
       if (incrementalResults.isEmpty) return;
+      // v2.6.7: SSE 增量结果 addAll 前再过滤一次 0 集源, 兜底. 下游
+      //   DownstreamService.searchPage 和后端 /api/search/ws 都过滤了
+      //   episodes.isEmpty, 但以防某个 source 漏过滤 (未来加新 source /
+      //   缓存被污染), 客户端这里再卡一道, 避免"0集"卡片污染结果.
+      final filtered = incrementalResults
+          .where((r) => r.episodes.isNotEmpty)
+          .toList();
+      if (filtered.isEmpty) return;
       setState(() {
-        _searchResults = [..._searchResults, ...incrementalResults];
+        _searchResults = [..._searchResults, ...filtered];
         _isLoading = false; // 第一批结果到了就取消 loading, 让用户看到东西
       });
     });
