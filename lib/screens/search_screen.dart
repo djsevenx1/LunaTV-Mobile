@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/search_result_ranker.dart';
 import 'package:luna_tv/services/sse_search_service.dart';
+import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -68,6 +69,14 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   StreamSubscription<String>? _errorSubscription;
   SearchProgress? _searchProgress;
 
+  // v2.6.9: 精确搜索开关 — 跟 web 端 exactSearch 1:1, 默认开.
+  //   开: 搜「凡人修仙传」只显示 title 含「凡人修仙传」的剧 (凡人修仙传 /
+  //       凡人修仙传 新版 等), 不显示「凡人修仙之风起」/「仙林外传」
+  //       等不相关卡片. 关: 显示全部结果 (跟 v2.6.8 行为一致).
+  //   持久化到 SharedPreferences key 'exact_search' (跟 web 端 localStorage
+  //   key 'exactSearch' 1:1), 跨 app 重启保留用户选择.
+  bool _exactSearch = true;
+
   // 筛选/排序状态（保持不变）
   String _selectedSource = 'all';
   String _selectedYear = 'all';
@@ -94,6 +103,18 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     //   存进 0 集) 就会显示"0集"卡片污染结果. 这里兜底过滤.
     List<SearchResult> results =
         _searchResults.where((r) => r.episodes.isNotEmpty).toList();
+    // v2.6.9: 精确搜索过滤 (跟 web 端 page.tsx:602-615 titleContainsQuery
+    //   + exactSearch 1:1). web 端聚合前先 filter title 包含 query, 不相关
+    //   卡片 (搜"凡人修仙传" 出现"凡人修仙之风起" / "仙林外传" / "修仙外传"
+    //   等 title 不含 query 的剧) 默认被过滤. app 端之前只有相关性排序,
+    //   低分卡片 (10-20 分) 仍混在前面, 体感"搜索太随意了".
+    //   精确搜索默认开, 跟 web 默认行为一致. 关掉 (_exactSearch=false)
+    //   返回 v2.6.8 行为, 让用户能看到全部结果.
+    if (_exactSearch) {
+      results = results
+          .where((r) => SearchResultRanker.resultMatchesQuery(r, _searchQuery))
+          .toList();
+    }
     // v2.6.7: 相关性排序, 跟 web 端 search-ranking.ts 1:1. 之前 SSE 拿到
     //   结果直接 addAll, 不相关卡片 (搜"凡人修仙传" 出现"凡人修仙之风起" /
     //   "仙林外传" 等) 跟相关卡片混在一起显示. 跟 web 行为对齐:
@@ -121,6 +142,13 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   void initState() {
     super.initState();
     _loadSearchHistory();
+    // v2.6.9: 加载精确搜索开关 (跟 web 端 page.tsx 读 localStorage 一致).
+    unawaited(_loadExactSearch());
+  }
+
+  Future<void> _loadExactSearch() async {
+    final v = await UserDataService.getExactSearch();
+    if (mounted) setState(() => _exactSearch = v);
   }
 
   Future<void> _loadSearchHistory() async {
@@ -309,6 +337,34 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
                 ],
               ),
             ),
+          // v2.6.9: 精确搜索开关 — 跟 web 端 SettingsPanel 暴露的 toggle
+          //   一致. 默认开, 用户可关掉看全部结果 (兜底). 用 Switch + 简短
+          //   标签, 跟搜索结果区同列, 不占额外导航.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                const Text('精确搜索',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(width: 8),
+                Switch(
+                  value: _exactSearch,
+                  onChanged: (v) {
+                    setState(() => _exactSearch = v);
+                    unawaited(UserDataService.saveExactSearch(v));
+                  },
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _exactSearch
+                      ? '只显示剧名含「$_searchQuery」的剧'
+                      : '显示全部结果 (低相关也展示)',
+                  style: const TextStyle(fontSize: 11, color: Colors.black45),
+                ),
+              ],
+            ),
+          ),
           // 搜索结果
           Expanded(
             child: _buildSearchResults(),

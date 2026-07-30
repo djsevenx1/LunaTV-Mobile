@@ -322,6 +322,21 @@ class UserDataService {
     return prefs.getBool(_preferSpeedTestKey) ?? true;
   }
 
+  // v2.6.9: 精确搜索开关 — 跟 web 端 SettingsPanel.tsx 持久化 key "exactSearch"
+  //   (localStorage) 1:1, 跨 app 重启保留用户选择. 搜「凡人修仙传」默认只
+  //   保留 title 含 query 的 result (跟 web 行为一致), 关掉能看到全部结果.
+  static const String _exactSearchKey = 'exact_search';
+
+  static Future<void> saveExactSearch(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_exactSearchKey, enabled);
+  }
+
+  static Future<bool> getExactSearch() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_exactSearchKey) ?? true;
+  }
+
   // 保存本地搜索设置
   static Future<void> saveLocalSearch(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();

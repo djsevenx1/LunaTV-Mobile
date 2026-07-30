@@ -139,6 +139,43 @@ class SearchResultRanker {
     return math.min(score, 110);
   }
 
+  /// 标题归一化: 转小写 + 去空格 + 去常见标点.
+  /// 跟 web 端 `title.toLowerCase().includes(query.toLowerCase())` 行为对齐,
+  /// 同时去掉空格让 "凡人修仙传" 能匹配 "凡 人 修 仙 传" 这种带空格的标题.
+  static String _normalize(String s) {
+    return s
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[\s\u3000\-—_:：·•・]+'), '');
+  }
+
+  /// 检查 title 是否"包含" query (titleContainsQuery 跟 web 端
+  ///   src/app/search/page.tsx:602-615 1:1).
+  ///
+  /// 行为: 归一化后 title.includes(query). 搜「凡人修仙传」匹配
+  ///   「凡人修仙传」「凡人修仙传 新版」「凡人修仙传之风起」等
+  ///   title 里含「凡人修仙传」的剧, 但不匹配「凡人修仙之风起」
+  ///   (title 不含 query) / 「仙林外传」 (无关剧).
+  ///
+  /// exactSearch=false 时返回 true (不过滤, 跟 web 端 `if (!exactSearch)
+  ///   return true` 一致). 打开 toggle 后能看到全部结果, 不再被强制过滤.
+  ///
+  /// 不做繁简转换: 跟 web 端 chineseConverter.simplized 比简化版只覆盖
+  ///   90% 场景 (用户搜简体命中简体 title, 搜繁体命中繁体 title).
+  ///   繁简转换是 nice-to-have, v2.6.9 暂不引入 switch-chinese 库增加体积.
+  static bool matchesQuery(String title, String query) {
+    if (title.isEmpty || query.isEmpty) return true;
+    final nt = _normalize(title);
+    final nq = _normalize(query);
+    if (nt.contains(nq)) return true;
+    return false;
+  }
+
+  /// 检查 SearchResult 是否"包含" query. 等价 `matchesQuery(r.title, query)`.
+  static bool resultMatchesQuery(SearchResult r, String query) {
+    return matchesQuery(r.title, query);
+  }
+
   /// 对结果按相关性排序. 跟 web 端 rankSearchResults 1:1.
   /// 排序: score desc → year desc → title asc.
   static List<SearchResult> rankSearchResults(
