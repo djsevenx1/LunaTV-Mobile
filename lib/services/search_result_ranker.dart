@@ -79,38 +79,41 @@ class SearchResultRanker {
     final keyword = query.trim();
     if (title.isEmpty || keyword.isEmpty) return 0;
 
-    final titleNoSpace = title.replaceAll(RegExp(r'\s+'), '');
-    final keywordNoSpace = keyword.replaceAll(RegExp(r'\s+'), '');
+    // v2.6.12: 跟 matchesQuery 用同一套归一化 (去所有非字母数字非中文字符),
+    //   之前只去空格, 你-好-a 跟 你好a 在 ranking 里算两个不同 title,
+    //   排序会乱
+    final titleNorm = _normalize(title);
+    final keywordNorm = _normalize(keyword);
 
     var score = 0;
 
     // 1. 完全匹配 100
-    if (title == keyword || titleNoSpace == keywordNoSpace) {
+    if (title == keyword || titleNorm == keywordNorm) {
       score = 100;
     }
     // 2. 开头匹配 80
-    else if (title.startsWith(keyword) || titleNoSpace.startsWith(keywordNoSpace)) {
+    else if (title.startsWith(keyword) || titleNorm.startsWith(keywordNorm)) {
       score = 80;
     }
     // 3. 包含完整关键词 60
-    else if (title.contains(keyword) || titleNoSpace.contains(keywordNoSpace)) {
+    else if (title.contains(keyword) || titleNorm.contains(keywordNorm)) {
       score = 60;
     }
     // 4. 模糊匹配
     else {
-      if (_containsCharsInOrder(titleNoSpace, keywordNoSpace)) {
+      if (_containsCharsInOrder(titleNorm, keywordNorm)) {
         // 字符间隔越小分数越高
-        final similarity = _similarityScore(titleNoSpace, keywordNoSpace);
+        final similarity = _similarityScore(titleNorm, keywordNorm);
         score = 20 + (similarity * 20).round(); // 20-40
       } else {
         // 部分字符匹配
-        final matchedChars = keywordNoSpace
+        final matchedChars = keywordNorm
             .split('')
-            .where((c) => titleNoSpace.contains(c))
+            .where((c) => titleNorm.contains(c))
             .length;
-        final ratio = keywordNoSpace.isEmpty
+        final ratio = keywordNorm.isEmpty
             ? 0.0
-            : matchedChars / keywordNoSpace.length;
+            : matchedChars / keywordNorm.length;
         score = (ratio * 15).round(); // 0-15
       }
     }
@@ -139,36 +142,51 @@ class SearchResultRanker {
     return math.min(score, 110);
   }
 
-  /// 标题归一化: 转小写 + 去空格 + 去常见标点.
-  /// 跟 web 端 `title.toLowerCase().includes(query.toLowerCase())` 行为对齐,
-  /// 同时去掉空格让 "凡人修仙传" 能匹配 "凡 人 修 仙 传" 这种带空格的标题.
+  /// 标题归一化: 转小写 + 去所有标点符号 (只保留字母数字中文).
+  /// v2.6.12: 比 web 端去得更狠 — web 只去空格和几个特定标点
+  ///   (`[\s\u3000\-—_:：·•・]`), 用户实测「你-好-a」搜「你好a」
+  ///   「XX你好a」「你好aXX」都搜不出来. 改成去掉**所有**非字母数字
+  ///   非中文字符, 让用户输入的 query 跟 title 里的字符序列对齐.
   static String _normalize(String s) {
     return s
         .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), '')
-        .replaceAll(RegExp(r'[\s\u3000\-—_:：·•・]+'), '');
+        .replaceAll(RegExp(r'[^\w\u4e00-\u9fff]'), '');
   }
 
-  /// 检查 title 是否"包含" query (titleContainsQuery 跟 web 端
-  ///   src/app/search/page.tsx:602-615 1:1).
+  /// 顺序子序列匹配: title 归一化后, query 字符是否按顺序出现在 title 里.
+  /// v2.6.12: 从 v2.6.9 的 substring 改成 subsequence, 跟用户实测反馈对齐:
+  ///   搜「你好a」能匹配:
+  ///   - 「你-好-a」 (去符号后 = 「你好a」, 直接命中)
+  ///   - 「xx你好a」 (前缀)
+  ///   - 「你好axx」 (后缀)
+  ///   - 「你x好xa」 (中间夹其他字符)
+  ///   - 「你好A」「你好a」 (大小写不敏感)
+  ///   但不匹配:
+  ///   - 「你好」 (query 是 3 字符, title 归一化后只有 2 字符命中)
+  ///   - 「好你a」 (乱序, subsequence 失败)
   ///
-  /// 行为: 归一化后 title.includes(query). 搜「凡人修仙传」匹配
-  ///   「凡人修仙传」「凡人修仙传 新版」「凡人修仙传之风起」等
-  ///   title 里含「凡人修仙传」的剧, 但不匹配「凡人修仙之风起」
-  ///   (title 不含 query) / 「仙林外传」 (无关剧).
-  ///
-  /// exactSearch=false 时返回 true (不过滤, 跟 web 端 `if (!exactSearch)
-  ///   return true` 一致). 打开 toggle 后能看到全部结果, 不再被强制过滤.
+  /// web 端 page.tsx:602-615 仍是 substring, 但 web 没遇到这个用户场景
+  /// (用户反馈的是 app 端问题, web 端搜源就够用). 改成 subsequence 是
+  /// app 端的优化, 不影响 web 端逻辑.
   ///
   /// 不做繁简转换: 跟 web 端 chineseConverter.simplized 比简化版只覆盖
   ///   90% 场景 (用户搜简体命中简体 title, 搜繁体命中繁体 title).
-  ///   繁简转换是 nice-to-have, v2.6.9 暂不引入 switch-chinese 库增加体积.
+  ///   繁简转换是 nice-to-have, 暂不引入 switch-chinese 库增加体积.
   static bool matchesQuery(String title, String query) {
     if (title.isEmpty || query.isEmpty) return true;
     final nt = _normalize(title);
     final nq = _normalize(query);
-    if (nt.contains(nq)) return true;
-    return false;
+    if (nq.isEmpty) return true;  // 纯符号 query (如 "---"), 全部放行
+    
+    // 子序列匹配: 双指针扫描, nt 跳过, nq 必须按顺序找到所有字符
+    int ti = 0, qi = 0;
+    while (ti < nt.length && qi < nq.length) {
+      if (nt[ti] == nq[qi]) {
+        qi++;
+      }
+      ti++;
+    }
+    return qi == nq.length;
   }
 
   /// 检查 SearchResult 是否"包含" query. 等价 `matchesQuery(r.title, query)`.
