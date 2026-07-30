@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/search_result_ranker.dart';
 import 'package:luna_tv/services/sse_search_service.dart';
+import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/models/search_result.dart';
@@ -239,6 +240,12 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       });
     });
 
+    // v2.6.11: /api/search fallback — 跟 SSE 并行跑, 哪个先到先用,
+    //   修「一直转圈」. 后端没 /api/search/ws 端点 (旧版本) / SSE 卡住 /
+    //   网络问题都会让 SSE 不返回, 兜底走 /api/search (老接口) 至少能
+    //   出结果. 8s 还没拿到 SSE 结果就 fall back, 不阻塞用户.
+    unawaited(_runSearchFallback(query, gen));
+
     try {
       await _sseSearchService.startSearch(query);
     } catch (e) {
@@ -247,6 +254,38 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         _searchError = e.toString();
         _isLoading = false;
       });
+    }
+  }
+
+  /// v2.6.11: /api/search 兜底 — 跟 SSE 并行, SSE 8s 没结果就 fire 兜底,
+  ///   修「一直转圈」. 拿到结果后 addAll 进 _searchResults, 自然走
+  ///   _filteredSearchResults 过滤 + 精确搜索 + 排序, 跟 SSE 结果完全一致.
+  ///   SSE 之后推回的结果也会通过同一路径 addAll 进来, 两条流汇合不冲突.
+  Future<void> _runSearchFallback(String query, int gen) async {
+    try {
+      // 8s 还没拿到结果才 fire 兜底, 太早发会跟 SSE 抢资源
+      await Future<void>.delayed(const Duration(seconds: 8));
+      if (!mounted || gen != _searchGeneration) return;
+      // SSE 已经出结果了就不用兜底
+      if (_searchResults.isNotEmpty) return;
+      if (!_isLoading) return;  // 搜索已被取消/超时
+      
+      print('[Search] SSE 8s 无结果, 触发 /api/search 兜底');
+      final results = await ApiService.fetchSourcesData(query)
+          .timeout(const Duration(seconds: 12));
+      
+      if (!mounted || gen != _searchGeneration) return;
+      if (results.isEmpty) return;
+      
+      final filtered = results.where((r) => r.episodes.isNotEmpty).toList();
+      if (filtered.isEmpty) return;
+      
+      setState(() {
+        _searchResults = [..._searchResults, ...filtered];
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('[Search] /api/search 兜底异常: $e');
     }
   }
 

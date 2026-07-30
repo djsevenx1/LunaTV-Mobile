@@ -176,8 +176,9 @@ class SSESearchService {
 
     _isConnected = true;
 
-    // 设置15秒超时定时器
-    _timeoutTimer = Timer(const Duration(seconds: 15), () {
+    // v2.6.11: 15s → 20s, 给 18 源批跑更多时间. 但 search_screen 端
+    //   有 8s /api/search 兜底, 即使 SSE 全卡也最多转 8s 就出结果.
+    _timeoutTimer = Timer(const Duration(seconds: 20), () {
       if (_isConnected) {
         _handleTimeout();
       }
