@@ -13,6 +13,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/search_result_ranker.dart';
 import 'package:luna_tv/services/diary_service.dart';
 import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
@@ -2296,11 +2297,24 @@ class _PlayerScreenState extends State<PlayerScreen>
       final resources = await resourcesFut;
       if (!mounted) return;
 
+      // v2.6.10: 先按剧名归一化精确匹配过滤, 跟 search_screen 一致.
+      //   之前 _loadSources 直接用 /api/search 全量结果聚合, 搜「凡人修仙传」
+      //   会带进「凡人修仙之风起」「仙林外传」之类 title 不含 query 的剧,
+      //   这些剧在某源上集数还多, bySource 选集数最多时会盖掉真正的目标剧,
+      //   用户切源发现内容不对. 现在先用 SearchResultRanker.resultMatchesQuery
+      //   过滤掉 title 不含 query 的, 再按源聚合.
+      final filteredResults = results
+          .where((r) => SearchResultRanker.resultMatchesQuery(r, title))
+          .toList();
+      DiaryService.add(
+          '[SourceFilter] 精确匹配过滤: ${results.length} → ${filteredResults.length} '
+          '(过滤掉 ${results.length - filteredResults.length} 个不相关剧集)');
+
       // 按 source 聚合: 同源保留集数最多的一条 (跟 web 一致)
       // 注: fetchSourcesData 已按 title_year_source 去重, 同一 source 的多个
       // 标题版本 (如 "凡人修仙传" + "凡人修仙传 新版") 也只留集数最多的
       final bySource = <String, SearchResult>{};
-      for (final r in results) {
+      for (final r in filteredResults) {
         final k = r.source;
         if (k.isEmpty) continue;
         final prev = bySource[k];
@@ -2308,41 +2322,27 @@ class _PlayerScreenState extends State<PlayerScreen>
           bySource[k] = r;
         }
       }
-      final searchYear = widget.videoInfo.year;
       DiaryService.add(
           '[SourceFilter] /api/search 命中: ${results.length}, 按源聚合后: ${bySource.length}, '
           '全源数: ${resources.length}, 标题: "$title"');
 
-      // 按 resources 顺序合并: 全源都展示, 命中的用真实数据, 没命中的占位
+      // v2.5.82→: 只展示有真实结果的源, 过滤 0 集 (避免 UI 显示 "共0集" / "待测")
+      //   之前占位 "没命中的源也展示" 的逻辑导致 18 源全显示, 但 16 个是
+      //   0 集占位, 用户体验差. 现在按 bySource 顺序直接展示, 没命中的源
+      //   自然就不会出现, 跟 web 列表页行为一致.
       final merged = <SearchResult>[];
-      for (final res in resources) {
-        if (res.key.isEmpty || res.disabled) continue;
-        final hit = bySource[res.key];
-        if (hit != null) {
-          merged.add(hit);
-        } else {
-          // 占位: 没命中的源也显示, 让用户看到"这个源搜不到"
-          merged.add(SearchResult(
-            id: '',
-            title: title,
-            poster: '',
-            episodes: const [],
-            episodesTitles: const [],
-            source: res.key,
-            sourceName: res.name,
-            year: searchYear,
-          ));
-        }
+      for (final entry in bySource.entries) {
+        if (entry.value.episodes.isEmpty) continue;
+        merged.add(entry.value);
       }
       DiaryService.add(
-          '[SourceFilter] 合并后展示源数: ${merged.length} '
-          '(命中 ${bySource.length}, 占位 ${merged.length - bySource.length})');
+          '[SourceFilter] 合并后展示源数: ${merged.length} (0 集过滤: ${bySource.length - merged.length})');
 
       setState(() {
         _sourceResults = merged;
         _sourcesLoading = false;
-        if (bySource.isEmpty) {
-          _error = '没有源匹配 "$title", 仅展示源列表';
+        if (merged.isEmpty) {
+          _error = '没有源匹配 "$title"';
         }
       });
 
