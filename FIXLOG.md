@@ -1667,3 +1667,40 @@ TVBox 协议每页固定 20 条 (`size` 参数只是 hint, 实际返回数 ≤ 2
 
 - `lib/screens/short_drama_screen.dart`: `_loadCategories` 加「全部」tab + 过滤「短剧」主类
 - `pubspec.yaml`: 2.5.4+1 → 2.5.5+1
+
+---
+
+## v2.6.7 (2026-07-30) — 搜索机制走 SSE 跟 Selene 一致 + 自维护源入口
+
+### 现象
+
+1. 搜「凡人修仙传」app 只显示 14 条, web 同条件显示 18 个源
+2. 跨源同剧 app 端只有 1 个源名, web 显示全部源名 (source_names.join(','))
+3. M3U/订阅自维护源在 Selene 没有, LunaTV-Mobile 有 m3u_import_screen
+   但 user_menu 没暴露入口, 用户找不到
+
+### 根因
+
+app 之前走 `ApiService.fetchSourcesData` → 后端 `/api/search` 聚合接口,
+后端按 `title+year+type` 跨源同剧合并 (18 个源同剧聚成 1 条 SearchResult
++ 17 条进 `extraSources`). SearchResultAggGrid 拿到 1 条 SearchResult
+只能显示 1 个源名, 跟 web `source_names.join(',')` 行为不一致. Selene
+走 `SSESearchService` 客户端直连 + 后端 SSE 增量推回, app 没用上.
+
+### 修复
+
+- `lib/services/sse_search_service.dart` (已有) + `lib/screens/search_screen.dart`
+  改用 SSESearchService, 接增量结果 + 进度 + 错误, UI 加进度条.
+- `lib/services/api_service.dart::_dedupeBySourceKey` 改 v2.6.6 `title+year+source` key,
+  跨源不合并 (跨源同剧交给 SearchResultAggGrid).
+- `lib/widgets/user_menu.dart`「其他」section 加「导入订阅 / 自维护源」入口
+  (LucideIcons.rss), 跳到 `/m3u-import` (m3u_import_screen). 导入后自动
+  切本地模式, SSESearchService 客户端直连, 自维护源能搜到.
+
+### 影响
+
+- 搜「凡人修仙传」: app 跟 web 一致显示 18 个源, 跨源同剧聚合卡片
+  显示全部 18 个源名 (逗号分隔, 跟 web 1:1)
+- 用户可以导入 M3U/订阅链接自维护源 (Selene 没有这能力)
+- 搜索进度可见: 「搜索中 5 / 18 — 凡人修仙传」细进度反馈
+

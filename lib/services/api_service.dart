@@ -759,11 +759,19 @@ class ApiService {
     }
   }
 
-  /// 按 (title + year + 类型) 聚合跨源同剧,同一剧保留集数最多的 source;
-  /// 之前版本按 source 去重 → 96 源返 628 个结果被压到 26 条
-  /// (1 条/source, 真正有"凡人"剧的源只有 26 个, 用户看到就剩 14 条渲染)
-  /// 现在按剧聚合: "凡人修仙传" 在 30 个源都有, 保留集数最多的那个 source 即可
-  /// 其它 source 进 _extraSources 列表, UI 切源时能直接切
+  /// 跨源不合并, 每个 source 一条结果; 同 source 同 title 同 year 视为
+  /// 同剧多版本, 只保留集数最多的 (处理 "新版"/"重制版" 这种集数变体).
+  ///
+  /// 关键: 跨源同剧的合并交给 SearchResultAggGrid (按 title+year+类型
+  /// 聚合 + sourceNames.join(',') 展示, 跟 web 行为一致).
+  /// api_service.dart 这层不做跨源聚合, 不然 18 个源同剧 (如"凡人修仙传")
+  /// 在 SearchResultAggGrid 那边就只剩 1 条 SearchResult, 卡片上
+  /// sourceNames 只有 1 个源名, 跟 web 18 个源名差很多.
+  ///
+  /// 同源的多版本 ("凡人修仙传" + "凡人修仙传 新版") 不会错误合并,
+  /// 因为 key 含 title, 两个不同 title 走不同 key, 各自保留.
+  /// 真正的"可可影视"重复 (tv 19 集 + movie 1 集) 也由同源多版本
+  /// 去重解决: 集数多的覆盖集数少的.
   static List<SearchResult> _dedupeBySourceKey(List<SearchResult> results) {
     final deduped = <String, SearchResult>{};
     for (final r in results) {
@@ -772,29 +780,17 @@ class ApiService {
         deduped['__nokey_${deduped.length}'] = r;
         continue;
       }
-      // v2.6.5: 用 title+year+类型 (tv/movie) 作 key, 跨源同剧聚合.
-      //   v2.5.81 试过 title+year+source, 但会把同源不同标题版本
-      //   (如 "凡人修仙传" + "凡人修仙传 新版") 错误合并成同剧.
-      //   真正的"可可影视"重复 (tv 19 集 + movie 1 集) 由
-      //   player_screen.dart 的 bySource 聚合解决 — 同源同剧保留
-      //   集数最多的一条. api_service.dart 这层只做跨源同剧合并.
-      final type = r.episodes.length > 1 ? 'tv' : 'movie';
-      final key = '${r.title}_${r.year}_$type';
+      // v2.6.6: 跟 v2.5.81 一致 — title+year+source, 跨源不合并.
+      //   同 source 的同 title 同 year 才会合并 (同源去重), 跨源分开保留.
+      final key = '${r.title}_${r.year}_${r.source}';
       final existing = deduped[key];
       if (existing == null) {
         deduped[key] = r;
       } else if (r.episodes.length > existing.episodes.length) {
-        // 当前结果集数更多, 当主 source, 旧的进 _extraSources
-        final oldExtras = List<SearchResult>.from(existing.extraSources ?? const []);
-        oldExtras.add(existing);
-        r.extraSources = oldExtras;
+        // 同源同剧多版本, 集数更多的覆盖 (处理 "新版"/"重制版")
         deduped[key] = r;
-      } else {
-        // 当前集数少, 进现有 entry 的 _extraSources
-        final extras = List<SearchResult>.from(existing.extraSources ?? const []);
-        extras.add(r);
-        existing.extraSources = extras;
       }
+      // 集数少, 跳过 (同源同剧的次优版本)
     }
     return deduped.values.toList();
   }

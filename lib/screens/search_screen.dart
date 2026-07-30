@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
-import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
+import 'package:luna_tv/services/sse_search_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
@@ -49,6 +49,23 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   //   新搜索, 旧搜索的 await 晚返回会覆盖新搜索的空/loading 状态, 导致"结果突然消失".
   //   每次发起新搜索递增 generation, await 返回后校验, 不匹配就丢弃结果.
   int _searchGeneration = 0;
+
+  // v2.6.7: 改用 SSESearchService 走客户端直连 + SSE 增量推回 (跟 Selene 一致).
+  //   本地模式 → 客户端直连资源站 ?ac=videolist&wd=... 并行搜, 自维护源
+  //   (LocalModeStorageService 存的) 也能搜.
+  //   非本地模式 → 后端 /api/search/ws SSE 推流, 后端按 source+id 去重,
+  //   每搜完一个 source 就推回 source_result 事件.
+  //   之前 _performSearch 走 ApiService.fetchSourcesData → 后端 /api/search
+  //   聚合接口 → 后端按 title+year+type 跨源合并 (e.g. 18 源同剧聚成 1 条
+  //   SearchResult + 17 条进 extraSources) → SearchResultAggGrid 拿到
+  //   1 条 SearchResult 只能显示 1 个源名. 跟 web 的 source_names.join(',')
+  //   行为不一致. 改 SSE 后后端不再做跨源合并, 18 条全推回, SearchResultAggGrid
+  //   按 title+year+类型 自己聚合 + join 所有源名, 跟 web 一致.
+  final SSESearchService _sseSearchService = SSESearchService();
+  StreamSubscription<List<SearchResult>>? _incrementalResultsSubscription;
+  StreamSubscription<SearchProgress>? _progressSubscription;
+  StreamSubscription<String>? _errorSubscription;
+  SearchProgress? _searchProgress;
 
   // 筛选/排序状态（保持不变）
   String _selectedSource = 'all';
@@ -123,21 +140,59 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Future<void> _performSearch(String query) async {
-    // v2.5.27: 记录本次搜索的代次, await 后校验, 避免旧搜索覆盖新搜索状态
+    // v2.6.7: 改用 SSESearchService — 走客户端直连 (本地模式) 或
+    //   后端 /api/search/ws SSE 增量推回, 跟 Selene 行为一致.
+    //   取消旧订阅, 防增量结果混到新搜索里.
+    await _incrementalResultsSubscription?.cancel();
+    await _progressSubscription?.cancel();
+    await _errorSubscription?.cancel();
+    await _sseSearchService.stopSearch();
+
     final gen = ++_searchGeneration;
     setState(() {
       _hasSearched = true;
       _searchResults = [];
       _searchError = null;
       _isLoading = true;
+      _searchProgress = null;
     });
-    try {
-      final results = await ApiService.fetchSourcesData(query);
+
+    // 增量结果: 每个 source 完成搜索就推回一批, addAll 到 _searchResults.
+    //   SearchResultAggGrid 内部按 title+year+类型 聚合并 join 所有源名,
+    //   跟 web 行为一致.
+    _incrementalResultsSubscription = _sseSearchService
+        .incrementalResultsStream
+        .listen((incrementalResults) {
+      if (!mounted || gen != _searchGeneration) return;
+      if (incrementalResults.isEmpty) return;
+      setState(() {
+        _searchResults = [..._searchResults, ...incrementalResults];
+        _isLoading = false; // 第一批结果到了就取消 loading, 让用户看到东西
+      });
+    });
+
+    // 进度: 显示"已完成 X / 总共 Y 个源"
+    _progressSubscription = _sseSearchService.progressStream.listen((progress) {
       if (!mounted || gen != _searchGeneration) return;
       setState(() {
-        _searchResults = results;
+        _searchProgress = progress;
+        if (progress.isComplete) {
+          _isLoading = false;
+        }
+      });
+    });
+
+    // 错误
+    _errorSubscription = _sseSearchService.errorStream.listen((error) {
+      if (!mounted || gen != _searchGeneration) return;
+      setState(() {
+        _searchError = error;
         _isLoading = false;
       });
+    });
+
+    try {
+      await _sseSearchService.startSearch(query);
     } catch (e) {
       if (!mounted || gen != _searchGeneration) return;
       setState(() {
@@ -150,6 +205,12 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   @override
   void dispose() {
     _updateTimer?.cancel();
+    _incrementalResultsSubscription?.cancel();
+    _progressSubscription?.cancel();
+    _errorSubscription?.cancel();
+    // 异步 stopSearch 不 await — dispose 是 sync, fire-and-forget
+    //   SSESearchService.stopSearch 内部会关 _client / _subscription.
+    unawaited(_sseSearchService.stopSearch());
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
@@ -173,12 +234,18 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         if (_searchController.hasListeners) _searchController.clear();
         // v2.5.27: 清空时让进行中的搜索作废
         _searchGeneration++;
+        // v2.6.7: 清空时也停掉 SSE, 不然旧搜索的结果还会继续推回
+        unawaited(_sseSearchService.stopSearch());
+        _incrementalResultsSubscription?.cancel();
+        _progressSubscription?.cancel();
+        _errorSubscription?.cancel();
         setState(() {
           _searchQuery = '';
           _hasSearched = false;
           _searchResults = [];
           _searchError = null;
           _isLoading = false;
+          _searchProgress = null;
         });
       },
       content: Column(
@@ -194,6 +261,34 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
                 style: const TextStyle(color: Colors.red, fontSize: 12),
               ),
             ),
+          // v2.6.7: SSE 搜索进度条 — 结果已出但还没搜完时, 顶部显示细进度,
+          //   让用户知道"还有源在搜, 别急着滚到底". 搜完 (_isComplete) 或
+          //   还没搜 (_searchProgress == null) 时不显示.
+          if (_searchProgress != null &&
+              !_searchProgress!.isComplete &&
+              _searchProgress!.totalSources > 0 &&
+              _searchResults.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 1.5),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '搜索中 ${_searchProgress!.completedSources} / ${_searchProgress!.totalSources}'
+                      '${_searchProgress!.currentSource != null ? ' — ${_searchProgress!.currentSource}' : ''}',
+                      style: const TextStyle(fontSize: 11, color: Colors.black54),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // 搜索结果
           Expanded(
             child: _buildSearchResults(),
@@ -205,17 +300,28 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
 
   Widget _buildSearchResults() {
     // v2.5.26: 搜索中且还没结果时显示 loading, 给用户即时反馈
+    // v2.6.7: 加进度条 + 当前源名, 让用户看到"5/18 个源完成"这种进度,
+    //   SSE 增量推回时第一批结果到了就显示结果, 进度条继续在结果上方跑.
     if (_isLoading && _searchResults.isEmpty) {
-      return const Center(
+      final progress = _searchProgress;
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 12),
-            Text(
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            const Text(
               '搜索中...',
               style: TextStyle(fontSize: 13),
             ),
+            if (progress != null && progress.totalSources > 0) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${progress.completedSources} / ${progress.totalSources} 个源'
+                '${progress.currentSource != null ? ' (${progress.currentSource})' : ''}',
+                style: const TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ],
           ],
         ),
       );
