@@ -261,19 +261,14 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       });
     });
 
-    // v2.6.11: /api/search fallback — 跟 SSE 并行跑, 哪个先到先用,
-    //   修「一直转圈」. 后端没 /api/search/ws 端点 (旧版本) / SSE 卡住 /
-    //   网络问题都会让 SSE 不返回, 兜底走 /api/search (老接口) 至少能
-    //   出结果. 8s 还没拿到 SSE 结果就 fall back, 不阻塞用户.
-    unawaited(_runSearchFallback(query, gen));
-
-    // v2.6.16: 多名称搜索 — 跟 SSE 并行, 通过豆瓣搜索拿影片别名
-    //   (e.g. 铁拳教育 → 极权教师 / 不良指导官 / 真教育 / Teach You a Lesson 等),
-    //   对每个别名并行打 /api/search 搜, 结果跟 SSE 汇合.
-    //   3s 后还没拿到 SSE 第一批结果就 fire, 别名结果自然走
-    //   _filteredSearchResults 过滤 + 精确搜索 + 排序, 跟主结果一致.
-    //   失败/超时就静默走原 query 兜底, 不破坏现有逻辑.
-    unawaited(_runMultiNameSearch(query, gen));
+    // v2.6.22: 删 fire 兜底 + 别名搜 — 跟 Selene 1:1, 走纯 SSE 增量推回.
+    //   v2.6.21 changelog 写了删, 但代码没动, 这版补删.
+    //   之前 _runSearchFallback 8s 后 fire /api/search 聚合 (后端 80 源
+    //   Promise.allSettled 等最慢 20s) + _runMultiNameSearch 3s 后 fire
+    //   豆瓣别名 (每个别名并行 80 源), 跟 SSE 主路同时并发 80*5=400 源,
+    //   后端 CPU/网络/资源站全打满, SSE 主路跟着卡, 结果数还被
+    //   _exactSearch subsequence 过滤 (凡人修仙之风起 / 仙林外传等) —
+    //   用户体感「搜得没 Selene 全, 又慢」根因.
 
     try {
       await _sseSearchService.startSearch(query);
@@ -286,103 +281,12 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     }
   }
 
-  /// v2.6.11: /api/search 兜底 — 跟 SSE 并行, SSE 8s 没结果就 fire 兜底,
-  ///   修「一直转圈」. 拿到结果后 addAll 进 _searchResults, 自然走
-  ///   _filteredSearchResults 过滤 + 精确搜索 + 排序, 跟 SSE 结果完全一致.
-  ///   SSE 之后推回的结果也会通过同一路径 addAll 进来, 两条流汇合不冲突.
-  Future<void> _runSearchFallback(String query, int gen) async {
-    try {
-      // 8s 还没拿到结果才 fire 兜底, 太早发会跟 SSE 抢资源
-      await Future<void>.delayed(const Duration(seconds: 8));
-      if (!mounted || gen != _searchGeneration) return;
-      // SSE 已经出结果了就不用兜底
-      if (_searchResults.isNotEmpty) return;
-      if (!_isLoading) return;  // 搜索已被取消/超时
-      
-      print('[Search] SSE 8s 无结果, 触发 /api/search 兜底');
-      final results = await ApiService.fetchSourcesData(query)
-          .timeout(const Duration(seconds: 12));
-      
-      if (!mounted || gen != _searchGeneration) return;
-      if (results.isEmpty) return;
-      
-      final filtered = results.where((r) => r.episodes.isNotEmpty).toList();
-      if (filtered.isEmpty) return;
-      
-      setState(() {
-        _searchResults = [..._searchResults, ...filtered];
-        _isLoading = false;
-      });
-    } catch (e) {
-      print('[Search] /api/search 兜底异常: $e');
-    }
-  }
-
-  /// v2.6.16: 多名称搜索 — 跟 SSE 并行, 通过豆瓣搜索拿影片别名 (aka),
-  ///   对每个别名并行打 /api/search 搜, 结果跟 SSE 汇合.
-  ///   解决「一部剧多个名字搜不到」问题. 例如搜「铁拳教育」,
-  ///   豆瓣详情返回 aka = [极权教师, 不良指导官, 真教育, Teach You a Lesson, ...],
-  ///   把这些都拿去搜源, 命中范围比只搜原 query 宽很多.
-  ///   失败/超时就静默走原 query 兜底, 不破坏现有逻辑.
-  ///   触发时机: 3s 后 SSE 没返回第一批结果时 fire, 让主结果先出来.
-  Future<void> _runMultiNameSearch(String query, int gen) async {
-    try {
-      // 3s 还没拿到 SSE 第一批结果, 这时 fire 也不会太干扰主结果
-      await Future<void>.delayed(const Duration(seconds: 3));
-      if (!mounted || gen != _searchGeneration) return;
-      if (!_isLoading) return;  // 搜索已被取消/超时
-      // 已经有结果了也别打扰 (主搜索出了东西, 别名就不那么重要)
-      // 但仍 fire 一下, 因为别名能扩展结果集. 不强制跳过.
-
-      print('[Search] 触发多名称搜索 (豆瓣别名扩展)');
-      final variants = await DoubanService.expandSearchKeywords(context, query);
-      if (!mounted || gen != _searchGeneration) return;
-      // 如果只返回了原 query, 说明豆瓣没找到或失败, 直接返回
-      if (variants.length <= 1) {
-        print('[Search] 豆瓣未返回别名, 跳过别名搜索');
-        return;
-      }
-
-      // 取前 4 个别名 (原 query 已经搜过, 不重复打), 并行打 /api/search
-      // 限制 4 个避免给后端 / 豆瓣造成压力, 也避免 user 看到太多延迟
-      final aliases = variants.skip(1).take(4).toList();
-      print('[Search] 别名搜索: $aliases');
-
-      // 并行搜索
-      final futures = aliases.map((alias) async {
-        try {
-          final results = await ApiService.fetchSourcesData(alias)
-              .timeout(const Duration(seconds: 10));
-          if (!mounted || gen != _searchGeneration) return <SearchResult>[];
-          // 过滤 0 集
-          return results.where((r) => r.episodes.isNotEmpty).toList();
-        } catch (e) {
-          print('[Search] 别名 $alias 搜索异常: $e');
-          return <SearchResult>[];
-        }
-      }).toList();
-
-      final allResults = await Future.wait(futures);
-      if (!mounted || gen != _searchGeneration) return;
-
-      // 合并所有结果, 用 source+id 去重 (避免跟主 SSE 结果重复)
-      final deduped = <String, SearchResult>{};
-      for (final r in [..._searchResults, ...allResults.expand((x) => x)]) {
-        final key = '${r.source}_${r.id}';
-        deduped[key] = r;
-      }
-      final merged = deduped.values.toList();
-      if (merged.isEmpty) return;
-
-      setState(() {
-        _searchResults = merged;
-        _isLoading = false;
-      });
-      print('[Search] 别名搜索完成, 合并后共 ${merged.length} 条');
-    } catch (e) {
-      print('[Search] 多名称搜索异常: $e');
-    }
-  }
+  /// v2.6.22: 删 _runSearchFallback / _runMultiNameSearch 两个方法体,
+  ///   走纯 SSE 增量推回, 跟 Selene 1:1. 之前 8s /api/search 兜底 +
+  ///   3s 豆瓣别名搜 fire /api/search 聚合 (后端 80 源 Promise.allSettled),
+  ///   跟主路 SSE 并发跑 80*5=400 源, 后端/资源站全打满, SSE 主路
+  ///   跟着卡, 结果数还被 _exactSearch subsequence 过滤 (凡人修仙之风起 /
+  ///   仙林外传等) — 用户体感「搜得没 Selene 全, 又慢」根因.
 
   @override
   void dispose() {
