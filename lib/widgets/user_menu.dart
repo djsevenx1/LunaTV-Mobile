@@ -6,7 +6,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/screens/login_screen.dart';
-import 'package:luna_tv/screens/m3u_import_screen.dart';
 import 'package:luna_tv/services/douban_cache_service.dart';
 import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/screens/diary_screen.dart';
@@ -1964,18 +1963,6 @@ class _UserMenuState extends State<UserMenu> {
                       builder: (_) => const SourceBrowserScreen(),
                     ),
                   );
-                },
-              ),
-              _buildDivider(),
-              // v2.6.7: 导入订阅/M3U — 自维护源入口. Selene 没有这个能力
-              //   (m3u_import_screen 是 LunaTV-Mobile 独有). 导入后自动切本地
-              //   模式, 客户端直连资源站, 跟 Selene SSE 行为对齐.
-              _buildActionItem(
-                title: '导入订阅 / 自维护源',
-                icon: LucideIcons.rss,
-                iconColor: const Color(0xFFF59E0B),
-                onTap: () {
-                  Navigator.of(context).pushNamed('/m3u-import');
                 },
               ),
               _buildDivider(),
