@@ -82,6 +82,10 @@ class _MainLayoutState extends State<MainLayout> {
   Timer? _debounceTimer;
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
+  // v2.6.23: 搜索建议总开关 — 点弹层右上角 × 后本 session 关掉, 跟 Selene 1:1
+  //   (Selene 搜索页只显示搜索结果, 不弹建议下拉). 状态在 main_layout 内存
+  //   里维护, 退出 app 重置回 true. 后续版可加 SharedPreferences 持久化.
+  bool _suggestionsEnabled = true;
 
   @override
   void dispose() {
@@ -187,6 +191,11 @@ class _MainLayoutState extends State<MainLayout> {
   void _showSuggestionsOverlay() {
     _removeOverlay();
 
+    // v2.6.23: 用户在弹层点了 × 后, 本 session 内不再弹建议栏
+    if (!_suggestionsEnabled) {
+      return;
+    }
+
     if (_searchSuggestions.isEmpty) {
       return;
     }
@@ -216,52 +225,112 @@ class _MainLayoutState extends State<MainLayout> {
                 : Colors.white,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 320),
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                shrinkWrap: true,
-                itemCount: _searchSuggestions.length,
-                itemBuilder: (context, index) {
-                  final suggestion = _searchSuggestions[index];
-                  return InkWell(
-                    onTap: () {
-                      widget.searchController?.text = suggestion;
-                      widget.onSearchSubmitted?.call(suggestion);
-                      _removeOverlay();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            LucideIcons.search,
-                            size: 16,
-                            color: themeService.isDarkMode
-                                ? const Color(0xFF666666)
-                                : const Color(0xFF95a5a6),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              suggestion,
-                              style: FontUtils.poppins(context,
-                                                                fontSize: 14,
-                                color: themeService.isDarkMode
-                                    ? const Color(0xFFffffff)
-                                    : const Color(0xFF2c3e50),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+              // v2.6.23: Column 拆 header + ListView, header 显示「搜索建议」+ ×
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: themeService.isDarkMode
+                              ? const Color(0xFF2a2a2a)
+                              : const Color(0xFFecf0f1),
+                          width: 1,
+                        ),
                       ),
                     ),
-                  );
-                },
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '搜索建议',
+                            style: FontUtils.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: themeService.isDarkMode
+                                  ? const Color(0xFF888888)
+                                  : const Color(0xFF95a5a6),
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () {
+                            // v2.6.23: 点 × 关掉本 session 建议栏, 跟 Selene 1:1
+                            setState(() {
+                              _suggestionsEnabled = false;
+                            });
+                            _removeOverlay();
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              LucideIcons.x,
+                              size: 14,
+                              color: themeService.isDarkMode
+                                  ? const Color(0xFF888888)
+                                  : const Color(0xFF95a5a6),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      shrinkWrap: true,
+                      itemCount: _searchSuggestions.length,
+                      itemBuilder: (context, index) {
+                        final suggestion = _searchSuggestions[index];
+                        return InkWell(
+                          onTap: () {
+                            widget.searchController?.text = suggestion;
+                            widget.onSearchSubmitted?.call(suggestion);
+                            _removeOverlay();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  LucideIcons.search,
+                                  size: 16,
+                                  color: themeService.isDarkMode
+                                      ? const Color(0xFF666666)
+                                      : const Color(0xFF95a5a6),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    suggestion,
+                                    style: FontUtils.poppins(
+                                      fontSize: 14,
+                                      color: themeService.isDarkMode
+                                          ? const Color(0xFFffffff)
+                                          : const Color(0xFF2c3e50),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
