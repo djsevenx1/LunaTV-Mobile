@@ -190,8 +190,43 @@ class SearchResultRanker {
   }
 
   /// 检查 SearchResult 是否"包含" query. 等价 `matchesQuery(r.title, query)`.
+  ///   注: v2.6.12 改成子序列匹配 (顺序 in-order, 中间可夹字符), 适合
+  ///   搜索页让「你-好-a」也能搜出「你好a」. 播放详情页定位要严格,
+  ///   用下面的 resultMatchesQueryStrict (substring + year 联合).
   static bool resultMatchesQuery(SearchResult r, String query) {
     return matchesQuery(r.title, query);
+  }
+
+  /// v2.6.14: 播放详情页联合去重 — title substring 匹配 + year 严格匹配.
+  ///   跟 resultMatchesQuery (子序列) 区别:
+  ///   - resultMatchesQuery 子序列: 「凡人修仙传」可匹配「凡人修仙传之风起」
+  ///     (适合搜索页, 子系列也展示)
+  ///   - resultMatchesQueryStrict substring: 「凡人修仙传」只能匹配
+  ///     「凡人修仙传」「凡人修仙传 新版」「凡人修仙传之风起」以外的同 IP 子系列
+  ///   联合 year: 即使 title 子串匹配, 年份不一样 (2023 vs 2024) 也排除
+  ///   目标: 播放详情页必须命中用户点的那部剧, 不出衍生剧/不同年份版本
+  ///
+  /// expectedYear 可传空或 'unknown' 跳过 year 检查 (资源站没年份信息时)
+  static bool resultMatchesQueryStrict(
+    SearchResult r,
+    String query,
+    String expectedYear,
+  ) {
+    if (r.title.isEmpty || query.isEmpty) return true;
+
+    // 1. title substring 匹配 (归一化后连续包含 query, 不允许中间夹字符)
+    final normTitle = _normalize(r.title);
+    final normQuery = _normalize(query);
+    if (!normTitle.contains(normQuery)) return false;
+
+    // 2. year 严格匹配 (双方都有年份才比, 缺年份的放行)
+    if (expectedYear.isNotEmpty && expectedYear != 'unknown') {
+      final rYear = r.year;
+      if (rYear.isNotEmpty && rYear != 'unknown' && rYear != expectedYear) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// 对结果按相关性排序. 跟 web 端 rankSearchResults 1:1.

@@ -2297,18 +2297,31 @@ class _PlayerScreenState extends State<PlayerScreen>
       final resources = await resourcesFut;
       if (!mounted) return;
 
-      // v2.6.10: 先按剧名归一化精确匹配过滤, 跟 search_screen 一致.
-      //   之前 _loadSources 直接用 /api/search 全量结果聚合, 搜「凡人修仙传」
-      //   会带进「凡人修仙之风起」「仙林外传」之类 title 不含 query 的剧,
-      //   这些剧在某源上集数还多, bySource 选集数最多时会盖掉真正的目标剧,
-      //   用户切源发现内容不对. 现在先用 SearchResultRanker.resultMatchesQuery
-      //   过滤掉 title 不含 query 的, 再按源聚合.
+      // v2.6.14: 播放详情页用「联合去重」 — title substring + year 严格匹配.
+      //   跟搜索页 (search_screen) 不同: 搜索页用子序列匹配 (宽松, 让
+      //   「凡人修仙传」也能命中「凡人修仙传之风起」, 因为用户可能想看
+      //   子系列), 播放详情页必须精确命中用户点的那部剧.
+      //
+      //   联合去重 = 2 个条件 AND:
+      //   1. title 归一化后 substring 包含 query (去符号 + 子序列 -> 严格 substring)
+      //   2. year 完全一致 (排除不同年份版本, e.g. 凡人修仙传 2023 vs 2024)
+      //   搜「凡人修仙传」现在只会匹配:
+      //   - 「凡人修仙传」24集 (真目标)
+      //   - 「凡人修仙传 新版」24集 (同剧不同版本, OK)
+      //   - 「凡人修仙传 第2季」 (同剧, OK)
+      //   不会匹配:
+      //   - 「凡人修仙传之风起」 (不同剧, 虽 title 含「凡人修仙传」但 substring 不连续)
+      //   - 「凡人修仙传」2023 (年份不对)
       final filteredResults = results
-          .where((r) => SearchResultRanker.resultMatchesQuery(r, title))
+          .where((r) => SearchResultRanker.resultMatchesQueryStrict(
+                r,
+                title,
+                widget.videoInfo.year,
+              ))
           .toList();
       DiaryService.add(
-          '[SourceFilter] 精确匹配过滤: ${results.length} → ${filteredResults.length} '
-          '(过滤掉 ${results.length - filteredResults.length} 个不相关剧集)');
+          '[SourceFilter] 联合去重过滤: ${results.length} → ${filteredResults.length} '
+          '(过滤掉 ${results.length - filteredResults.length} 个不相关剧集, query="$title" year="${widget.videoInfo.year}")');
 
       // 按 source 聚合: 同源保留集数最多的一条 (跟 web 一致)
       // 注: fetchSourcesData 已按 title_year_source 去重, 同一 source 的多个
