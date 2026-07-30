@@ -121,25 +121,31 @@ class HttpShared {
   /// 返回 (episodeName, episodeUrl) 列表. 多源 (`$$$` 分隔) 取集数最多的一组.
   static List<({String name, String url})> parseVodPlayUrl(String playUrl) {
     if (playUrl.isEmpty) return const [];
-    final firstSource = playUrl.split(r'$$$').first;
-    final episodes = <({String name, String url})>[];
-    for (final seg in firstSource.split('#')) {
-      final t = seg.trim();
-      if (t.isEmpty) continue;
-      final dollarIdx = t.indexOf(r'$');
-      if (dollarIdx > 0) {
-        final name = t.substring(0, dollarIdx).trim();
-        final url = t.substring(dollarIdx + 1).trim();
-        if (url.startsWith('http')) {
-          episodes.add((name: name, url: url));
-          continue;
+    // 多源用 $$$ 分隔, 之前只取 .first 会丢掉其他线路.
+    // 改成遍历所有线路, 选集数最多的一组 (跟注释一致).
+    final sources = playUrl.split(r'$$$');
+    List<({String name, String url})> best = const [];
+    for (final source in sources) {
+      final episodes = <({String name, String url})>[];
+      for (final seg in source.split('#')) {
+        final t = seg.trim();
+        if (t.isEmpty) continue;
+        final dollarIdx = t.indexOf(r'$');
+        if (dollarIdx > 0) {
+          final name = t.substring(0, dollarIdx).trim();
+          final url = t.substring(dollarIdx + 1).trim();
+          if (url.startsWith('http')) {
+            episodes.add((name: name, url: url));
+            continue;
+          }
+        }
+        if (t.startsWith('http')) {
+          episodes.add((name: '播放', url: t));
         }
       }
-      if (t.startsWith('http')) {
-        episodes.add((name: '播放', url: t));
-      }
+      if (episodes.length > best.length) best = episodes;
     }
-    return episodes;
+    return best;
   }
 
   // -------- v2.4.6: 服务器模式服务端代理 helpers --------
