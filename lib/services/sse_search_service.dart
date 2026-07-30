@@ -23,6 +23,15 @@ class SSESearchService {
   int _completedSources = 0; // 跟踪完成的源数量
   int _totalSources = 0; // 总源数量
   Timer? _timeoutTimer; // 超时定时器
+  // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」, 但
+  //   实际是源 API 本身就没数据. 加这个 map 在搜索完成后显示每个源搜出
+  //   多少条, 用户能区分「源没数据 (0 条)」vs 「app 没搜这个源 (缺失)」.
+  //   Map<sourceKey, count>, count = 0 表示源被调用了但 API 返回 0 条.
+  final Map<String, int> _sourceResultCounts = {};
+
+  /// 获取每个源的结果数 (key = source.key, value = 命中结果数)
+  Map<String, int> get sourceResultCounts =>
+      Map<String, int>.from(_sourceResultCounts);
 
   /// 获取增量结果流
   Stream<List<SearchResult>> get incrementalResultsStream =>
@@ -65,6 +74,7 @@ class SSESearchService {
 
       _totalSources = resources.length;
       _completedSources = 0;
+      _sourceResultCounts.clear();
 
       _progressController?.add(SearchProgress(
         totalSources: _totalSources,
@@ -107,6 +117,9 @@ class SSESearchService {
       // 增加完成计数
       _completedSources++;
 
+      // v2.6.16: 记录该源的结果数 (含 0 条, 让用户知道源被调用了但没数据)
+      _sourceResultCounts[resource.key] = results.length;
+
       // 发送结果事件
       if (results.isNotEmpty) {
         _incrementalResultsController?.add(results);
@@ -123,6 +136,8 @@ class SSESearchService {
       // 超时处理
       _completedSources++;
       _sourceErrors[resource.key] = '搜索超时（20秒）';
+      // v2.6.16: 超时也算源完成, 记 0 条
+      _sourceResultCounts[resource.key] ??= 0;
 
       // 发送错误进度更新
       _progressController?.add(SearchProgress(
@@ -136,6 +151,8 @@ class SSESearchService {
       // 其他错误处理
       _completedSources++;
       _sourceErrors[resource.key] = e.toString();
+      // v2.6.16: 错误也算源完成, 记 0 条
+      _sourceResultCounts[resource.key] ??= 0;
 
       // 发送错误进度更新
       _progressController?.add(SearchProgress(
@@ -166,6 +183,7 @@ class SSESearchService {
 
     _currentQuery = query.trim();
     _sourceErrors.clear();
+    _sourceResultCounts.clear();
     _completedSources = 0;
 
     // 初始化流控制器
@@ -344,6 +362,9 @@ class SSESearchService {
   /// 处理搜索结果事件
   void _handleSourceResultEvent(SearchSourceResultEvent event) {
     _completedSources++;
+
+    // v2.6.16: 记录该源的结果数 (后端 SSE 路径)
+    _sourceResultCounts[event.source] = event.results.length;
 
     // 只发送增量结果更新，避免全量重渲染
     if (event.results.isNotEmpty) {

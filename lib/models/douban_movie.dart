@@ -412,3 +412,56 @@ class DoubanResponse {
     );
   }
 }
+
+/// v2.6.16: 豆瓣搜索命中 — 用于多名称搜索.
+class DoubanSearchHit {
+  final String id;
+  final String title;
+  final String year;
+  final String type; // 'movie' | 'tv'
+  final String? coverUrl;
+  final List<String> aka; // 别名, 由 getDoubanDetails 填充
+  final String? rating;
+
+  const DoubanSearchHit({
+    required this.id,
+    required this.title,
+    required this.year,
+    required this.type,
+    this.coverUrl,
+    this.aka = const [],
+    this.rating,
+  });
+
+  DoubanSearchHit copyWith({
+    String? id,
+    String? title,
+    String? year,
+    String? type,
+    String? coverUrl,
+    List<String>? aka,
+    String? rating,
+  }) {
+    return DoubanSearchHit(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      year: year ?? this.year,
+      type: type ?? this.type,
+      coverUrl: coverUrl ?? this.coverUrl,
+      aka: aka ?? this.aka,
+      rating: rating ?? this.rating,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'year': year,
+      'type': type,
+      'cover_url': coverUrl,
+      'aka': aka,
+      'rating': rating,
+    };
+  }
+}

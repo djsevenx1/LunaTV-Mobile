@@ -7,8 +7,10 @@ import 'package:luna_tv/services/page_cache_service.dart';
 import 'package:luna_tv/services/search_result_ranker.dart';
 import 'package:luna_tv/services/sse_search_service.dart';
 import 'package:luna_tv/services/api_service.dart';
+import 'package:luna_tv/services/douban_service.dart';
 import 'package:luna_tv/services/user_data_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
+import 'package:luna_tv/services/local_mode_storage_service.dart';
 import 'package:luna_tv/models/search_result.dart';
 import 'package:luna_tv/models/video_info.dart';
 import 'package:luna_tv/widgets/video_menu_bottom_sheet.dart';
@@ -77,6 +79,14 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   //   持久化到 SharedPreferences key 'exact_search' (跟 web 端 localStorage
   //   key 'exactSearch' 1:1), 跨 app 重启保留用户选择.
   bool _exactSearch = true;
+
+  // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」, 但
+  //   实际是源 API 本身就没数据. 搜完时拉取 sourceResultCounts, 渲染成
+  //   "奈飞工厂 0 条 / 普通源 5 条" 提示, 用户能区分「源没数据」vs
+  //   「app 没搜这个源」. 折叠起来, 默认不占 UI 空间, 长按展开.
+  Map<String, int> _sourceResultCounts = {};
+  Map<String, String> _sourceKeyToName = {};
+  bool _showSourceDebug = false;
 
   // 筛选/排序状态（保持不变）
   String _selectedSource = 'all';
@@ -196,7 +206,23 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       _searchError = null;
       _isLoading = true;
       _searchProgress = null;
+      _sourceResultCounts = {};
     });
+
+    // v2.6.16: 拿源列表建 key→name 映射, 用于显示每个源的结果数
+    try {
+      final isLocalMode = await UserDataService.getIsLocalMode();
+      final resources = isLocalMode
+          ? await LocalModeStorageService.getSearchSources()
+          : await ApiService.getSearchResources();
+      if (mounted && gen == _searchGeneration) {
+        setState(() {
+          _sourceKeyToName = {
+            for (final r in resources.where((r) => !r.disabled)) r.key: r.name
+          };
+        });
+      }
+    } catch (_) {}
 
     // 增量结果: 每个 source 完成搜索就推回一批, addAll 到 _searchResults.
     //   SearchResultAggGrid 内部按 title+year+类型 聚合并 join 所有源名,
@@ -227,6 +253,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         _searchProgress = progress;
         if (progress.isComplete) {
           _isLoading = false;
+          // v2.6.16: 搜完拉取每个源的结果数, 让用户看到哪些源 0 条
+          _sourceResultCounts = _sseSearchService.sourceResultCounts;
         }
       });
     });
@@ -245,6 +273,14 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     //   网络问题都会让 SSE 不返回, 兜底走 /api/search (老接口) 至少能
     //   出结果. 8s 还没拿到 SSE 结果就 fall back, 不阻塞用户.
     unawaited(_runSearchFallback(query, gen));
+
+    // v2.6.16: 多名称搜索 — 跟 SSE 并行, 通过豆瓣搜索拿影片别名
+    //   (e.g. 铁拳教育 → 极权教师 / 不良指导官 / 真教育 / Teach You a Lesson 等),
+    //   对每个别名并行打 /api/search 搜, 结果跟 SSE 汇合.
+    //   3s 后还没拿到 SSE 第一批结果就 fire, 别名结果自然走
+    //   _filteredSearchResults 过滤 + 精确搜索 + 排序, 跟主结果一致.
+    //   失败/超时就静默走原 query 兜底, 不破坏现有逻辑.
+    unawaited(_runMultiNameSearch(query, gen));
 
     try {
       await _sseSearchService.startSearch(query);
@@ -286,6 +322,72 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       });
     } catch (e) {
       print('[Search] /api/search 兜底异常: $e');
+    }
+  }
+
+  /// v2.6.16: 多名称搜索 — 跟 SSE 并行, 通过豆瓣搜索拿影片别名 (aka),
+  ///   对每个别名并行打 /api/search 搜, 结果跟 SSE 汇合.
+  ///   解决「一部剧多个名字搜不到」问题. 例如搜「铁拳教育」,
+  ///   豆瓣详情返回 aka = [极权教师, 不良指导官, 真教育, Teach You a Lesson, ...],
+  ///   把这些都拿去搜源, 命中范围比只搜原 query 宽很多.
+  ///   失败/超时就静默走原 query 兜底, 不破坏现有逻辑.
+  ///   触发时机: 3s 后 SSE 没返回第一批结果时 fire, 让主结果先出来.
+  Future<void> _runMultiNameSearch(String query, int gen) async {
+    try {
+      // 3s 还没拿到 SSE 第一批结果, 这时 fire 也不会太干扰主结果
+      await Future<void>.delayed(const Duration(seconds: 3));
+      if (!mounted || gen != _searchGeneration) return;
+      if (!_isLoading) return;  // 搜索已被取消/超时
+      // 已经有结果了也别打扰 (主搜索出了东西, 别名就不那么重要)
+      // 但仍 fire 一下, 因为别名能扩展结果集. 不强制跳过.
+
+      print('[Search] 触发多名称搜索 (豆瓣别名扩展)');
+      final variants = await DoubanService.expandSearchKeywords(context, query);
+      if (!mounted || gen != _searchGeneration) return;
+      // 如果只返回了原 query, 说明豆瓣没找到或失败, 直接返回
+      if (variants.length <= 1) {
+        print('[Search] 豆瓣未返回别名, 跳过别名搜索');
+        return;
+      }
+
+      // 取前 4 个别名 (原 query 已经搜过, 不重复打), 并行打 /api/search
+      // 限制 4 个避免给后端 / 豆瓣造成压力, 也避免 user 看到太多延迟
+      final aliases = variants.skip(1).take(4).toList();
+      print('[Search] 别名搜索: $aliases');
+
+      // 并行搜索
+      final futures = aliases.map((alias) async {
+        try {
+          final results = await ApiService.fetchSourcesData(alias)
+              .timeout(const Duration(seconds: 10));
+          if (!mounted || gen != _searchGeneration) return <SearchResult>[];
+          // 过滤 0 集
+          return results.where((r) => r.episodes.isNotEmpty).toList();
+        } catch (e) {
+          print('[Search] 别名 $alias 搜索异常: $e');
+          return <SearchResult>[];
+        }
+      }).toList();
+
+      final allResults = await Future.wait(futures);
+      if (!mounted || gen != _searchGeneration) return;
+
+      // 合并所有结果, 用 source+id 去重 (避免跟主 SSE 结果重复)
+      final deduped = <String, SearchResult>{};
+      for (final r in [..._searchResults, ...allResults.expand((x) => x)]) {
+        final key = '${r.source}_${r.id}';
+        deduped[key] = r;
+      }
+      final merged = deduped.values.toList();
+      if (merged.isEmpty) return;
+
+      setState(() {
+        _searchResults = merged;
+        _isLoading = false;
+      });
+      print('[Search] 别名搜索完成, 合并后共 ${merged.length} 条');
+    } catch (e) {
+      print('[Search] 多名称搜索异常: $e');
     }
   }
 
@@ -404,10 +506,139 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ],
             ),
           ),
+          // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」,
+          //   加这个折叠面板, 让用户看到每个源搜出多少条. 0 条的源用红字标,
+          //   区分「源被 app 搜了但 API 没数据」vs「app 没搜这个源」.
+          //   默认收起, 避免干扰主结果视图; 用户点 "查看 X 个源" 才展开.
+          if (_hasSearched && _sourceResultCounts.isNotEmpty)
+            _buildSourceResultDebugPanel(),
           // 搜索结果
           Expanded(
             child: _buildSearchResults(),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// v2.6.16: 每个源的结果数 — 折叠面板, 显示"奈飞工厂 0 条 / 普通源 5 条"等,
+  ///   让用户区分「源没数据」vs「app 没搜这个源」.
+  ///   0 条源用红色, 正常源用绿色. 默认收起, 标题栏显示总览.
+  Widget _buildSourceResultDebugPanel() {
+    // 按 sourceName 排序, 0 条的排前面 (异常优先展示)
+    final entries = _sourceKeyToName.entries
+        .map((e) => MapEntry(
+            e.value,
+            _sourceResultCounts[e.key] ?? -1)) // -1 = app 没搜这个源
+        .toList();
+    entries.sort((a, b) {
+      // -1 (没搜) 排第一, 0 (搜了但没数据) 排第二, >0 排后面
+      if (a.value == -1 && b.value != -1) return -1;
+      if (a.value != -1 && b.value == -1) return 1;
+      if (a.value == 0 && b.value > 0) return -1;
+      if (a.value > 0 && b.value == 0) return 1;
+      return a.key.compareTo(b.key);
+    });
+
+    final zeroCount = entries.where((e) => e.value == 0).length;
+    final notSearchedCount = entries.where((e) => e.value == -1).length;
+    final hitCount = entries.where((e) => e.value > 0).length;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFf5f5f5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => setState(() => _showSourceDebug = !_showSourceDebug),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline,
+                      size: 14, color: Colors.black54),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '搜索源详情 — 命中 $hitCount 个 / 0 条 $zeroCount 个'
+                      '${notSearchedCount > 0 ? ' / 未搜 $notSearchedCount 个' : ''}',
+                      style:
+                          const TextStyle(fontSize: 11, color: Colors.black87),
+                    ),
+                  ),
+                  Icon(_showSourceDebug
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                      size: 16,
+                      color: Colors.black54),
+                ],
+              ),
+            ),
+          ),
+          if (_showSourceDebug)
+            Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final e in entries)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: e.value > 0
+                                  ? Colors.green
+                                  : (e.value == 0
+                                      ? Colors.red
+                                      : Colors.grey),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              e.key,
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.black87),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            e.value == -1 ? '未搜' : '${e.value} 条',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: e.value > 0
+                                  ? Colors.green
+                                  : (e.value == 0
+                                      ? Colors.red
+                                      : Colors.grey),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '• 绿色 = 搜到结果  •  红色 = 源被搜了但没数据  •  灰色 = app 未搜',
+                    style: TextStyle(fontSize: 9, color: Colors.black45),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

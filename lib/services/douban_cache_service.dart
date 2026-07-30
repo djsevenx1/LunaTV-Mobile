@@ -374,6 +374,17 @@ class DoubanCacheService {
     });
   }
 
+  /// v2.6.16: 为豆瓣搜索数据生成缓存键
+  String generateDoubanSearchCacheKey({
+    required String query,
+    required int count,
+  }) {
+    return _generateCacheKey('douban_search', {
+      'query': query,
+      'count': count,
+    });
+  }
+
   /// 清理所有缓存（用于调试）
   Future<void> clearAllCache() async {
     try {

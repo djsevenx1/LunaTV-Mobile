@@ -462,6 +462,178 @@ class DoubanService {
     }
   }
 
+  /// v2.6.16: 豆瓣搜索 — 给定 query, 拿豆瓣搜索接口的 top 命中 + 别名.
+  static Future<ApiResponse<List<DoubanSearchHit>>> searchMovie(
+    BuildContext context, {
+    required String query,
+    int count = 5,
+  }) async {
+    await _initCache();
+    if (query.trim().isEmpty) {
+      return ApiResponse.error('搜索词为空');
+    }
+    final cacheKey = _cacheService.generateDoubanSearchCacheKey(
+      query: query.trim(),
+      count: count,
+    );
+    try {
+      final cachedData = await _cacheService.get<List<DoubanSearchHit>>(
+        cacheKey,
+        (raw) => (raw as List<dynamic>)
+            .map((m) {
+              final map = m as Map<String, dynamic>;
+              return DoubanSearchHit(
+                id: map['id']?.toString() ?? '',
+                title: map['title']?.toString() ?? '',
+                year: map['year']?.toString() ?? '',
+                type: map['type']?.toString() ?? '',
+                coverUrl: map['cover_url']?.toString(),
+                aka: (map['aka'] is List)
+                    ? (map['aka'] as List<dynamic>)
+                        .map((e) => e.toString())
+                        .toList()
+                    : <String>[],
+                rating: map['rating']?.toString(),
+              );
+            })
+            .toList(),
+      );
+      if (cachedData != null) {
+        return ApiResponse.success(cachedData);
+      }
+    } catch (e) {
+      print('读取豆瓣搜索缓存失败: $e');
+    }
+    final dataSourceKey = await UserDataService.getDoubanDataSourceKey();
+    String baseUrl;
+    switch (dataSourceKey) {
+      case 'cdn_tencent':
+        baseUrl = 'https://m.douban.cmliussss.net/rexxar/api/v2/search';
+        break;
+      case 'cdn_aliyun':
+        baseUrl = 'https://m.douban.cmliussss.com/rexxar/api/v2/search';
+        break;
+      case 'direct':
+      default:
+        baseUrl = 'https://m.douban.com/rexxar/api/v2/search';
+        break;
+    }
+    final queryParams = <String, String>{
+      'q': query.trim(),
+      'count': count.toString(),
+    };
+    final uri = Uri.parse(baseUrl).replace(queryParameters: queryParams);
+    String target = uri.toString();
+    if (dataSourceKey == 'cors_proxy') {
+      target = 'https://ciao-cors.is-an.org/${Uri.encodeComponent(target)}';
+    }
+    try {
+      final headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Referer': 'https://movie.douban.com/',
+        'Accept': 'application/json, text/plain, */*',
+      };
+      if (dataSourceKey == 'cors_proxy') {
+        headers['Origin'] = _getUniqueOrigin();
+      }
+      final response = await http.get(
+        Uri.parse(target),
+        headers: headers,
+      ).timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) {
+        return ApiResponse.error(
+          '获取豆瓣搜索失败: ${response.statusCode}',
+          statusCode: response.statusCode,
+        );
+      }
+      final Map<String, dynamic> data = json.decode(response.body);
+      final subjects =
+          (data['subjects'] as Map<String, dynamic>?)?['items'] as List<dynamic>? ??
+              [];
+      final hits = <DoubanSearchHit>[];
+      for (final item in subjects) {
+        if (item is! Map<String, dynamic>) continue;
+        final target_ = item['target'] as Map<String, dynamic>?;
+        if (target_ == null) continue;
+        final type = item['target_type']?.toString() ?? '';
+        if (type != 'movie' && type != 'tv') continue;
+        final title = target_['title']?.toString() ?? '';
+        if (title.isEmpty) continue;
+        hits.add(DoubanSearchHit(
+          id: target_['id']?.toString() ?? '',
+          title: title,
+          year: target_['year']?.toString() ?? '',
+          type: type,
+          coverUrl: target_['cover_url']?.toString(),
+          aka: const <String>[],
+          rating: (target_['rating'] as Map?)?['value']?.toString(),
+        ));
+      }
+      if (hits.isEmpty) {
+        try {
+          await _cacheService.set(
+            cacheKey,
+            <Map<String, dynamic>>[],
+            const Duration(hours: 6),
+          );
+        } catch (_) {}
+        return ApiResponse.success(<DoubanSearchHit>[]);
+      }
+      final topHit = hits.first;
+      if (topHit.id.isNotEmpty) {
+        try {
+          final detail = await getDoubanDetails(context, doubanId: topHit.id);
+          if (detail.success && detail.data != null) {
+            hits[0] = topHit.copyWith(aka: detail.data!.aka);
+          }
+        } catch (_) {}
+      }
+      try {
+        await _cacheService.set(
+          cacheKey,
+          hits.map((h) => h.toJson()).toList(),
+          const Duration(days: 7),
+        );
+      } catch (cacheError) {
+        print('缓存豆瓣搜索数据失败: $cacheError');
+      }
+      return ApiResponse.success(hits);
+    } catch (e) {
+      return ApiResponse.error('豆瓣搜索请求异常: ${e.toString()}');
+    }
+  }
+
+  /// v2.6.16: 展开搜索关键词 — 给定 query, 返回 [原query, ...所有别名] 去重列表.
+  ///   解决「一部剧多个名字搜不到」问题.
+  static Future<List<String>> expandSearchKeywords(
+    BuildContext context,
+    String query,
+  ) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return [trimmed];
+    try {
+      final resp = await searchMovie(context, query: trimmed).timeout(
+        const Duration(seconds: 6),
+      );
+      if (!resp.success || resp.data == null || resp.data!.isEmpty) {
+        return [trimmed];
+      }
+      final variants = <String>{trimmed};
+      for (final hit in resp.data!) {
+        if (variants.length >= 12) break;
+        if (hit.title.trim().isNotEmpty) variants.add(hit.title.trim());
+        for (final alias in hit.aka) {
+          if (variants.length >= 12) break;
+          final a = alias.trim();
+          if (a.isNotEmpty) variants.add(a);
+        }
+      }
+      return variants.toList();
+    } catch (_) {
+      return [trimmed];
+    }
+  }
+
   /// 获取豆瓣详情数据
   /// 
   /// 参数说明：
