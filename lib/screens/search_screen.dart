@@ -395,11 +395,14 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           Expanded(
             child: Stack(
               children: [
-                // 底层 — 结果区 grid, 永远渲染
+                // 底层 — 结果区 grid. 搜索中无结果时不渲染 (避免"暂无搜索结果"
+                //   空态透出跟 loading 叠在一起), 有结果或搜完后再渲染.
                 Positioned.fill(
-                  child: _buildSearchResults(),
+                  child: (_isLoading && _filteredSearchResults.isEmpty)
+                      ? const SizedBox.shrink()
+                      : _buildSearchResults(),
                 ),
-                // 搜索中 + 无结果 → 居中 loading 覆盖空态
+                // 搜索中 + 无结果 → 居中 loading, 背景透明融入 app 渐变
                 if (_isLoading && _filteredSearchResults.isEmpty)
                   Positioned.fill(
                     child: _buildCenterLoading(),
@@ -556,47 +559,43 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           );
   }
 
-  /// v2.6.35: 居中 loading — 搜索中且无结果时, 覆盖在结果区空态上.
-  ///   显示"搜索中「关键词」" + 进度 (X/Y) + 当前源名, 带半透明背景.
+  /// v2.6.35: 居中 loading — 搜索中且无结果时显示.
+  ///   显示脉冲点动画 + "搜索中「关键词」" + 进度 (X/Y) + 当前源名.
   ///   搜索结束后自动消失, 露出 grid 自带的"暂无搜索结果"空态.
   ///   替代 v2.6.29~v2.6.34 的顶部 banner + 底部 footer 方案.
+  /// v2.6.36: 背景改透明, 融入 app 自带渐变/深色背景, 不再用白色覆盖层.
   Widget _buildCenterLoading() {
     final themeService = Provider.of<ThemeService>(context, listen: false);
     final isDark = themeService.isDarkMode;
     final completed = _searchProgress?.completedSources ?? 0;
     final total = _searchProgress?.totalSources ?? 0;
     final current = _searchProgress?.currentSource;
-    return Container(
-      color: isDark
-          ? const Color(0xFF000000).withOpacity(0.92)
-          : Colors.white.withOpacity(0.95),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // 脉冲点动画, 跟 app 原生 PulsingDotsIndicator 风格一致
-            const PulsingDotsIndicator(),
-            const SizedBox(height: 20),
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // 脉冲点动画, 跟 app 原生 PulsingDotsIndicator 风格一致
+          const PulsingDotsIndicator(),
+          const SizedBox(height: 20),
+          Text(
+            '搜索中「$_searchQuery」',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: isDark ? AppColors.darkText : const Color(0xFF1F2937),
+            ),
+          ),
+          if (total > 0) ...[
+            const SizedBox(height: 8),
             Text(
-              '搜索中「$_searchQuery」',
+              '$completed / $total${current != null ? '  ·  $current' : ''}',
               style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: isDark ? AppColors.darkText : const Color(0xFF1F2937),
+                fontSize: 12,
+                color: isDark ? AppColors.darkTextSecondary : const Color(0xFF6B7280),
               ),
             ),
-            if (total > 0) ...[
-              const SizedBox(height: 8),
-              Text(
-                '$completed / $total${current != null ? '  ·  $current' : ''}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: isDark ? AppColors.darkTextSecondary : const Color(0xFF6B7280),
-                ),
-              ),
-            ],
           ],
-        ),
+        ],
       ),
     );
   }
