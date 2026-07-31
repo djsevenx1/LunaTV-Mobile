@@ -111,11 +111,18 @@ class SourceBrowserService {
     // v2.4.5: class 字段 cast 安全. 某些源返 `class: ""` / `class: "电影,电视剧"`
     // (字符串而非数组), `as List?` 会抛 TypeError, `?? const []` 接不住.
     // 跟 web categories/route.ts:53-54 `Array.isArray(data.class) ? data.class : []` 1:1.
-    if (json['class'] is! List) {
+    // v2.6.43: fallback 兼容自维护源 — lunatv-sources 的 HTML→maccms 转换代理
+    //   (kan555.php / kkys.php 等) ?ac=list 不返 class, 改返 list 字段,
+    //   结构跟 class 一样 [{type_id, type_name}]. 标准 maccms 的 list 是视频
+    //   列表, 但这些代理源的 list 在 ac=list 模式下返的是分类列表 (code:1 +
+    //   total:5 + list:[{type_id,type_name}]). 先取 class, 没有再取 list.
+    List? classRaw = json['class'] is List ? json['class'] as List : null;
+    classRaw ??= json['list'] is List ? json['list'] as List : null;
+    if (classRaw == null) {
       _setCached(key, const <SourceCategory>[]);
       return const <SourceCategory>[];
     }
-    final list = (json['class'] as List)
+    final list = classRaw
         .whereType<Map<String, dynamic>>()
         .map(SourceCategory.fromJson)
         .where((c) => c.typeId > 0 && c.typeName.isNotEmpty)
