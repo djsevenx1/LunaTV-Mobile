@@ -2323,6 +2323,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     } catch (_) {}
   }
 
+  // ★ v2.6.45: 返回键后台异步清理 (不阻塞 UI 响应)
+  Future<void> _cleanupOnBack() async {
+    try {
+      // 等有效位置 (最多 500ms, 比之前 800ms 更快)
+      await _waitForValidPosition(timeout: const Duration(milliseconds: 500));
+      if (_currentPosition > Duration.zero) {
+        await _saveCurrentProgress(force: true);
+      }
+      await _player?.stop();
+      await _onExitFullscreen();
+    } catch (_) {}
+  }
+
   // 加载多源并自动测速
   Future<void> _loadSources() async {
     final title = widget.videoInfo.searchTitle.isNotEmpty
@@ -3620,37 +3633,14 @@ class _PlayerScreenState extends State<PlayerScreen>
           canPop: _phase == 'detail',
           onPopInvoked: (didPop) async {
             if (!didPop && _phase == 'playing') {
-              // v1.0.65: 先等 _currentPosition > 0 再 save, 避免刚 play 就
-              // back 时存 0 覆盖之前的真进度. 仍然 0 就跳过
-              await _waitForValidPosition();
-              if (_currentPosition > Duration.zero) {
-                // v1.0.49: 必须先 save 再 stop, 否则 stop 把 state.position 重置成 0,
-                // _saveCurrentProgress 读到的就是 0, 退出后下次打开从 0 开始.
-                // (之前的顺序是先 stop 再 save, 写盘的 playTime 一直是 0)
-                await _saveCurrentProgress(force: true);
-              }
-              // 从播放页返回详情页: 恢复竖屏, 暂停播放
-              try {
-                await _player!.stop();
-              } catch (_) {}
-              await _onExitFullscreen();
-              if (mounted) {
-                setState(() {
-                  _phase = 'detail';
-                });
-                // v2.2.0+59: 退出播放视图, 解除屏幕常亮, 允许系统屏保
-                _setKeepScreenOn(false);
-                // v2.6.42: 退出播放回 detail, 关音量拦截, 恢复系统音量弹窗
-                _disableVolumeInterception();
-              }
-            } else if (didPop && _phase == 'detail') {
-              // v1.0.50: 真正退出页面时不再 save.
-              // 之前这里调 _saveCurrentProgress(force: true), 但 player 在
-              // playing→detail 那次已经 stop 了, state.position 和 _currentPosition
-              // 都是 0, 这次 save 会存 playTime=0 覆盖掉之前存的 12 分钟,
-              // 下次打开云端拉到 playTime=0 又从 0 开始.
-              // 进度已经在 playing→detail 转换时存过了, 这里不需要再存.
+              // ★ v2.6.45: 立即切换 UI 响应返回键, 后台异步清理
+              setState(() => _phase = 'detail');
+              _setKeepScreenOn(false);
+              _disableVolumeInterception();
+              // 后台异步保存进度 + 停止播放器 (不阻塞返回)
+              unawaited(_cleanupOnBack());
             }
+            // didPop && _phase == 'detail' → 真正退出页面, 无需处理
           },
           child: Scaffold(
             backgroundColor:
