@@ -609,83 +609,108 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   ///   大徽章显示总数. 用户反馈「半天不错搜索结果」, 体感想知道"搜到
   ///   多少了", 移动端体验上比 web 端更需要这个数字. 加在 (X / Y) 后面,
   ///   跟源完成度一并显示, 用户能直观看到结果数在涨.
+  /// v2.6.34: footer 风格同步 web 端 (page.tsx:2460-2489) 1:1.
+  ///   搜索中: 全宽底部栏, 白色半透明背景, 仅顶部边框, 跟 web `fixed bottom-0
+  ///   bg-white/98 border-t` 一致. 之前是药丸形全边框容器, 跟 web 不一致.
+  ///   完成徽章: 加大圆圈 (36→48), 加 ping 动画, 跟 web `animate-ping` 一致.
   Widget _buildSearchFooter() {
     final hasResults = _filteredSearchResults.isNotEmpty;
     final resultCount = _filteredSearchResults.length;
-    // v2.6.33: 搜索中 (有无结果都显示) — 统一底部进度条, 删了顶部 banner 后
-    //   启动阶段 (无结果) 也要在底部显示进度.
+    // 搜索中 — 跟 web `fixed bottom-0 bg-white/98 border-t` 1:1
     if (_isLoading) {
       final completed = _searchProgress?.completedSources ?? 0;
       final total = _searchProgress?.totalSources ?? 0;
       final current = _searchProgress?.currentSource;
       return Container(
         width: double.infinity,
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          color: Colors.white.withOpacity(0.98),
+          border: Border(
+            top: BorderSide(color: const Color(0xFFE5E7EB).withOpacity(0.8), width: 0.5),
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const SizedBox(
-              width: 14,
-              height: 14,
+              width: 16,
+              height: 16,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 color: Color(0xFF10B981),
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                hasResults
-                    ? '正在搜索更多结果... ($completed / $total)  已找到 $resultCount 个'
-                    : '搜索中... ($completed / $total)${current != null ? '  $current' : ''}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            Text(
+              hasResults
+                  ? '正在搜索更多结果... ($completed / $total)  已找到 $resultCount 个'
+                  : '搜索中... ($completed / $total)${current != null ? '  $current' : ''}',
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
             ),
           ],
         ),
       );
     }
+    // 搜索完成 — 跟 web `rounded-2xl bg-gradient border shadow-lg` + `animate-ping` 1:1
     if (!_isLoading && hasResults) {
-      // 大徽章, 跟 web "搜索完成 共 N 个" 1:1.
-      //   fixed 屏幕底部覆盖, 永远可见, 搜完一抬头就能看到 "搜索完成 共 N 个"
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFFEFF6FF), Color(0xFFEEF2FF), Color(0xFFF3E8FF)],
           ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFBFDBFE)),
+          border: Border.all(color: const Color(0xFFBFDBFE).withOpacity(0.5)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-                ),
+            // 圆圈 + ping 动画, 跟 web `animate-ping` 1:1
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // ping 扩散环
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF3B82F6).withOpacity(0.3),
+                    ),
+                  ),
+                  // 主圆圈
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
+                      ),
+                    ),
+                    child: const Icon(Icons.check, color: Colors.white, size: 24),
+                  ),
+                ],
               ),
-              child: const Icon(Icons.check, color: Colors.white, size: 22),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             const Text(
               '搜索完成',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF1F2937),
               ),
@@ -694,7 +719,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
             Text(
               '共找到 $resultCount 个结果',
               style: const TextStyle(
-                fontSize: 11,
+                fontSize: 12,
                 color: Color(0xFF6B7280),
               ),
             ),
