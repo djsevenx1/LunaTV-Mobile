@@ -55,21 +55,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   //   每次发起新搜索递增 generation, await 返回后校验, 不匹配就丢弃结果.
   int _searchGeneration = 0;
 
-  // v2.6.27: loading 兜底定时器. 后端 /api/search/ws 路由里 complete 事件
-  //   要等所有源完成才发, 最慢的源要满 20s timeout (line 84 setTimeout).
-  //   后果: 即便第一批 source_result 1s 内到, _isLoading 只在结果到达时
-  //   关掉, 没问题. 但如果用户搜的词所有源都慢, 第一个 source_result 10s+
-  //   才到, 前端转圈 10s 体感极差. Selene 体感 3s 出结果是因为 web 端 fetch
-  //   + EventSource 渲染是分开的, 第一批结果到达 React 立刻渲染, 跟 loading
-  //   不耦合. LunaTV 之前 _isLoading=false 跟 _searchResults.addAll 在同一
-  //   个 setState 里, 第一个源完成就关 loading, 体感正常. 但慢源/全网慢时
-  //   第一个源也慢, 还是转 20s.
-  //   修复: 3s 兜底定时器. 不管结果到没到, 3s 后强制 _isLoading=false,
-  //   让用户看到当前已有的 _searchResults (可能为空, 显示"暂无结果"空态)
-  //   跟"还在搜"的双显: ProgressBanner 显示 X/Y 完成进度条, 但 loading
-  //   转圈干掉, 用户能往下滚看到已有结果. Selene 也是这个行为.
-  Timer? _loadingFallbackTimer;
-
   // v2.6.7: 改用 SSESearchService 走客户端直连 + SSE 增量推回 (跟 Selene 一致).
   //   本地模式 → 客户端直连资源站 ?ac=videolist&wd=... 并行搜, 自维护源
   //   (LocalModeStorageService 存的) 也能搜.
@@ -227,12 +212,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     await _errorSubscription?.cancel();
     await _sseSearchService.stopSearch();
 
-    // v2.6.27: 取消上一个搜索遗留的 3s loading 兜底定时器. 之前
-    //   连续搜两次, 第一次的 3s 定时器没 cancel, 会在第二次搜索 3s
-    //   后把第二次的 _isLoading 强行关掉, 体感"还没搜完 loading 就消失了"
-    //   误导. 现在每次新搜都 cancel 上一个, 只保留当前代际的兜底.
-    _loadingFallbackTimer?.cancel();
-
     final gen = ++_searchGeneration;
     setState(() {
       _hasSearched = true;
@@ -241,25 +220,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       _isLoading = true;
       _searchProgress = null;
       _sourceResultCounts = {};
-    });
-
-    // v2.6.27: 3s loading 兜底定时器. 后端 /api/search/ws 等所有源完成
-    //   才发 complete, 慢源要满 20s. 即便 SSE 推回正常, 第一个源 1s 内
-    //   到 _isLoading 也会跟着关 (line 251), 体感 1s. 但如果第一个源也慢
-    //   (网络抖动 / 资源站冷启), 用户看 10s+ 转圈体感极差. 3s 兜底后,
-    //   不管结果到没到, 3s 后 _isLoading=false, 用户能看到已有结果 / 空态,
-    //   顶部 progress 仍在跑 (X/Y 进度条), 跟 Selene 行为一致.
-    //   配套: 1) 主路首个结果到达 → _isLoading=false (line 251), 立即收尾
-    //   体感跟没定时器一样; 2) 定时器触发 → _isLoading=false, 主路继续跑,
-    //   后续 source_result 仍 addAll + 刷新进度, 用户看到的是"有结果就显示,
-    //   还在继续搜". 3) complete → _isLoading=false 兜底, 正常路径.
-    _loadingFallbackTimer = Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      if (gen != _searchGeneration) return;
-      if (!_isLoading) return; // 已有结果, 不重复触发
-      setState(() {
-        _isLoading = false;
-      });
     });
 
     // v2.6.16: 拿源列表建 key→name 映射, 用于显示每个源的结果数
@@ -288,7 +248,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       if (filtered.isEmpty) return;
       setState(() {
         _searchResults = [..._searchResults, ...filtered];
-        _isLoading = false; // 第一批结果到了就取消 loading, 让用户看到东西
+        // v2.6.28: 删 _isLoading=false. 之前首个 source_result 到达就关
+        //   loading, 这是"二态门"残留. 现在 _isLoading 语义跟 web isFetching
+        //   一致: "stream 还没收 complete 事件". 首个结果到达不该关 loading,
+        //   后面慢源还在跑, 用户该看到 footer "正在搜索更多结果... (5/18)".
+        //   loading 只在 progress.isComplete 或 error 时才关.
       });
     });
 
@@ -344,9 +308,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   @override
   void dispose() {
     _updateTimer?.cancel();
-    // v2.6.27: 取消 loading 兜底定时器, 防止 dispose 后定时器还活着
-    //   触发 setState 报错 "setState after dispose"
-    _loadingFallbackTimer?.cancel();
     _incrementalResultsSubscription?.cancel();
     _progressSubscription?.cancel();
     _errorSubscription?.cancel();
@@ -378,9 +339,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         _searchGeneration++;
         // v2.6.7: 清空时也停掉 SSE, 不然旧搜索的结果还会继续推回
         unawaited(_sseSearchService.stopSearch());
-        // v2.6.27: 清空时也取消 loading 兜底定时器, 跟 onClearSearch 一起
-        //   重置, 不让 3s 后定时器还触发 setState 强行关 _isLoading
-        _loadingFallbackTimer?.cancel();
         _incrementalResultsSubscription?.cancel();
         _progressSubscription?.cancel();
         _errorSubscription?.cancel();
@@ -601,52 +559,146 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Widget _buildSearchResults() {
-    // v2.5.26: 搜索中且还没结果时显示 loading, 给用户即时反馈
-    // v2.6.7: 加进度条 + 当前源名, 让用户看到"5/18 个源完成"这种进度,
-    //   SSE 增量推回时第一批结果到了就显示结果, 进度条继续在结果上方跑.
-    if (_isLoading && _searchResults.isEmpty) {
-      final progress = _searchProgress;
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    // v2.6.28: 架构级大改 — 跟 web 端 (LunaTV-web/src/app/search/page.tsx:2300-2470) 1:1
+    //   渲染. 之前 `_isLoading && _searchResults.isEmpty` 二态门 (line 607-630) 强制
+    //   loading 转圈必须等第一批 source_result 到达, 慢源场景用户看 20s 转圈.
+    //
+    //   web 端的模式: 结果区**永远渲染** searchResults (从 start 事件起累积), 跟
+    //   `isLoading` 完全解耦. `isLoading = streamedQuery.isFetching` 只用于:
+    //   1) 标题区小转圈 + "5/18" 进度
+    //   2) Footer 底部小条 banner "正在搜索更多结果..." (仅当 results.length > 0)
+    //   3) Footer 大徽章 "搜索完成 共 N 个" (仅当 !isLoading && results.length > 0)
+    //
+    //   翻译到 Flutter:
+    //   - `_isLoading` = "stream 还在跑, 还没收 complete 事件" (跟 web isFetching 同款)
+    //   - **永远** 渲染结果区 (空就空, SearchResultAggGrid / SearchResultsGrid 内部
+    //     自己处理 empty state, 跟 web VideoCard empty 行为一致)
+    //   - 加 `_buildSearchFooterBanner` 底部小条 + `_buildSearchFooterComplete` 底部
+    //     大徽章, 跟 web line 2460-2470 1:1
+    //   - 删 v2.6.27 的 3s 兜底定时器 (line 60-71 字段 + line 230-235 / 257-265 /
+    //     348-350 / 381-384 所有 cancel 防御) — 现在 loading 不再"门控"结果, 没
+    //     兜底必要. Loading 永远 true 直到 complete, 体感"还在搜"是正确语义, 不
+    //     兜底. v2.6.27 changelog 描述的 3s loading 兜底场景, 跟 web 不一致, 是
+    //     "前端硬编了个假门" 的 hack. 删
+    //
+    //   行为对比 (搜「凡人修仙传」, 18 源后端):
+    //   | 场景 | 改前 (v2.6.27) | 改后 (v2.6.28) | web (Selene) |
+    //   | 第一源 1s 到, 18 源全 3s 到 | 1s 出第一批, 3s 后 footer "正在搜" → 18s 出 "完成" | 1s 出第一批, 3s 后 footer "正在搜" → 18s 出 "完成" | 同 |
+    //   | 第一源 10s 到, 慢源 20s | 3s 兜底关 loading, 10s 出结果, 20s 出 footer "完成" | 10s 出结果, 20s 出 footer "完成" (banner 一直在底部) | 同 |
+    //   | 一直 0 结果 (没人搜) | 3s 兜底关 loading, 显示空态, 20s 出 "完成 0 个" | 一直显示空态 (0 results), 20s 出 footer "完成 0 个" | 同 (web 是空网格 + footer "完成 0 个") |
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    return Column(
+      children: [
+        // 结果区 — 永远渲染, 跟 web searchResults.map(...) 1:1
+        Expanded(
+          child: _useAggregatedView
+              ? SearchResultAggGrid(
+                  results: _filteredSearchResults,
+                  themeService: themeService,
+                  hasReceivedStart: _hasSearched,
+                  onVideoTap: (video) => _navigateToPlayer(video),
+                  onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
+                )
+              : SearchResultsGrid(
+                  results: _filteredSearchResults,
+                  themeService: themeService,
+                  hasReceivedStart: _hasSearched,
+                  onVideoTap: (video) => _navigateToPlayer(video),
+                  onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
+                ),
+        ),
+        // Footer banner — 跟 web line 2460-2470 1:1
+        if (_hasSearched) _buildSearchFooter(),
+      ],
+    );
+  }
+
+  /// v2.6.28: Footer banner — 跟 web 端 (LunaTV-web/src/app/search/page.tsx:2460-2470) 1:1.
+  ///   - isLoading && results.length > 0 → "正在搜索更多结果..." 底部小条
+  ///   - !isLoading && results.length > 0 → "搜索完成 共 N 个" 大徽章
+  ///   - 都不是 → null (不渲染, 跟 web 一样)
+  Widget _buildSearchFooter() {
+    final hasResults = _filteredSearchResults.isNotEmpty;
+    if (_isLoading && hasResults) {
+      // 底部固定小条, 跟 web "fixed bottom-0 left-0 right-0 z-50" 1:1
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 12),
-            const Text(
-              '搜索中...',
-              style: TextStyle(fontSize: 13),
-            ),
-            if (progress != null && progress.totalSources > 0) ...[
-              const SizedBox(height: 8),
-              Text(
-                '${progress.completedSources} / ${progress.totalSources} 个源'
-                '${progress.currentSource != null ? ' (${progress.currentSource})' : ''}',
-                style: const TextStyle(fontSize: 11, color: Colors.black54),
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF10B981),
               ),
-            ],
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '正在搜索更多结果... (${_searchProgress?.completedSources ?? 0} / ${_searchProgress?.totalSources ?? 0})',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
           ],
         ),
       );
     }
-    final themeService = Provider.of<ThemeService>(context, listen: false);
-    // 保持原有逻辑不变：选中聚合视图或普通列表
-    if (_useAggregatedView) {
-      return SearchResultAggGrid(
-        results: _filteredSearchResults,
-        themeService: themeService,
-        hasReceivedStart: _hasSearched,
-        onVideoTap: (video) => _navigateToPlayer(video),
-        onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
-      );
-    } else {
-      return SearchResultsGrid(
-        results: _filteredSearchResults,
-        themeService: themeService,
-        hasReceivedStart: _hasSearched,
-        onVideoTap: (video) => _navigateToPlayer(video),
-        onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
+    if (!_isLoading && hasResults) {
+      // 大徽章, 跟 web "搜索完成 共 N 个" 1:1
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFEFF6FF), Color(0xFFEEF2FF), Color(0xFFF3E8FF)],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFBFDBFE)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
+                ),
+              ),
+              child: const Icon(Icons.check, color: Colors.white, size: 22),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '搜索完成',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1F2937),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '共找到 ${_filteredSearchResults.length} 个结果',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+          ],
+        ),
       );
     }
+    return const SizedBox.shrink();
   }
 
   void _navigateToPlayer(VideoInfo video) {
