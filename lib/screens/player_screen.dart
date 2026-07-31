@@ -386,20 +386,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     // v1.0.50: 监听 AppLifecycleState, 进后台 (home 键) 时立即保存一次,
     // 避免 10s progressTimer 还没触发就被上滑/杀进程, 进度丢
     WidgetsBinding.instance.addObserver(this);
-    // v1.0.54: 关闭系统音量弹窗, 自己接管音量 UI (右侧指示器)
-    // volume_controller 2.0.2+ Android / 2.0.6+ iOS 都支持 showSystemUI 静态字段
-    // 默认 true, 每次 setVolume 都会弹系统音量窗口遮挡视频
-    // v2.5.91: 只要在播放器界面就隐藏, 退出播放器 (dispose) 恢复显示
-    VolumeController.instance.showSystemUI = false;
-    // v2.5.18: 物理音量键拦截 — 物理 KEYCODE_VOLUME_UP/DOWN/MUTE 走
-    //   Activity.dispatchKeyEvent → AudioManager.adjustStreamVolume (默认
-    //   FLAG_SHOW_UI) 弹系统音量条, **绕过 volume_controller**. 必须在
-    //   Kotlin 层 (VolumeKeyChannel) 拦截, 转发到 Dart 端, Dart 端再走
-    //   volume_controller.instance.setVolume (showSystemUI=false 不弹).
-    //   initState 注册 setEnabled(true) 开启拦截, dispose 关掉, 让用户离
-    //   开播放页时物理音量键走系统默认 (弹音量条是合理的系统反馈).
+    // v2.6.42: 音量拦截只在 playing 阶段开启, detail 阶段保留系统音量弹窗.
+    //   initState 只注册 MethodCallHandler (接收 native 回调), 不调
+    //   setEnabled(true) — detail 页物理音量键走系统默认 (弹音量条是合理
+    //   的系统反馈). 进入 playing 阶段时 _enableVolumeInterception() 开,
+    //   退出回 detail 时 _disableVolumeInterception() 关. dispose 兜底清.
     _volumeKeyChannel.setMethodCallHandler(_onVolumeKeyCall);
-    unawaited(_volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': true}));
     // ★ v2.5.65: 进入播放页时解锁所有方向 (让设备自由旋转, 平板/手机都友好)
     unawaited(SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -604,15 +596,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]));
-    // v1.0.54: 还原 volume_controller 的 showSystemUI 标志
-    // initState 设了 false 屏蔽系统音量弹窗, dispose 要还原成 true
-    // 跟 mobile_player_controls.dart:160 同模板, 否则其他场景 (detail 页面
-    // 之类) 再调 setVolume 也不会弹系统 UI
+    // v2.6.42: dispose 兜底清理音量拦截 — 正常流程 playing→detail 已经
+    //   _disableVolumeInterception() 了, 但 widget 异常销毁 (e.g. build
+    //   抛错) 可能跳过. 这里再清一次: showSystemUI=true + setEnabled(false)
+    //   + 清 handler, 确保离开播放页后系统音量弹窗恢复正常.
     VolumeController.instance.showSystemUI = true;
-    // v2.5.18: 关物理音量键拦截, 让用户离开播放页时物理音量键走系统
-    //   默认 (弹系统音量条). 同时清 MethodCallHandler, 避免下次 push
-    //   播放页重复监听. setEnabled(false) 是 fire-and-forget — dispose
-    //   路径不能 await, 走 unawaited 包一下让 lint 不告警.
     _volumeKeyChannel.setMethodCallHandler(null);
     unawaited(_volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': false}));
     // v2.3.0: 视频加速链路整个删了, 关本地代理 / 状态指示器 / 速度采样 timer
@@ -643,6 +631,25 @@ class _PlayerScreenState extends State<PlayerScreen>
             '[KeepScreenOn] $enable failed: $e');
       }
     });
+  }
+
+  /// v2.6.42: 开启音量拦截 — 进入 playing 阶段调.
+  ///   showSystemUI=false 屏蔽系统音量弹窗, setEnabled(true) 让 Kotlin
+  ///   端拦截物理音量键转发到 Dart (handler 已在 initState 注册).
+  ///   resumed (从后台回来) 也调, 跟 initState 一致.
+  void _enableVolumeInterception() {
+    VolumeController.instance.showSystemUI = false;
+    unawaited(
+        _volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': true}));
+  }
+
+  /// v2.6.42: 关闭音量拦截 — 退出 playing 阶段回 detail 调.
+  ///   showSystemUI=true 恢复系统音量弹窗, setEnabled(false) 让物理音量
+  ///   键走系统默认. 不清 handler (dispose 才清).
+  void _disableVolumeInterception() {
+    VolumeController.instance.showSystemUI = true;
+    unawaited(
+        _volumeKeyChannel.invokeMethod<bool>('setEnabled', {'enabled': false}));
   }
 
   /// 退出时串行: save → stop → dispose
@@ -710,6 +717,17 @@ class _PlayerScreenState extends State<PlayerScreen>
           unawaited(_saveCurrentProgress(force: true));
         }
       });
+    } else if (state == AppLifecycleState.resumed) {
+      // v2.6.42: 从后台回来时重新注册音量拦截 — Android 后台/前台切换
+      //   时 Flutter 引擎可能重连, 导致 MethodChannel handler 丢失 +
+      //   VolumeController.showSystemUI 被 native 层重置. 症状: 切后台
+      //   再回来, 物理音量键 Kotlin 端仍拦截 (enabled=true 没丢), 但
+      //   invokeMethod 到不了 Dart (handler 丢了), 系统音量条 + 自定义
+      //   音量指示器都不弹. 偶发 (短时间切后台 channel 没断就没事).
+      //   修法: resumed 时重新 setMethodCallHandler + _enableVolumeInterception()
+      //   (showSystemUI=false + setEnabled(true)), 跟进入 playing 阶段一致.
+      _volumeKeyChannel.setMethodCallHandler(_onVolumeKeyCall);
+      _enableVolumeInterception();
     }
   }
 
@@ -3396,6 +3414,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   离开播放页 (detail) 时会 clearFlags. 切集的话 _phase 还是 'playing',
     //   这里 enable=true 多次调无副作用 (addFlags 重复设置是幂等的).
     _setKeepScreenOn(true);
+    // v2.6.42: 进入播放阶段, 开启音量拦截 (屏蔽系统音量弹窗 + 物理键接管).
+    //   切集时 _phase 已经是 'playing', 重复调无副作用.
+    _enableVolumeInterception();
     // v2.0.51: 切集后 PageView 跳到当前 episode 所在页 (用 jumpToPage, 静默切)
     final newPage = (index ~/ _episodesPerPage).clamp(0, 999);
     if (_episodesPageController.hasClients &&
@@ -3615,6 +3636,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                 });
                 // v2.2.0+59: 退出播放视图, 解除屏幕常亮, 允许系统屏保
                 _setKeepScreenOn(false);
+                // v2.6.42: 退出播放回 detail, 关音量拦截, 恢复系统音量弹窗
+                _disableVolumeInterception();
               }
             } else if (didPop && _phase == 'detail') {
               // v1.0.50: 真正退出页面时不再 save.
@@ -4944,6 +4967,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       _phase = 'detail';
                       // v2.2.0+59: 返回箭头退出播放, 解除屏幕常亮
                       _setKeepScreenOn(false);
+                      // v2.6.42: 退出播放回 detail, 关音量拦截, 恢复系统音量弹窗
+                      _disableVolumeInterception();
                     });
                   }();
                 },
@@ -5345,6 +5370,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         _isControlsVisible = false;
         // v2.2.0+59: DLNA 接管, 关屏幕常亮 (本地不播了, 屏幕可以省电)
         _setKeepScreenOn(false);
+        // v2.6.42: 退出播放回 detail, 关音量拦截, 恢复系统音量弹窗
+        _disableVolumeInterception();
       });
       // 提示
       ScaffoldMessenger.of(context).showSnackBar(
