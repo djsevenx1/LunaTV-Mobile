@@ -392,18 +392,24 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           // v2.6.35: 砍掉所有顶部 banner + 底部 footer. 搜索中且无结果时,
           //   用居中 loading 覆盖在结果区上 (替代原来的"暂无搜索结果"空态),
           //   显示"搜索中「关键词」" + 进度. 有结果后只显示结果, 无任何额外条.
+          // v2.6.37: 修搜索点击后先闪"暂无搜索结果"空态的 bug.
+          //   根因: _performSearch 里 setState(_isLoading=true) 跟 grid 的
+          //   didUpdateWidget 有时序差, grid 用自己的 _aggregatedResults +
+          //   hasReceivedStart 判空态, 可能在 loading 生效前先 build 一次
+          //   空态. 改用 _hasSearched 做门 (同步设 true, 不依赖网络),
+          //   搜索中无结果时底层完全不渲染 grid.
           Expanded(
             child: Stack(
               children: [
-                // 底层 — 结果区 grid. 搜索中无结果时不渲染 (避免"暂无搜索结果"
-                //   空态透出跟 loading 叠在一起), 有结果或搜完后再渲染.
+                // 底层 — 结果区 grid. 搜索中无结果时不渲染 (避免 grid 内部
+                //   _buildEmptyState "暂无搜索结果" 闪现), 有结果或搜完后再渲染.
                 Positioned.fill(
-                  child: (_isLoading && _filteredSearchResults.isEmpty)
+                  child: (_hasSearched && _filteredSearchResults.isEmpty && _isLoading)
                       ? const SizedBox.shrink()
                       : _buildSearchResults(),
                 ),
                 // 搜索中 + 无结果 → 居中 loading, 背景透明融入 app 渐变
-                if (_isLoading && _filteredSearchResults.isEmpty)
+                if (_hasSearched && _filteredSearchResults.isEmpty && _isLoading)
                   Positioned.fill(
                     child: _buildCenterLoading(),
                   ),
