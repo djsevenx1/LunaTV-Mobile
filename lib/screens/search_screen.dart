@@ -21,6 +21,7 @@ import 'package:luna_tv/widgets/search_results_grid.dart';
 import 'package:luna_tv/widgets/filter_options_selector.dart';
 import 'package:luna_tv/widgets/filter_pill_hover.dart';
 import 'package:luna_tv/widgets/main_layout.dart';
+import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/screens/player_screen.dart';
@@ -381,11 +382,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ],
             ),
           ),
-          // v2.6.33: 删顶部 banner — 用户反馈上下都有进度条, 去掉上面的.
-          //   之前 Column 内 + Stack 内各渲染一次 _buildTopLoadingBanner (图2
-          //   重复两个), 加上 Column 内旧进度条 (图1 上下各一个). 现在全删,
-          //   只保留 Stack 内底部 footer (_buildSearchFooter), 搜索进度统一
-          //   在底部显示.
           // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」,
           //   加这个折叠面板, 让用户看到每个源搜出多少条. 0 条的源用红字标,
           //   区分「源被 app 搜了但 API 没数据」vs「app 没搜这个源」.
@@ -393,8 +389,9 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           if (_hasSearched && _sourceResultCounts.isNotEmpty)
             _buildSourceResultDebugPanel(),
           // 搜索结果
-          // v2.6.33: 只保留底部 footer, 删掉 Stack 内顶部 banner.
-          //   搜索进度统一在底部显示, 不再上下重复.
+          // v2.6.35: 砍掉所有顶部 banner + 底部 footer. 搜索中且无结果时,
+          //   用居中 loading 覆盖在结果区上 (替代原来的"暂无搜索结果"空态),
+          //   显示"搜索中「关键词」" + 进度. 有结果后只显示结果, 无任何额外条.
           Expanded(
             child: Stack(
               children: [
@@ -402,13 +399,10 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
                 Positioned.fill(
                   child: _buildSearchResults(),
                 ),
-                // 底部 footer — 搜索进度/完成指示, fixed 屏幕底部
-                if (_hasSearched)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: _buildSearchFooter(),
+                // 搜索中 + 无结果 → 居中 loading 覆盖空态
+                if (_isLoading && _filteredSearchResults.isEmpty)
+                  Positioned.fill(
+                    child: _buildCenterLoading(),
                   ),
               ],
             ),
@@ -542,38 +536,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Widget _buildSearchResults() {
-    // v2.6.30: 删 footer 渲染 — footer 改 fixed 屏幕底部 (跟 web 端
-    //   page.tsx:2461 `fixed bottom-0 left-0 right-0 z-50` 1:1). 之前
-    //   footer 在 Column 末尾占位, 结果多时 (18 源满结果) 需要滚到
-    //   最底才能看到完成徽章, 体感"半天不错搜索结果". 改 Stack + Positioned
-    //   fixed 覆盖在结果区上, 跟 web 完全一致.
-    // v2.6.28: 架构级大改 — 跟 web 端 (LunaTV-web/src/app/search/page.tsx:2300-2470) 1:1
-    //   渲染. 之前 `_isLoading && _searchResults.isEmpty` 二态门 (line 607-630) 强制
-    //   loading 转圈必须等第一批 source_result 到达, 慢源场景用户看 20s 转圈.
-    //
-    //   web 端的模式: 结果区**永远渲染** searchResults (从 start 事件起累积), 跟
-    //   `isLoading` 完全解耦. `isLoading = streamedQuery.isFetching` 只用于:
-    //   1) 标题区小转圈 + "5/18" 进度
-    //   2) Footer 底部小条 banner "正在搜索更多结果..." (仅当 results.length > 0)
-    //   3) Footer 大徽章 "搜索完成 共 N 个" (仅当 !isLoading && results.length > 0)
-    //
-    //   翻译到 Flutter:
-    //   - `_isLoading` = "stream 还在跑, 还没收 complete 事件" (跟 web isFetching 同款)
-    //   - **永远** 渲染结果区 (空就空, SearchResultAggGrid / SearchResultsGrid 内部
-    //     自己处理 empty state, 跟 web VideoCard empty 行为一致)
-    //   - 加 `_buildSearchFooterBanner` 底部小条 + `_buildSearchFooterComplete` 底部
-    //     大徽章, 跟 web line 2460-2470 1:1
-    //   - 删 v2.6.27 的 3s 兜底定时器 (line 60-71 字段 + line 230-235 / 257-265 /
-    //     348-350 / 381-384 所有 cancel 防御) — 现在 loading 不再"门控"结果, 没
-    //     兜底必要. Loading 永远 true 直到 complete, 体感"还在搜"是正确语义, 不
-    //     兜底. v2.6.27 changelog 描述的 3s loading 兜底场景, 跟 web 不一致, 是
-    //     "前端硬编了个假门" 的 hack. 删
-    //
-    //   行为对比 (搜「凡人修仙传」, 18 源后端):
-    //   | 场景 | 改前 (v2.6.27) | 改后 (v2.6.28) | web (Selene) |
-    //   | 第一源 1s 到, 18 源全 3s 到 | 1s 出第一批, 3s 后 footer "正在搜" → 18s 出 "完成" | 1s 出第一批, 3s 后 footer "正在搜" → 18s 出 "完成" | 同 |
-    //   | 第一源 10s 到, 慢源 20s | 3s 兜底关 loading, 10s 出结果, 20s 出 footer "完成" | 10s 出结果, 20s 出 footer "完成" (banner 一直在底部) | 同 |
-    //   | 一直 0 结果 (没人搜) | 3s 兜底关 loading, 显示空态, 20s 出 "完成 0 个" | 一直显示空态 (0 results), 20s 出 footer "完成 0 个" | 同 (web 是空网格 + footer "完成 0 个") |
+    // v2.6.35: 结果区永远渲染. 搜索中无结果时由 _buildCenterLoading 覆盖,
+    //   搜完无结果时 grid 自带 _buildEmptyState 显示"暂无搜索结果".
     final themeService = Provider.of<ThemeService>(context, listen: false);
     return _useAggregatedView
         ? SearchResultAggGrid(
@@ -592,142 +556,49 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           );
   }
 
-  /// v2.6.33: 删 _buildTopLoadingBanner — 用户反馈上下都有进度条,
-  ///   去掉上面的, 统一用底部 _buildSearchFooter 显示搜索进度.
-
-  /// v2.6.28: Footer banner — 跟 web 端 (LunaTV-web/src/app/search/page.tsx:2460-2470) 1:1.
-  ///   - isLoading && results.length > 0 → "正在搜索更多结果..." 底部小条
-  ///   - !isLoading && results.length > 0 → "搜索完成 共 N 个" 大徽章
-  ///   - 都不是 → null (不渲染, 跟 web 一样)
-  ///
-  /// v2.6.30: footer 改 fixed 屏幕底部 (跟 web `fixed bottom-0` 1:1).
-  ///   在 build 里用 Stack + Positioned(bottom: 0) 浮在结果区上. 之前
-  ///   `_buildSearchResults` 内 Column 末尾占位, 结果多时需滚到底才能
-  ///   看到完成徽章. 改 fixed 后永远可见, 跟 web 完全一致.
-  /// v2.6.30: "正在搜索更多结果..." 小条里加「已找到 N 个」实时数字.
-  ///   web 端 page.tsx:2464 「正在搜索更多结果...」无数字, 只有完成时
-  ///   大徽章显示总数. 用户反馈「半天不错搜索结果」, 体感想知道"搜到
-  ///   多少了", 移动端体验上比 web 端更需要这个数字. 加在 (X / Y) 后面,
-  ///   跟源完成度一并显示, 用户能直观看到结果数在涨.
-  /// v2.6.34: footer 风格同步 web 端 (page.tsx:2460-2489) 1:1.
-  ///   搜索中: 全宽底部栏, 白色半透明背景, 仅顶部边框, 跟 web `fixed bottom-0
-  ///   bg-white/98 border-t` 一致. 之前是药丸形全边框容器, 跟 web 不一致.
-  ///   完成徽章: 加大圆圈 (36→48), 加 ping 动画, 跟 web `animate-ping` 一致.
-  Widget _buildSearchFooter() {
-    final hasResults = _filteredSearchResults.isNotEmpty;
-    final resultCount = _filteredSearchResults.length;
-    // 搜索中 — 跟 web `fixed bottom-0 bg-white/98 border-t` 1:1
-    if (_isLoading) {
-      final completed = _searchProgress?.completedSources ?? 0;
-      final total = _searchProgress?.totalSources ?? 0;
-      final current = _searchProgress?.currentSource;
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.98),
-          border: Border(
-            top: BorderSide(color: const Color(0xFFE5E7EB).withOpacity(0.8), width: 0.5),
-          ),
-        ),
-        child: Row(
+  /// v2.6.35: 居中 loading — 搜索中且无结果时, 覆盖在结果区空态上.
+  ///   显示"搜索中「关键词」" + 进度 (X/Y) + 当前源名, 带半透明背景.
+  ///   搜索结束后自动消失, 露出 grid 自带的"暂无搜索结果"空态.
+  ///   替代 v2.6.29~v2.6.34 的顶部 banner + 底部 footer 方案.
+  Widget _buildCenterLoading() {
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    final isDark = themeService.isDarkMode;
+    final completed = _searchProgress?.completedSources ?? 0;
+    final total = _searchProgress?.totalSources ?? 0;
+    final current = _searchProgress?.currentSource;
+    return Container(
+      color: isDark
+          ? const Color(0xFF000000).withOpacity(0.92)
+          : Colors.white.withOpacity(0.95),
+      child: Center(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Color(0xFF10B981),
-              ),
-            ),
-            const SizedBox(width: 8),
+            // 脉冲点动画, 跟 app 原生 PulsingDotsIndicator 风格一致
+            const PulsingDotsIndicator(),
+            const SizedBox(height: 20),
             Text(
-              hasResults
-                  ? '正在搜索更多结果... ($completed / $total)  已找到 $resultCount 个'
-                  : '搜索中... ($completed / $total)${current != null ? '  $current' : ''}',
-              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-            ),
-          ],
-        ),
-      );
-    }
-    // 搜索完成 — 跟 web `rounded-2xl bg-gradient border shadow-lg` + `animate-ping` 1:1
-    if (!_isLoading && hasResults) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFFEFF6FF), Color(0xFFEEF2FF), Color(0xFFF3E8FF)],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFBFDBFE).withOpacity(0.5)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 圆圈 + ping 动画, 跟 web `animate-ping` 1:1
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // ping 扩散环
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF3B82F6).withOpacity(0.3),
-                    ),
-                  ),
-                  // 主圆圈
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-                      ),
-                    ),
-                    child: const Icon(Icons.check, color: Colors.white, size: 24),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '搜索完成',
+              '搜索中「$_searchQuery」',
               style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1F2937),
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: isDark ? AppColors.darkText : const Color(0xFF1F2937),
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              '共找到 $resultCount 个结果',
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF6B7280),
+            if (total > 0) ...[
+              const SizedBox(height: 8),
+              Text(
+                '$completed / $total${current != null ? '  ·  $current' : ''}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? AppColors.darkTextSecondary : const Color(0xFF6B7280),
+                ),
               ),
-            ),
+            ],
           ],
         ),
-      );
-    }
-    return const SizedBox.shrink();
+      ),
+    );
   }
 
   void _navigateToPlayer(VideoInfo video) {
