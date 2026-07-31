@@ -420,6 +420,23 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ],
             ),
           ),
+          // v2.6.29: 顶部"搜索中"小条 banner — 修 v2.6.28 大改后体感"没反应"问题.
+          //   之前 v2.6.28 删了 loading 转圈门, 改成"永远渲染结果区 + 底部 footer banner".
+          //   但 footer banner 只在 _isLoading && hasResults 时才显示, 而
+          //   _isLoading=true && _filteredSearchResults.isEmpty (搜索启动但
+          //   第一个 source_result 还没到) 这个状态没指示, 体感"屏幕闪一下空态
+          //   然后才有结果" → 用户以为"没反应".
+          //   修法: 顶部加小条 banner, _isLoading && _filteredSearchResults.isEmpty
+          //   时显示"搜索中... (0/18)" + 小转圈 + 当前源名. 跟 web 端 page.tsx
+          //   line 2187-2196 标题区小转圈 + 进度完全 1:1, 跟 v2.6.28 底部 footer
+          //   banner 配对形成"上下两个指示":
+          //   - 顶部 banner: 还没出结果时告诉用户"在搜, 等等" (启动阶段)
+          //   - 底部 banner: 有结果后告诉用户"还在搜更多 / 搜完了" (后续阶段)
+          //   - 都没结果: v2.6.28 footer null, 顶部 banner 也 null, SearchResultAggGrid
+          //     走 _buildEmptyState "暂无搜索结果" 静态空态 (用户没搜过时是 SizedBox.shrink)
+          //   配合 _useAggregatedView / _filteredSearchResults, 跟 footer banner
+          //   互斥 (一个有结果一个没结果).
+          if (_isLoading && _filteredSearchResults.isEmpty) _buildTopLoadingBanner(),
           // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」,
           //   加这个折叠面板, 让用户看到每个源搜出多少条. 0 条的源用红字标,
           //   区分「源被 app 搜了但 API 没数据」vs「app 没搜这个源」.
@@ -427,8 +444,42 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           if (_hasSearched && _sourceResultCounts.isNotEmpty)
             _buildSourceResultDebugPanel(),
           // 搜索结果
+          // v2.6.30: 结果区 + 顶部 banner 包 Stack, footer 用 Positioned
+          //   fixed 屏幕底部. 跟 web 端 page.tsx:2461 `fixed bottom-0
+          //   left-0 right-0 z-50` 1:1. 之前 footer 在 Column 末尾占位
+          //   (v2.6.28 `_buildSearchResults` 内 Column([Expanded(grid), footer])),
+          //   结果多时 (18 源满结果, ~200px 高度 / 18 卡片 = 12 行) 需要
+          //   滚到最底才能看到完成徽章, 体感"半天不错搜索结果".
+          //   现在 footer 浮在屏幕底部, 永远可见, 跟 web 一致.
+          //   - 顶部 banner (启动阶段) 仍包在 Stack 内, Positioned(top: 0)
+          //   - 底部 footer (后续阶段) 包在 Stack 内, Positioned(bottom: 0)
+          //   - 两者互斥 (一个有结果一个没结果), 不会出现同时显示
           Expanded(
-            child: _buildSearchResults(),
+            child: Stack(
+              children: [
+                // 底层 — 结果区 grid, 永远渲染
+                Positioned.fill(
+                  child: _buildSearchResults(),
+                ),
+                // 顶部 banner — 启动阶段 (0~3s) 指示, 第一个 source_result
+                //   到达后自动消失
+                if (_isLoading && _filteredSearchResults.isEmpty)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildTopLoadingBanner(),
+                  ),
+                // 底部 footer — 后续阶段指示, fixed 屏幕底部覆盖在结果区上
+                if (_hasSearched)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildSearchFooter(),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -559,6 +610,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Widget _buildSearchResults() {
+    // v2.6.30: 删 footer 渲染 — footer 改 fixed 屏幕底部 (跟 web 端
+    //   page.tsx:2461 `fixed bottom-0 left-0 right-0 z-50` 1:1). 之前
+    //   footer 在 Column 末尾占位, 结果多时 (18 源满结果) 需要滚到
+    //   最底才能看到完成徽章, 体感"半天不错搜索结果". 改 Stack + Positioned
+    //   fixed 覆盖在结果区上, 跟 web 完全一致.
     // v2.6.28: 架构级大改 — 跟 web 端 (LunaTV-web/src/app/search/page.tsx:2300-2470) 1:1
     //   渲染. 之前 `_isLoading && _searchResults.isEmpty` 二态门 (line 607-630) 强制
     //   loading 转圈必须等第一批 source_result 到达, 慢源场景用户看 20s 转圈.
@@ -587,29 +643,69 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     //   | 第一源 10s 到, 慢源 20s | 3s 兜底关 loading, 10s 出结果, 20s 出 footer "完成" | 10s 出结果, 20s 出 footer "完成" (banner 一直在底部) | 同 |
     //   | 一直 0 结果 (没人搜) | 3s 兜底关 loading, 显示空态, 20s 出 "完成 0 个" | 一直显示空态 (0 results), 20s 出 footer "完成 0 个" | 同 (web 是空网格 + footer "完成 0 个") |
     final themeService = Provider.of<ThemeService>(context, listen: false);
-    return Column(
-      children: [
-        // 结果区 — 永远渲染, 跟 web searchResults.map(...) 1:1
-        Expanded(
-          child: _useAggregatedView
-              ? SearchResultAggGrid(
-                  results: _filteredSearchResults,
-                  themeService: themeService,
-                  hasReceivedStart: _hasSearched,
-                  onVideoTap: (video) => _navigateToPlayer(video),
-                  onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
-                )
-              : SearchResultsGrid(
-                  results: _filteredSearchResults,
-                  themeService: themeService,
-                  hasReceivedStart: _hasSearched,
-                  onVideoTap: (video) => _navigateToPlayer(video),
-                  onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
-                ),
-        ),
-        // Footer banner — 跟 web line 2460-2470 1:1
-        if (_hasSearched) _buildSearchFooter(),
-      ],
+    return _useAggregatedView
+        ? SearchResultAggGrid(
+            results: _filteredSearchResults,
+            themeService: themeService,
+            hasReceivedStart: _hasSearched,
+            onVideoTap: (video) => _navigateToPlayer(video),
+            onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
+          )
+        : SearchResultsGrid(
+            results: _filteredSearchResults,
+            themeService: themeService,
+            hasReceivedStart: _hasSearched,
+            onVideoTap: (video) => _navigateToPlayer(video),
+            onGlobalMenuAction: (video, action) => _handleMenuAction(video, action),
+          );
+  }
+
+  /// v2.6.29: 顶部"搜索中"小条 banner — 跟 web 端 page.tsx:2187-2196
+  ///   标题区"搜索结果 + 5/18 + 小转圈"1:1, 跟 v2.6.28 底部 footer banner
+  ///   配对. 显示条件: `_isLoading && _filteredSearchResults.isEmpty`,
+  ///   也就是"搜索启动了, 第一个 source_result 还没推回"这个 0~3s 启动阶段.
+  ///   跟 footer banner 互斥 (一个有结果一个没结果), 不会出现两个同时显示.
+  Widget _buildTopLoadingBanner() {
+    final progress = _searchProgress;
+    final completed = progress?.completedSources ?? 0;
+    final total = progress?.totalSources ?? 0;
+    final current = progress?.currentSource;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFF10B981),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              total > 0
+                  ? '搜索中... ($completed / $total)${current != null ? '  $current' : ''}'
+                  : '搜索中...',
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF065F46),
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -617,10 +713,23 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   ///   - isLoading && results.length > 0 → "正在搜索更多结果..." 底部小条
   ///   - !isLoading && results.length > 0 → "搜索完成 共 N 个" 大徽章
   ///   - 都不是 → null (不渲染, 跟 web 一样)
+  ///
+  /// v2.6.30: footer 改 fixed 屏幕底部 (跟 web `fixed bottom-0` 1:1).
+  ///   在 build 里用 Stack + Positioned(bottom: 0) 浮在结果区上. 之前
+  ///   `_buildSearchResults` 内 Column 末尾占位, 结果多时需滚到底才能
+  ///   看到完成徽章. 改 fixed 后永远可见, 跟 web 完全一致.
+  /// v2.6.30: "正在搜索更多结果..." 小条里加「已找到 N 个」实时数字.
+  ///   web 端 page.tsx:2464 「正在搜索更多结果...」无数字, 只有完成时
+  ///   大徽章显示总数. 用户反馈「半天不错搜索结果」, 体感想知道"搜到
+  ///   多少了", 移动端体验上比 web 端更需要这个数字. 加在 (X / Y) 后面,
+  ///   跟源完成度一并显示, 用户能直观看到结果数在涨.
   Widget _buildSearchFooter() {
     final hasResults = _filteredSearchResults.isNotEmpty;
+    final resultCount = _filteredSearchResults.length;
     if (_isLoading && hasResults) {
-      // 底部固定小条, 跟 web "fixed bottom-0 left-0 right-0 z-50" 1:1
+      // 底部 fixed 小条, 跟 web "fixed bottom-0 left-0 right-0 z-50" 1:1.
+      //   Positioned(bottom: 0) 让它浮在屏幕底部, 不挡结果区滚动. web 端
+      //   是 fixed 覆盖在内容上 (z-50), Flutter Stack 内 Positioned 同款效果.
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
@@ -643,7 +752,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
             ),
             const SizedBox(width: 8),
             Text(
-              '正在搜索更多结果... (${_searchProgress?.completedSources ?? 0} / ${_searchProgress?.totalSources ?? 0})',
+              '正在搜索更多结果... (${_searchProgress?.completedSources ?? 0} / ${_searchProgress?.totalSources ?? 0})  已找到 $resultCount 个',
               style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
             ),
           ],
@@ -651,7 +760,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       );
     }
     if (!_isLoading && hasResults) {
-      // 大徽章, 跟 web "搜索完成 共 N 个" 1:1
+      // 大徽章, 跟 web "搜索完成 共 N 个" 1:1.
+      //   fixed 屏幕底部覆盖, 永远可见, 搜完一抬头就能看到 "搜索完成 共 N 个"
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -688,7 +798,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
             ),
             const SizedBox(height: 2),
             Text(
-              '共找到 ${_filteredSearchResults.length} 个结果',
+              '共找到 $resultCount 个结果',
               style: const TextStyle(
                 fontSize: 11,
                 color: Color(0xFF6B7280),
