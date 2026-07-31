@@ -351,9 +351,26 @@ class UserDataService {
   }
 
   // 获取本地搜索设置（默认为 false）
+  // v2.6.25-fix: 加缓存命中分支, 跟 getIsLocalMode 一致. 之前每次都走
+  //   SharedPreferences.getInstance() 磁盘 IO (~50-200ms 冷启首调), 拖慢
+  //   SSE 启动. 命中 _localSearchCache 直接返回, miss 才走 SharedPreferences
+  //   并写回缓存. 跟 getIsLocalMode (line 367-372) 完全一样模式.
   static Future<bool> getLocalSearch() async {
+    if (_localSearchCache != null) return _localSearchCache!;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_localSearchKey) ?? false;
+    final v = prefs.getBool(_localSearchKey) ?? false;
+    _localSearchCache = v;
+    return v;
+  }
+
+  // v2.6.25-fix: 同步版, 供搜索主路径用, 跟 getIsLocalModeSync 平行.
+  //   v2.6.25 changelog 写了加这个方法但代码漏了, 导致 v2.6.25 编译挂
+  //   (sse_search_service.dart:221 调 UserDataService.getLocalSearchSync()
+  //   报 "Member not found"). warmup 前调用兜底 false (走 SSE 主路, 默认
+  //   安全侧), 跟 async 版未缓存时行为一致 (prefs.getBool(_localSearchKey)
+  //   ?? false), 不影响业务.
+  static bool getLocalSearchSync() {
+    return _localSearchCache ?? false;
   }
 
   // 保存本地模式设置
