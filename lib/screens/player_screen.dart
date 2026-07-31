@@ -207,6 +207,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   // 视频尺寸（用于判断横竖屏全屏）
   int _videoWidth = 0;
   int _videoHeight = 0;
+  // v2.6.41: 手势缩放 — 有的影片尺寸小, 双指捏拉放大填满屏幕.
+  //   _videoScale 当前缩放倍数 (1.0 = 原始, 4.0 = 4倍), 双击中央复位.
+  //   用 Listener (raw pointer) 而非 GestureDetector.onScale*, 避免跟
+  //   亮度/音量/快进快退的 VerticalDrag/HorizontalDrag 抢手势竞技场.
+  //   Listener 不参与竞技场, 只观察 pointer 事件, 2 指以上才计算缩放.
+  double _videoScale = 1.0;
+  double _baseScale = 1.0; // pinch 手势开始时的 scale
+  // pinch 指针追踪 — 记录当前按下的指针 id → 屏幕坐标
+  final Map<int, Offset> _pinchPointers = {};
+  double _pinchInitialDistance = 0.0; // pinch 开始时两指距离 (像素)
   // v2.2.0: 删 _videoParamsSub (libmpv streams.videoParams 替代)
   //   video size 从 backend.width/height 读 (在 positionStream listener 里同步)
 
@@ -2068,11 +2078,60 @@ class _PlayerScreenState extends State<PlayerScreen>
     _pendingDoubleTapSide = null;
     if (side == null) return;
     if (side == 0) {
-      // 中间双击 = 播放/暂停
-      _togglePlayPause();
+      // v2.6.41: 缩放状态下双击中央 = 复位缩放, 否则 = 播放/暂停
+      if (_videoScale > 1.01) {
+        setState(() => _videoScale = 1.0);
+      } else {
+        _togglePlayPause();
+      }
     } else {
       // 左右双击 = ±10s (跟主流方案一致, 替代原 ±30s 按钮)
       _seekBySeconds(side * 10, side > 0 ? '快进10s' : '快退10s');
+    }
+  }
+
+  // ==================== 双指缩放 (v2.6.41) ====================
+
+  /// pointer down — 记录指针, 2 指时算初始距离
+  void _onPinchPointerDown(PointerDownEvent event) {
+    _pinchPointers[event.pointer] = event.position;
+    if (_pinchPointers.length == 2) {
+      final pts = _pinchPointers.values.toList();
+      _pinchInitialDistance = (pts[0] - pts[1]).distance;
+      _baseScale = _videoScale;
+    }
+  }
+
+  /// pointer move — 2 指以上时按距离比更新缩放
+  void _onPinchPointerMove(PointerMoveEvent event) {
+    if (!_pinchPointers.containsKey(event.pointer)) return;
+    _pinchPointers[event.pointer] = event.position;
+    if (_pinchPointers.length >= 2 && _pinchInitialDistance > 0) {
+      final pts = _pinchPointers.values.toList();
+      final currentDist = (pts[0] - pts[1]).distance;
+      if (currentDist > 0) {
+        final newScale =
+            (_baseScale * currentDist / _pinchInitialDistance).clamp(1.0, 4.0);
+        if ((newScale - _videoScale).abs() > 0.01) {
+          setState(() => _videoScale = newScale);
+        }
+      }
+    }
+  }
+
+  /// pointer up — 移除指针, 不足 2 指时结束 pinch
+  void _onPinchPointerUp(PointerUpEvent event) {
+    _pinchPointers.remove(event.pointer);
+    if (_pinchPointers.length < 2) {
+      _pinchInitialDistance = 0.0;
+    }
+  }
+
+  /// pointer cancel — 系统取消触摸 (如来电), 清空所有指针
+  void _onPinchPointerCancel(PointerCancelEvent event) {
+    _pinchPointers.remove(event.pointer);
+    if (_pinchPointers.length < 2) {
+      _pinchInitialDistance = 0.0;
     }
   }
 
@@ -2546,6 +2605,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   都不跳过了").
     _adResetDetected = false;
     _lastPosForAdDetect = -1;
+    // v2.6.41: 切集时重置缩放 — 上一集放大了, 新一集不该沿用.
+    _videoScale = 1.0;
+    _pinchPointers.clear();
+    _pinchInitialDistance = 0.0;
   }
 
   /// 后台测速所有源：并发用 M3U8Service 测速, 并按综合分从高到低排序源列表
@@ -3286,6 +3349,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     //   不跳 (用户反馈). 新一集可能没广告, 必须重新检测.
     _adResetDetected = false;
     _lastPosForAdDetect = -1;
+    // v2.6.41: 切集时重置缩放 — 上一集放大了, 新一集不该沿用.
+    _videoScale = 1.0;
+    _pinchPointers.clear();
+    _pinchInitialDistance = 0.0;
 
     // 记住这次要 seek 到的位置, 等 player 缓冲到可以 seek 时用
     // 仅在用户主动开新集时且和云记忆吻合的那次才用
@@ -5717,46 +5784,53 @@ class _PlayerScreenState extends State<PlayerScreen>
       fit: StackFit.expand,
       children: [
         // 视频 (12ce29d 结构: Container+AspectRatio+Stack+Video(NoVideoControls))
+        // v2.6.41: 加 Transform.scale 支持双指缩放, 小尺寸影片能放大填满.
         Positioned.fill(
           child: Container(
             color: Colors.black,
             child: Center(
-              child: AspectRatio(
-                aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
-                    ? _videoWidth / _videoHeight
-                    : 16 / 9,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // v2.2.0: 卸 libmpv Video() 改 ExoPlayerView.
-                    //   内部 [ExoPlayerView] 走 [VideoPlayer] widget
-                    //   (video_player package) 渲染 ExoPlayer 视频帧.
-                    // v2.3.14: 卸自研 CustomExoPlayer + Flutter [Texture]
-                    //   widget, 回到 v2.3.0 video_player [VideoPlayer] 渲染.
-                    //   UI 控件 (LunaTV 自定义底栏/顶栏/手势) 全部在外层
-                    //   Stack 上, 这里只是个视频画面的薄壳.
-                    ExoPlayerView(backend: _player!),
-                    // v2.5.34: 弹幕浮层 — IgnorePointer 不挡手势, CustomPaint
-                    //   滚动画. positionProvider 从 _currentPosition 读.
-                    if (_danmakuEnabled)
-                      DanmakuOverlay(
-                        key: _danmakuKey,
-                        comments: _danmakuComments,
-                        enabled: _danmakuEnabled,
-                        positionProvider: () => _currentPosition,
-                        pausedProvider: () => !_isPlaying,
-                      ),
-                    if (_isBuffering)
-                      const SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(
-                            color: kLunaLoadingColor, strokeWidth: 3),
-                      ),
-                  ],
+              child: Transform.scale(
+                scale: _videoScale,
+                child: AspectRatio(
+                  aspectRatio: (_videoWidth > 0 && _videoHeight > 0)
+                      ? _videoWidth / _videoHeight
+                      : 16 / 9,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      ExoPlayerView(backend: _player!),
+                      if (_danmakuEnabled)
+                        DanmakuOverlay(
+                          key: _danmakuKey,
+                          comments: _danmakuComments,
+                          enabled: _danmakuEnabled,
+                          positionProvider: () => _currentPosition,
+                          pausedProvider: () => !_isPlaying,
+                        ),
+                      if (_isBuffering)
+                        const SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: CircularProgressIndicator(
+                              color: kLunaLoadingColor, strokeWidth: 3),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
+          ),
+        ),
+        // v2.6.41: 双指缩放 Listener 层 — 不参与手势竞技场, 只观察 pointer.
+        //   translucent 让事件穿透到下方 GestureDetector (tap/drag/doubleTap),
+        //   同时 Listener 拿到所有 pointer down/move/up 做 pinch 计算.
+        Positioned.fill(
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPinchPointerDown,
+            onPointerMove: _onPinchPointerMove,
+            onPointerUp: _onPinchPointerUp,
+            onPointerCancel: _onPinchPointerCancel,
           ),
         ),
         // 点击空白区切换控制栏显隐 (始终存在, 控件隐藏时也能点击调出)
