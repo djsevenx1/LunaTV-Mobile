@@ -618,13 +618,15 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   /// v2.6.38: 搜索中(有结果)顶部进度小条 — 轻量, 不挡结果区.
-  ///   显示小转圈 + "X/Y" + 已找到 N 个, 跟精确搜索开关同列风格.
+  ///   显示小转圈 + "搜索中 X/Y — 当前源" + 已找到 N 个.
   ///   搜完自动消失. 替代 v2.6.28~v2.6.34 的底部 footer.
+  /// v2.6.40: 样式对齐用户参考截图 — 加当前源名, 跟中间转圈统一.
   Widget _buildSearchingHint() {
     final themeService = Provider.of<ThemeService>(context, listen: false);
     final isDark = themeService.isDarkMode;
     final completed = _searchProgress?.completedSources ?? 0;
     final total = _searchProgress?.totalSources ?? 0;
+    final current = _searchProgress?.currentSource;
     final resultCount = _filteredSearchResults.length;
     return Container(
       width: double.infinity,
@@ -632,21 +634,25 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       child: Row(
         children: [
           SizedBox(
-            width: 12,
-            height: 12,
+            width: 14,
+            height: 14,
             child: CircularProgressIndicator(
-              strokeWidth: 1.5,
+              strokeWidth: 2,
               color: AppColors.primary,
             ),
           ),
           const SizedBox(width: 8),
-          Text(
-            total > 0
-                ? '搜索中 $completed/$total  ·  已找到 $resultCount 个'
-                : '搜索中  ·  已找到 $resultCount 个',
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? AppColors.darkTextSecondary : Colors.black54,
+          Expanded(
+            child: Text(
+              total > 0
+                  ? '搜索中 $completed / $total${current != null ? ' — $current' : ''}  ·  已找到 $resultCount 个'
+                  : '搜索中  ·  已找到 $resultCount 个',
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? AppColors.darkTextSecondary : Colors.black54,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
