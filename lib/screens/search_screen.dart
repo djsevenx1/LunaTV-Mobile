@@ -382,6 +382,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ],
             ),
           ),
+          // v2.6.38: 搜索中(有结果)顶部进度小条 — 告诉用户"还在搜更多源".
+          //   搜索中无结果时由居中 loading 处理; 有结果后底部 footer 被砍了,
+          //   用户不知道还有源在搜, 加这个轻量小条在结果区上方, 不挡结果.
+          if (_isLoading && _filteredSearchResults.isNotEmpty)
+            _buildSearchingHint(),
           // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」,
           //   加这个折叠面板, 让用户看到每个源搜出多少条. 0 条的源用红字标,
           //   区分「源被 app 搜了但 API 没数据」vs「app 没搜这个源」.
@@ -601,6 +606,43 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// v2.6.38: 搜索中(有结果)顶部进度小条 — 轻量, 不挡结果区.
+  ///   显示小转圈 + "X/Y" + 已找到 N 个, 跟精确搜索开关同列风格.
+  ///   搜完自动消失. 替代 v2.6.28~v2.6.34 的底部 footer.
+  Widget _buildSearchingHint() {
+    final themeService = Provider.of<ThemeService>(context, listen: false);
+    final isDark = themeService.isDarkMode;
+    final completed = _searchProgress?.completedSources ?? 0;
+    final total = _searchProgress?.totalSources ?? 0;
+    final resultCount = _filteredSearchResults.length;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            total > 0
+                ? '搜索中 $completed/$total  ·  已找到 $resultCount 个'
+                : '搜索中  ·  已找到 $resultCount 个',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? AppColors.darkTextSecondary : Colors.black54,
+            ),
+          ),
         ],
       ),
     );
