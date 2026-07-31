@@ -287,6 +287,12 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
         } else {
           _items.addAll(result.items);
           _meta = result.meta;
+          // v2.6.43: 自维护源 (lunatv-sources HTML→maccms 代理) 不支持按分类
+          //   浏览 (?ac=videolist&t=X 返空), 但搜索 (?ac=videolist&wd=X) 正常.
+          //   第 1 页拉到空内容时提示用户用搜索, 不留个空白页面让人困惑.
+          if (!isLoadMore && _items.isEmpty && _searchQuery.isEmpty) {
+            _error = '该源不支持分类浏览，请使用搜索';
+          }
         }
         _lastFetchAt = DateTime.now();
       });
