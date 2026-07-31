@@ -708,6 +708,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden) {
+      // ★ v2.6.44: 熄屏/锁屏时暂停播放
+      if (_isPlaying) {
+        _player?.pause();
+      }
       // v1.0.65: 先等 _currentPosition > 0 再 save, 避免刚 play 就 home
       // 键时存 0 覆盖之前的真进度. 仍然 0 就跳过 (10s 定时器下次兜底)
       _waitForValidPosition().then((_) {
