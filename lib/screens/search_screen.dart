@@ -50,10 +50,25 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   Timer? _updateTimer;
   bool _useAggregatedView = true;
 
-  // v2.5.27: 搜索代际 guard. debounce 缩短到 400ms 后, 用户还在输入就可能触发
+  // 搜索代际 guard. debounce 缩短到 400ms 后, 用户还在输入就可能触发
   //   新搜索, 旧搜索的 await 晚返回会覆盖新搜索的空/loading 状态, 导致"结果突然消失".
   //   每次发起新搜索递增 generation, await 返回后校验, 不匹配就丢弃结果.
   int _searchGeneration = 0;
+
+  // v2.6.27: loading 兜底定时器. 后端 /api/search/ws 路由里 complete 事件
+  //   要等所有源完成才发, 最慢的源要满 20s timeout (line 84 setTimeout).
+  //   后果: 即便第一批 source_result 1s 内到, _isLoading 只在结果到达时
+  //   关掉, 没问题. 但如果用户搜的词所有源都慢, 第一个 source_result 10s+
+  //   才到, 前端转圈 10s 体感极差. Selene 体感 3s 出结果是因为 web 端 fetch
+  //   + EventSource 渲染是分开的, 第一批结果到达 React 立刻渲染, 跟 loading
+  //   不耦合. LunaTV 之前 _isLoading=false 跟 _searchResults.addAll 在同一
+  //   个 setState 里, 第一个源完成就关 loading, 体感正常. 但慢源/全网慢时
+  //   第一个源也慢, 还是转 20s.
+  //   修复: 3s 兜底定时器. 不管结果到没到, 3s 后强制 _isLoading=false,
+  //   让用户看到当前已有的 _searchResults (可能为空, 显示"暂无结果"空态)
+  //   跟"还在搜"的双显: ProgressBanner 显示 X/Y 完成进度条, 但 loading
+  //   转圈干掉, 用户能往下滚看到已有结果. Selene 也是这个行为.
+  Timer? _loadingFallbackTimer;
 
   // v2.6.7: 改用 SSESearchService 走客户端直连 + SSE 增量推回 (跟 Selene 一致).
   //   本地模式 → 客户端直连资源站 ?ac=videolist&wd=... 并行搜, 自维护源
@@ -212,6 +227,12 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
     await _errorSubscription?.cancel();
     await _sseSearchService.stopSearch();
 
+    // v2.6.27: 取消上一个搜索遗留的 3s loading 兜底定时器. 之前
+    //   连续搜两次, 第一次的 3s 定时器没 cancel, 会在第二次搜索 3s
+    //   后把第二次的 _isLoading 强行关掉, 体感"还没搜完 loading 就消失了"
+    //   误导. 现在每次新搜都 cancel 上一个, 只保留当前代际的兜底.
+    _loadingFallbackTimer?.cancel();
+
     final gen = ++_searchGeneration;
     setState(() {
       _hasSearched = true;
@@ -220,6 +241,25 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       _isLoading = true;
       _searchProgress = null;
       _sourceResultCounts = {};
+    });
+
+    // v2.6.27: 3s loading 兜底定时器. 后端 /api/search/ws 等所有源完成
+    //   才发 complete, 慢源要满 20s. 即便 SSE 推回正常, 第一个源 1s 内
+    //   到 _isLoading 也会跟着关 (line 251), 体感 1s. 但如果第一个源也慢
+    //   (网络抖动 / 资源站冷启), 用户看 10s+ 转圈体感极差. 3s 兜底后,
+    //   不管结果到没到, 3s 后 _isLoading=false, 用户能看到已有结果 / 空态,
+    //   顶部 progress 仍在跑 (X/Y 进度条), 跟 Selene 行为一致.
+    //   配套: 1) 主路首个结果到达 → _isLoading=false (line 251), 立即收尾
+    //   体感跟没定时器一样; 2) 定时器触发 → _isLoading=false, 主路继续跑,
+    //   后续 source_result 仍 addAll + 刷新进度, 用户看到的是"有结果就显示,
+    //   还在继续搜". 3) complete → _isLoading=false 兜底, 正常路径.
+    _loadingFallbackTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      if (gen != _searchGeneration) return;
+      if (!_isLoading) return; // 已有结果, 不重复触发
+      setState(() {
+        _isLoading = false;
+      });
     });
 
     // v2.6.16: 拿源列表建 key→name 映射, 用于显示每个源的结果数
@@ -304,6 +344,9 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   @override
   void dispose() {
     _updateTimer?.cancel();
+    // v2.6.27: 取消 loading 兜底定时器, 防止 dispose 后定时器还活着
+    //   触发 setState 报错 "setState after dispose"
+    _loadingFallbackTimer?.cancel();
     _incrementalResultsSubscription?.cancel();
     _progressSubscription?.cancel();
     _errorSubscription?.cancel();
@@ -335,6 +378,9 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         _searchGeneration++;
         // v2.6.7: 清空时也停掉 SSE, 不然旧搜索的结果还会继续推回
         unawaited(_sseSearchService.stopSearch());
+        // v2.6.27: 清空时也取消 loading 兜底定时器, 跟 onClearSearch 一起
+        //   重置, 不让 3s 后定时器还触发 setState 强行关 _isLoading
+        _loadingFallbackTimer?.cancel();
         _incrementalResultsSubscription?.cancel();
         _progressSubscription?.cancel();
         _errorSubscription?.cancel();
