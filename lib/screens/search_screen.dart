@@ -353,34 +353,6 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
                 style: const TextStyle(color: Colors.red, fontSize: 12),
               ),
             ),
-          // v2.6.7: SSE 搜索进度条 — 结果已出但还没搜完时, 顶部显示细进度,
-          //   让用户知道"还有源在搜, 别急着滚到底". 搜完 (_isComplete) 或
-          //   还没搜 (_searchProgress == null) 时不显示.
-          if (_searchProgress != null &&
-              !_searchProgress!.isComplete &&
-              _searchProgress!.totalSources > 0 &&
-              _searchResults.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '搜索中 ${_searchProgress!.completedSources} / ${_searchProgress!.totalSources}'
-                      '${_searchProgress!.currentSource != null ? ' — ${_searchProgress!.currentSource}' : ''}',
-                      style: const TextStyle(fontSize: 11, color: Colors.black54),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           // v2.6.9: 精确搜索开关 — 跟 web 端 SettingsPanel 暴露的 toggle
           //   一致. 默认开, 用户可关掉看全部结果 (兜底). 用 Switch + 简短
           //   标签, 跟搜索结果区同列, 不占额外导航.
@@ -409,23 +381,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ],
             ),
           ),
-          // v2.6.29: 顶部"搜索中"小条 banner — 修 v2.6.28 大改后体感"没反应"问题.
-          //   之前 v2.6.28 删了 loading 转圈门, 改成"永远渲染结果区 + 底部 footer banner".
-          //   但 footer banner 只在 _isLoading && hasResults 时才显示, 而
-          //   _isLoading=true && _filteredSearchResults.isEmpty (搜索启动但
-          //   第一个 source_result 还没到) 这个状态没指示, 体感"屏幕闪一下空态
-          //   然后才有结果" → 用户以为"没反应".
-          //   修法: 顶部加小条 banner, _isLoading && _filteredSearchResults.isEmpty
-          //   时显示"搜索中... (0/18)" + 小转圈 + 当前源名. 跟 web 端 page.tsx
-          //   line 2187-2196 标题区小转圈 + 进度完全 1:1, 跟 v2.6.28 底部 footer
-          //   banner 配对形成"上下两个指示":
-          //   - 顶部 banner: 还没出结果时告诉用户"在搜, 等等" (启动阶段)
-          //   - 底部 banner: 有结果后告诉用户"还在搜更多 / 搜完了" (后续阶段)
-          //   - 都没结果: v2.6.28 footer null, 顶部 banner 也 null, SearchResultAggGrid
-          //     走 _buildEmptyState "暂无搜索结果" 静态空态 (用户没搜过时是 SizedBox.shrink)
-          //   配合 _useAggregatedView / _filteredSearchResults, 跟 footer banner
-          //   互斥 (一个有结果一个没结果).
-          if (_isLoading && _filteredSearchResults.isEmpty) _buildTopLoadingBanner(),
+          // v2.6.33: 删顶部 banner — 用户反馈上下都有进度条, 去掉上面的.
+          //   之前 Column 内 + Stack 内各渲染一次 _buildTopLoadingBanner (图2
+          //   重复两个), 加上 Column 内旧进度条 (图1 上下各一个). 现在全删,
+          //   只保留 Stack 内底部 footer (_buildSearchFooter), 搜索进度统一
+          //   在底部显示.
           // v2.6.16: 每个源的结果数 — 用户反馈「奈飞工厂源app搜不到内容」,
           //   加这个折叠面板, 让用户看到每个源搜出多少条. 0 条的源用红字标,
           //   区分「源被 app 搜了但 API 没数据」vs「app 没搜这个源」.
@@ -433,16 +393,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           if (_hasSearched && _sourceResultCounts.isNotEmpty)
             _buildSourceResultDebugPanel(),
           // 搜索结果
-          // v2.6.30: 结果区 + 顶部 banner 包 Stack, footer 用 Positioned
-          //   fixed 屏幕底部. 跟 web 端 page.tsx:2461 `fixed bottom-0
-          //   left-0 right-0 z-50` 1:1. 之前 footer 在 Column 末尾占位
-          //   (v2.6.28 `_buildSearchResults` 内 Column([Expanded(grid), footer])),
-          //   结果多时 (18 源满结果, ~200px 高度 / 18 卡片 = 12 行) 需要
-          //   滚到最底才能看到完成徽章, 体感"半天不错搜索结果".
-          //   现在 footer 浮在屏幕底部, 永远可见, 跟 web 一致.
-          //   - 顶部 banner (启动阶段) 仍包在 Stack 内, Positioned(top: 0)
-          //   - 底部 footer (后续阶段) 包在 Stack 内, Positioned(bottom: 0)
-          //   - 两者互斥 (一个有结果一个没结果), 不会出现同时显示
+          // v2.6.33: 只保留底部 footer, 删掉 Stack 内顶部 banner.
+          //   搜索进度统一在底部显示, 不再上下重复.
           Expanded(
             child: Stack(
               children: [
@@ -450,16 +402,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
                 Positioned.fill(
                   child: _buildSearchResults(),
                 ),
-                // 顶部 banner — 启动阶段 (0~3s) 指示, 第一个 source_result
-                //   到达后自动消失
-                if (_isLoading && _filteredSearchResults.isEmpty)
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: _buildTopLoadingBanner(),
-                  ),
-                // 底部 footer — 后续阶段指示, fixed 屏幕底部覆盖在结果区上
+                // 底部 footer — 搜索进度/完成指示, fixed 屏幕底部
                 if (_hasSearched)
                   Positioned(
                     bottom: 0,
@@ -649,54 +592,8 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           );
   }
 
-  /// v2.6.29: 顶部"搜索中"小条 banner — 跟 web 端 page.tsx:2187-2196
-  ///   标题区"搜索结果 + 5/18 + 小转圈"1:1, 跟 v2.6.28 底部 footer banner
-  ///   配对. 显示条件: `_isLoading && _filteredSearchResults.isEmpty`,
-  ///   也就是"搜索启动了, 第一个 source_result 还没推回"这个 0~3s 启动阶段.
-  ///   跟 footer banner 互斥 (一个有结果一个没结果), 不会出现两个同时显示.
-  Widget _buildTopLoadingBanner() {
-    final progress = _searchProgress;
-    final completed = progress?.completedSources ?? 0;
-    final total = progress?.totalSources ?? 0;
-    final current = progress?.currentSource;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFBBF7D0)),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Color(0xFF10B981),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              total > 0
-                  ? '搜索中... ($completed / $total)${current != null ? '  $current' : ''}'
-                  : '搜索中...',
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF065F46),
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  /// v2.6.33: 删 _buildTopLoadingBanner — 用户反馈上下都有进度条,
+  ///   去掉上面的, 统一用底部 _buildSearchFooter 显示搜索进度.
 
   /// v2.6.28: Footer banner — 跟 web 端 (LunaTV-web/src/app/search/page.tsx:2460-2470) 1:1.
   ///   - isLoading && results.length > 0 → "正在搜索更多结果..." 底部小条
@@ -715,10 +612,12 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   Widget _buildSearchFooter() {
     final hasResults = _filteredSearchResults.isNotEmpty;
     final resultCount = _filteredSearchResults.length;
-    if (_isLoading && hasResults) {
-      // 底部 fixed 小条, 跟 web "fixed bottom-0 left-0 right-0 z-50" 1:1.
-      //   Positioned(bottom: 0) 让它浮在屏幕底部, 不挡结果区滚动. web 端
-      //   是 fixed 覆盖在内容上 (z-50), Flutter Stack 内 Positioned 同款效果.
+    // v2.6.33: 搜索中 (有无结果都显示) — 统一底部进度条, 删了顶部 banner 后
+    //   启动阶段 (无结果) 也要在底部显示进度.
+    if (_isLoading) {
+      final completed = _searchProgress?.completedSources ?? 0;
+      final total = _searchProgress?.totalSources ?? 0;
+      final current = _searchProgress?.currentSource;
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
@@ -740,9 +639,15 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              '正在搜索更多结果... (${_searchProgress?.completedSources ?? 0} / ${_searchProgress?.totalSources ?? 0})  已找到 $resultCount 个',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            Expanded(
+              child: Text(
+                hasResults
+                    ? '正在搜索更多结果... ($completed / $total)  已找到 $resultCount 个'
+                    : '搜索中... ($completed / $total)${current != null ? '  $current' : ''}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
