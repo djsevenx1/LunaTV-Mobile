@@ -21,7 +21,6 @@ import 'package:luna_tv/widgets/search_results_grid.dart';
 import 'package:luna_tv/widgets/filter_options_selector.dart';
 import 'package:luna_tv/widgets/filter_pill_hover.dart';
 import 'package:luna_tv/widgets/main_layout.dart';
-import 'package:luna_tv/widgets/pulsing_dots_indicator.dart';
 import 'package:luna_tv/utils/font_utils.dart';
 import 'package:luna_tv/utils/device_utils.dart';
 import 'package:luna_tv/screens/player_screen.dart';
@@ -571,10 +570,11 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   /// v2.6.35: 居中 loading — 搜索中且无结果时显示.
-  ///   显示脉冲点动画 + "搜索中「关键词」" + 进度 (X/Y) + 当前源名.
+  ///   显示转圈 + "搜索中「关键词」" + 进度 (X/Y) + 当前源名.
   ///   搜索结束后自动消失, 露出 grid 自带的"暂无搜索结果"空态.
   ///   替代 v2.6.29~v2.6.34 的顶部 banner + 底部 footer 方案.
   /// v2.6.36: 背景改透明, 融入 app 自带渐变/深色背景, 不再用白色覆盖层.
+  /// v2.6.39: 脉冲点改转圈, 跟搜索中(有结果)小条风格一致.
   Widget _buildCenterLoading() {
     final themeService = Provider.of<ThemeService>(context, listen: false);
     final isDark = themeService.isDarkMode;
@@ -585,19 +585,25 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // 脉冲点动画, 跟 app 原生 PulsingDotsIndicator 风格一致
-          const PulsingDotsIndicator(),
-          const SizedBox(height: 20),
+          const SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 16),
           Text(
             '搜索中「$_searchQuery」',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w500,
               color: isDark ? AppColors.darkText : const Color(0xFF1F2937),
             ),
           ),
           if (total > 0) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               '$completed / $total${current != null ? '  ·  $current' : ''}',
               style: TextStyle(
