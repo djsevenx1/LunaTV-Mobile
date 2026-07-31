@@ -175,22 +175,27 @@ class SSESearchService {
       throw Exception('搜索查询不能为空');
     }
 
-    // 如果已有连接，先关闭
-    if (_isConnected) {
-      await stopSearch();
-    }
+    // v2.6.32: 快速取消旧连接, 不 await stopSearch(). 之前 await stopSearch()
+    //   等旧 SSE 流完全关闭 + 3 个 StreamController.close() 完成, 如果旧
+    //   搜索还在接收数据, cancel + close 可能需要几十毫秒. 现在直接 cancel
+    //   + 置 null, 新搜索立即开始. 有 generation guard 保证旧结果不混入.
+    _subscription?.cancel();
+    _subscription = null;
+    _timeoutTimer?.cancel();
+    _timeoutTimer = null;
+    _isConnected = false;
 
-    // 关闭之前的流控制器
-    await _incrementalResultsController?.close();
-    await _errorController?.close();
-    await _progressController?.close();
+    // 旧流控制器直接置 null (GC 回收), 不 await close
+    _incrementalResultsController = null;
+    _errorController = null;
+    _progressController = null;
 
     _currentQuery = query.trim();
     _sourceErrors.clear();
     _sourceResultCounts.clear();
     _completedSources = 0;
 
-    // 初始化流控制器
+    // 创建新的流控制器
     _incrementalResultsController =
         StreamController<List<SearchResult>>.broadcast();
     _errorController = StreamController<String>.broadcast();
@@ -198,8 +203,7 @@ class SSESearchService {
 
     _isConnected = true;
 
-    // v2.6.11: 15s → 20s, 给 18 源批跑更多时间. 但 search_screen 端
-    //   有 8s /api/search 兜底, 即使 SSE 全卡也最多转 8s 就出结果.
+    // v2.6.32: 20s 超时保留作为兜底, 但正常情况下后端 1-3s 就推回结果.
     _timeoutTimer = Timer(const Duration(seconds: 20), () {
       if (_isConnected) {
         _handleTimeout();
@@ -268,14 +272,20 @@ class SSESearchService {
       _subscription = client.send(request).asStream().listen(
         _handleSSEResponse,
         onError: (error) {
-          // 静默处理连接关闭错误，不显示给用户
+          // v2.6.31: 之前把 connection closed / clientexception / connection
+          //   terminated 全静默 return, SSE 连接失败时用户看不到任何错误,
+          //   只转 20s 超时. 现在: 如果没收到任何结果 (completedSources=0)
+          //   且没收到 complete 事件, 当成真错误报给用户. 如果已经收到了
+          //   结果/complete, 说明是正常关流, 静默忽略.
           final errorString = error.toString().toLowerCase();
-          if (errorString.contains('connection closed') ||
+          final isConnectionClose = errorString.contains('connection closed') ||
               errorString.contains('clientexception') ||
-              errorString.contains('connection terminated')) {
-            // 连接被关闭，这是正常情况，静默处理
+              errorString.contains('connection terminated');
+          if (isConnectionClose && _completedSources > 0) {
+            // 正常关流 (server close 后 Dart http 抛 ClientException), 有结果, 忽略
             return;
           }
+          // 真错误 (连接失败 / 0 结果时断开) — 报给用户
           _handleError(error);
         },
         onDone: _handleDone,
@@ -300,7 +310,19 @@ class SSESearchService {
   /// 处理 SSE 响应
   void _handleSSEResponse(http.StreamedResponse response) async {
     if (response.statusCode != 200) {
+      // v2.6.31: 非 200 时不仅报错, 还要发 complete 事件关掉 loading.
+      //   之前只加 error 不发 complete, search_screen 的 _isLoading
+      //   虽然 errorStream 会关, 但如果 errorStream 监听有 race condition
+      //   (progressStream 先到), 可能漏关. 双保险.
       _errorController?.add('SSE 连接失败: ${response.statusCode}');
+      _isConnected = false;
+      _progressController?.add(SearchProgress(
+        totalSources: _totalSources,
+        completedSources: _totalSources,
+        currentSource: null,
+        isComplete: true,
+        error: 'HTTP ${response.statusCode}',
+      ));
       return;
     }
 
@@ -469,23 +491,42 @@ class SSESearchService {
   void _handleError(error) {
     _isConnected = false;
 
-    // 检查是否是连接关闭错误，如果是则忽略
-    final errorString = error.toString().toLowerCase();
-    if (errorString.contains('connection closed') ||
-        errorString.contains('clientexception') ||
-        errorString.contains('connection terminated')) {
-      // 连接被关闭，这是正常情况，不显示错误
-      print('搜索连接已关闭: ${error.toString()}');
-      return;
-    }
+    // v2.6.31: 不再静默吞 connection closed — 如果走到这里说明是真错误
+    //   (onError 里已经过滤了正常关流的情况). 报给用户 + 发 complete 事件
+    //   关掉 loading, 否则 _isLoading 永远 true.
+    _errorController?.add('搜索失败: ${error.toString()}');
 
-    // 其他错误才显示给用户
-    _errorController?.add('SSE 错误: ${error.toString()}');
+    // v2.6.31: 发 complete 事件关掉 loading, 否则 search_screen 的
+    //   _isLoading 永远 true (只有 progress.isComplete 或 error 才关)
+    if (_completedSources < _totalSources) {
+      _completedSources = _totalSources;
+    }
+    _progressController?.add(SearchProgress(
+      totalSources: _totalSources,
+      completedSources: _completedSources,
+      currentSource: null,
+      isComplete: true,
+      error: error.toString(),
+    ));
   }
 
   /// 处理 SSE 关闭
   void _handleDone() {
     _isConnected = false;
+    // v2.6.31: 流关闭时如果还没发 complete 事件, 补发一个. 之前 _handleDone
+    //   只设 _isConnected=false, 不发 progress.isComplete, 如果 server 关流
+    //   但 complete 事件没被处理到 (网络中断 / server crash / Dart http 提前
+    //   关流), search_screen 的 _isLoading 永远 true, 用户卡在"搜索中...".
+    //   现在补发 complete, 确保 _isLoading 一定被关掉.
+    if (_totalSources > 0 && _completedSources < _totalSources) {
+      _completedSources = _totalSources;
+      _progressController?.add(SearchProgress(
+        totalSources: _totalSources,
+        completedSources: _completedSources,
+        currentSource: null,
+        isComplete: true,
+      ));
+    }
   }
 
   /// 停止搜索

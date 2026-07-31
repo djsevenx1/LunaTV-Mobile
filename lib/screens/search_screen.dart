@@ -204,13 +204,25 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
   }
 
   Future<void> _performSearch(String query) async {
-    // v2.6.7: 改用 SSESearchService — 走客户端直连 (本地模式) 或
-    //   后端 /api/search/ws SSE 增量推回, 跟 Selene 行为一致.
-    //   取消旧订阅, 防增量结果混到新搜索里.
-    await _incrementalResultsSubscription?.cancel();
-    await _progressSubscription?.cancel();
-    await _errorSubscription?.cancel();
-    await _sseSearchService.stopSearch();
+    // v2.6.32: 搜索不返回结果的根本原因修复 + 启动速度优化.
+    //
+    // 根本原因: 之前先 await stopSearch() (把 _incrementalResultsController
+    //   设为 null), 然后订阅 stream — 此时 incrementalResultsStream 返回
+    //   const Stream.empty(), listener 永远收不到事件! 之后 startSearch
+    //   创建新的流控制器, 但 listener 已经订阅了 empty stream.
+    //
+    // 修复: 先 startSearch (创建新流控制器 + 发起 SSE), 再订阅 stream.
+    //   startSearch 内部快速取消旧连接 (不 await), SSE 请求是 fire-and-forget,
+    //   返回后流控制器已就绪, SSE 结果还没到达 (需网络往返), listener
+    //   会在第一批事件之前完成订阅.
+    //
+    // 速度优化: 旧搜索取消改 fire-and-forget, 不 await. 之前 4 个 await
+    //   (cancel x3 + stopSearch) + stopSearch 内部 3 个 await close = 7 个
+    //   async 操作串行排队, 拖慢 SSE 请求发起. 现在 0 个 await, SSE 请求
+    //   立即发起.
+    unawaited(_incrementalResultsSubscription?.cancel());
+    unawaited(_progressSubscription?.cancel());
+    unawaited(_errorSubscription?.cancel());
 
     final gen = ++_searchGeneration;
     setState(() {
@@ -222,71 +234,10 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       _sourceResultCounts = {};
     });
 
-    // v2.6.16: 拿源列表建 key→name 映射, 用于显示每个源的结果数
-    // v2.6.24: 不 await, 跟 SSE 主路并发跑. 之前 await 这个 getSearchResources
-    //   阻塞了 _performSearch 主路径, 主搜索 /api/search/ws 启动被串行拖慢
-    //   0.5-2s (80 源配置读 DB 的耗时), Selene 体感 3s, LunaTV 体感 5s+ 根因之一.
-    //   _sourceKeyToName 是搜索完成后 debug 面板用, 不影响搜索体验, fire-and-forget
-    //   即可. 失败时 try/catch 兜底返回空, 不会污染状态.
     unawaited(_loadSourceKeyToName(gen));
 
-    // 增量结果: 每个 source 完成搜索就推回一批, addAll 到 _searchResults.
-    //   SearchResultAggGrid 内部按 title+year+类型 聚合并 join 所有源名,
-    //   跟 web 行为一致.
-    _incrementalResultsSubscription = _sseSearchService
-        .incrementalResultsStream
-        .listen((incrementalResults) {
-      if (!mounted || gen != _searchGeneration) return;
-      if (incrementalResults.isEmpty) return;
-      // v2.6.7: SSE 增量结果 addAll 前再过滤一次 0 集源, 兜底. 下游
-      //   DownstreamService.searchPage 和后端 /api/search/ws 都过滤了
-      //   episodes.isEmpty, 但以防某个 source 漏过滤 (未来加新 source /
-      //   缓存被污染), 客户端这里再卡一道, 避免"0集"卡片污染结果.
-      final filtered = incrementalResults
-          .where((r) => r.episodes.isNotEmpty)
-          .toList();
-      if (filtered.isEmpty) return;
-      setState(() {
-        _searchResults = [..._searchResults, ...filtered];
-        // v2.6.28: 删 _isLoading=false. 之前首个 source_result 到达就关
-        //   loading, 这是"二态门"残留. 现在 _isLoading 语义跟 web isFetching
-        //   一致: "stream 还没收 complete 事件". 首个结果到达不该关 loading,
-        //   后面慢源还在跑, 用户该看到 footer "正在搜索更多结果... (5/18)".
-        //   loading 只在 progress.isComplete 或 error 时才关.
-      });
-    });
-
-    // 进度: 显示"已完成 X / 总共 Y 个源"
-    _progressSubscription = _sseSearchService.progressStream.listen((progress) {
-      if (!mounted || gen != _searchGeneration) return;
-      setState(() {
-        _searchProgress = progress;
-        if (progress.isComplete) {
-          _isLoading = false;
-          // v2.6.16: 搜完拉取每个源的结果数, 让用户看到哪些源 0 条
-          _sourceResultCounts = _sseSearchService.sourceResultCounts;
-        }
-      });
-    });
-
-    // 错误
-    _errorSubscription = _sseSearchService.errorStream.listen((error) {
-      if (!mounted || gen != _searchGeneration) return;
-      setState(() {
-        _searchError = error;
-        _isLoading = false;
-      });
-    });
-
-    // v2.6.22: 删 fire 兜底 + 别名搜 — 跟 Selene 1:1, 走纯 SSE 增量推回.
-    //   v2.6.21 changelog 写了删, 但代码没动, 这版补删.
-    //   之前 _runSearchFallback 8s 后 fire /api/search 聚合 (后端 80 源
-    //   Promise.allSettled 等最慢 20s) + _runMultiNameSearch 3s 后 fire
-    //   豆瓣别名 (每个别名并行 80 源), 跟 SSE 主路同时并发 80*5=400 源,
-    //   后端 CPU/网络/资源站全打满, SSE 主路跟着卡, 结果数还被
-    //   _exactSearch subsequence 过滤 (凡人修仙之风起 / 仙林外传等) —
-    //   用户体感「搜得没 Selene 全, 又慢」根因.
-
+    // v2.6.32: 先 startSearch — 内部快速取消旧连接 + 创建新流控制器 +
+    //   发起 SSE 请求 (fire-and-forget). 返回后流控制器已就绪.
     try {
       await _sseSearchService.startSearch(query);
     } catch (e) {
@@ -295,7 +246,45 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         _searchError = e.toString();
         _isLoading = false;
       });
+      return;
     }
+
+    // v2.6.32: 在 startSearch 之后订阅 — 此时流控制器已创建.
+    //   SSE 请求是 fire-and-forget, startSearch 返回后结果还没到达
+    //   (需 TCP/TLS 握手 + 后端处理 ~1s), listener 会在第一批事件
+    //   之前完成订阅.
+    _incrementalResultsSubscription = _sseSearchService
+        .incrementalResultsStream
+        .listen((incrementalResults) {
+      if (!mounted || gen != _searchGeneration) return;
+      if (incrementalResults.isEmpty) return;
+      final filtered = incrementalResults
+          .where((r) => r.episodes.isNotEmpty)
+          .toList();
+      if (filtered.isEmpty) return;
+      setState(() {
+        _searchResults = [..._searchResults, ...filtered];
+      });
+    });
+
+    _progressSubscription = _sseSearchService.progressStream.listen((progress) {
+      if (!mounted || gen != _searchGeneration) return;
+      setState(() {
+        _searchProgress = progress;
+        if (progress.isComplete) {
+          _isLoading = false;
+          _sourceResultCounts = _sseSearchService.sourceResultCounts;
+        }
+      });
+    });
+
+    _errorSubscription = _sseSearchService.errorStream.listen((error) {
+      if (!mounted || gen != _searchGeneration) return;
+      setState(() {
+        _searchError = error;
+        _isLoading = false;
+      });
+    });
   }
 
   /// v2.6.22: 删 _runSearchFallback / _runMultiNameSearch 两个方法体,
