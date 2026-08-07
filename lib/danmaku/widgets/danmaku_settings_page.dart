@@ -238,7 +238,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                         await DanmakuSettings.instance.toggleSource(s, value);
                       },
                       icon: Icons.dns_rounded,
-                      iconColor: const Color(0xFF7C5CFF),
+                      iconColor: const Color(0xFF22C55E),
                     ),
                     if (s != DanmakuSource.values.last) _buildDivider(),
                   ],

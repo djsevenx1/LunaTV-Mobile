@@ -37,11 +37,11 @@ class _FilterPillHoverState extends State<FilterPillHover> {
     // 计算颜色：如果是PC且isDefault且hover，显示绿色；否则按原逻辑
     Color textColor;
     if (widget.isPC && widget.isDefault && _isHovered) {
-      textColor = const Color(0xFF7C5CFF);
+      textColor = const Color(0xFF27AE60);
     } else if (widget.isDefault) {
       textColor = Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey;
     } else {
-      textColor = const Color(0xFF7C5CFF);
+      textColor = const Color(0xFF27AE60);
     }
 
     return MouseRegion(
@@ -112,7 +112,7 @@ class _FilterOptionHoverState extends State<FilterOptionHover> {
     if (widget.isSelected) {
       textColor = Colors.white;
     } else if (widget.isPC && _isHovered) {
-      textColor = const Color(0xFF7C5CFF);
+      textColor = const Color(0xFF27AE60);
     } else {
       textColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black;
     }
@@ -134,7 +134,7 @@ class _FilterOptionHoverState extends State<FilterOptionHover> {
               : null,
           decoration: BoxDecoration(
             color: widget.isSelected
-                ? const Color(0xFF7C5CFF)
+                ? const Color(0xFF27AE60)
                 : Theme.of(context).chipTheme.backgroundColor,
             borderRadius: BorderRadius.circular(8),
           ),

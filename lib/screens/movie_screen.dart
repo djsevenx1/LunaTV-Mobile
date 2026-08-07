@@ -474,7 +474,7 @@ class _MovieScreenState extends State<MovieScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshMoviesData,
       refreshText: '刷新电影数据...',
-      primaryColor: const Color(0xFF7C5CFF),
+      primaryColor: const Color(0xFF27AE60),
       child: SingleChildScrollView(
         controller: _scrollController,
         child: Column(

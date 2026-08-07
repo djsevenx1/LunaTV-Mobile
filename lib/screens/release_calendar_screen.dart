@@ -124,7 +124,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                 : _allItems.isEmpty
                     ? _buildEmptyState(isDark)
                     : RefreshIndicator(
-                        color: const Color(0xFF7C5CFF),
+                        color: const Color(0xFF27ae60),
                         onRefresh: _loadData,
                         child: _buildGroupedList(isDark),
                       ),
@@ -158,7 +158,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? const Color(0xFF7C5CFF)
+                    ? const Color(0xFF27ae60)
                     : isDark
                         ? Colors.white.withOpacity(0.1)
                         : Colors.grey.withOpacity(0.15),
@@ -336,7 +336,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
                       Icon(
                         Icons.calendar_today_outlined,
                         size: 14,
-                        color: const Color(0xFF7C5CFF),
+                        color: const Color(0xFF27ae60),
                       ),
                       const SizedBox(width: 4),
                       Text(
@@ -378,7 +378,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: const Color(0xFF7C5CFF).withOpacity(0.15),
+        color: const Color(0xFF27ae60).withOpacity(0.15),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
@@ -386,7 +386,7 @@ class _ReleaseCalendarScreenState extends State<ReleaseCalendarScreen> {
         style: FontUtils.poppins(context,
                     fontSize: 11,
           fontWeight: FontWeight.w500,
-          color: const Color(0xFF7C5CFF),
+          color: const Color(0xFF27ae60),
         ),
       ),
     );

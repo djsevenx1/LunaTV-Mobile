@@ -386,7 +386,7 @@ class _LoginScreenState extends State<LoginScreen>
               left: MediaQuery.of(context).size.width * 0.1,
               child: _buildBlurCircle(
                 isDarkMode
-                    ? const Color(0xFFE23B8E).withOpacity(0.18)
+                    ? const Color(0xFF10B981).withOpacity(0.18)
                     : const Color(0xFF6EE7B7).withOpacity(0.5),
                 180,
               ),
@@ -435,7 +435,7 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFE23B8E).withOpacity(0.12),
+                          color: const Color(0xFF10B981).withOpacity(0.12),
                           blurRadius: 32,
                           offset: const Offset(0, 8),
                         ),
@@ -519,12 +519,12 @@ class _LoginScreenState extends State<LoginScreen>
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF7C5CFF), Color(0xFF059669)],
+                colors: [Color(0xFF22C55E), Color(0xFF059669)],
               ),
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF7C5CFF).withOpacity(0.4),
+                  color: const Color(0xFF22C55E).withOpacity(0.4),
                   blurRadius: 20,
                   offset: const Offset(0, 6),
                 ),
@@ -540,7 +540,7 @@ class _LoginScreenState extends State<LoginScreen>
           // 标题 (LunaTV 绿色渐变)
           ShaderMask(
             shaderCallback: (bounds) => const LinearGradient(
-              colors: [Color(0xFF5A3FD9), Color(0xFF0D9488)],
+              colors: [Color(0xFF16A34A), Color(0xFF0D9488)],
             ).createShader(bounds),
             child: const Text(
               'LunaTV',
@@ -719,12 +719,12 @@ class _LoginScreenState extends State<LoginScreen>
       height: 48,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF5A3FD9), Color(0xFF059669)],
+          colors: [Color(0xFF16A34A), Color(0xFF059669)],
         ),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF7C5CFF).withOpacity(0.35),
+            color: const Color(0xFF22C55E).withOpacity(0.35),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),

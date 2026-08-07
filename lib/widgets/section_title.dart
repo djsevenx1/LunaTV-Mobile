@@ -16,23 +16,23 @@ extension SectionColorExtension on SectionColor {
   List<Color> get colors {
     switch (this) {
       case SectionColor.amber:
-        return const [Color(0xFFF5B84B), Color(0xFFFF8A3D)];
+        return const [Color(0xFFF59E0B), Color(0xFFF97316)];
       case SectionColor.blue:
-        return const [Color(0xFF2BD9E8), Color(0xFF34B3F1)];
+        return const [Color(0xFF3B82F6), Color(0xFF06B6D4)];
       case SectionColor.pink:
-        return const [Color(0xFFE23B8E), Color(0xFFFF5C7A)];
+        return const [Color(0xFFEC4899), Color(0xFFF43F5E)];
       case SectionColor.purple:
-        return const [Color(0xFF7C5CFF), Color(0xFFE23B8E)];
+        return const [Color(0xFFA855F7), Color(0xFFEC4899)];
       case SectionColor.green:
-        return const [Color(0xFF2BD9E8), Color(0xFF34B3F1)];
+        return const [Color(0xFF22C55E), Color(0xFF10B981)];
       case SectionColor.red:
-        return const [Color(0xFFFF4D5E), Color(0xFFE23B8E)];
+        return const [Color(0xFFEF4444), Color(0xFFF43F5E)];
     }
   }
 }
 
-/// 「极光影院」风格的 Section 标题
-/// 左侧渐变强调竖条 + 粗体大标题 + 副标题 + 右侧"查看全部"
+/// LunaTV 风格的 Section 标题
+/// 渐变图标 + 标题 + 副标题 + 右侧"查看全部"链接
 class SectionTitle extends StatelessWidget {
   final String title;
   final String? subtitle;
@@ -58,34 +58,32 @@ class SectionTitle extends StatelessWidget {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
         final isDarkMode = themeService.isDarkMode;
-        final titleColor = isDarkMode
-            ? const Color(0xFFEDF0F7)
-            : const Color(0xFF1A2133);
-        final subtitleColor = isDarkMode
-            ? const Color(0xFF9BA3B5)
-            : const Color(0xFF6B7280);
-        final moreColor = isDarkMode
-            ? const Color(0xFF9BA3B5)
-            : const Color(0xFF6B7280);
-
         return Padding(
           padding: padding,
           child: Row(
             children: [
-              // 左侧渐变强调竖条
+              // 图标徽章
               Container(
-                width: 4,
-                height: 24,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                     colors: color.colors,
                   ),
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.colors.first.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
+                child: Icon(icon, color: Colors.white, size: 20),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               // 标题文字
               Expanded(
                 child: Column(
@@ -95,10 +93,11 @@ class SectionTitle extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                        color: titleColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode
+                            ? const Color(0xFFE5E7EB)
+                            : const Color(0xFF1F2937),
                       ),
                     ),
                     if (subtitle != null) ...[
@@ -107,7 +106,9 @@ class SectionTitle extends StatelessWidget {
                         subtitle!,
                         style: TextStyle(
                           fontSize: 12,
-                          color: subtitleColor,
+                          color: isDarkMode
+                              ? const Color(0xFF9CA3AF)
+                              : const Color(0xFF6B7280),
                         ),
                       ),
                     ],
@@ -121,7 +122,9 @@ class SectionTitle extends StatelessWidget {
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: const Size(0, 32),
-                    foregroundColor: moreColor,
+                    foregroundColor: isDarkMode
+                        ? const Color(0xFF9CA3AF)
+                        : const Color(0xFF6B7280),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -130,11 +133,7 @@ class SectionTitle extends StatelessWidget {
                         moreText!,
                         style: const TextStyle(fontSize: 13),
                       ),
-                      Icon(
-                        Icons.chevron_right,
-                        size: 16,
-                        color: moreColor,
-                      ),
+                      const Icon(Icons.chevron_right, size: 16),
                     ],
                   ),
                 ),

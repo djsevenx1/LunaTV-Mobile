@@ -340,7 +340,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color:
-                                const Color(0xFF7C5CFF).withOpacity(0.1),
+                                const Color(0xFF27AE60).withOpacity(0.1),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
@@ -353,7 +353,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                             size: 40,
                             color: _phase == _DownloadPhase.error
                                 ? const Color(0xFFef4444)
-                                : const Color(0xFF7C5CFF),
+                                : const Color(0xFF27AE60),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -421,7 +421,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                                 '最新版本',
                                 widget.versionInfo.latestVersion,
                                 Icons.new_releases_rounded,
-                                const Color(0xFF7C5CFF),
+                                const Color(0xFF27AE60),
                               ),
                             ],
                           ),
@@ -479,7 +479,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                               const Icon(
                                 Icons.article_outlined,
                                 size: 18,
-                                color: Color(0xFF7C5CFF),
+                                color: Color(0xFF27AE60),
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -571,7 +571,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
             backgroundColor: themeService.isDarkMode
                 ? const Color(0xFF444444)
                 : const Color(0xFFE0E0E0),
-            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF7C5CFF)),
+            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF27AE60)),
           ),
         ),
         const SizedBox(height: 8),
@@ -642,7 +642,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7C5CFF),
+                    backgroundColor: const Color(0xFF27AE60),
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -724,7 +724,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 valueColor:
-                    AlwaysStoppedAnimation<Color>(Color(0xFF7C5CFF)),
+                    AlwaysStoppedAnimation<Color>(Color(0xFF27AE60)),
               ),
             ),
             label: Text(
@@ -738,7 +738,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               ),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF7C5CFF).withOpacity(0.5),
+              backgroundColor: const Color(0xFF27AE60).withOpacity(0.5),
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
@@ -765,7 +765,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               ),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF7C5CFF),
+              backgroundColor: const Color(0xFF27AE60),
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
@@ -812,7 +812,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                 await _openReleasePage();
               },
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF7C5CFF),
+                foregroundColor: const Color(0xFF27AE60),
               ),
               child: Text(
                 '去 GitHub 看',
@@ -862,7 +862,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                 ? null
                 : _dismissAndClose,
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF7C5CFF),
+              foregroundColor: const Color(0xFF27AE60),
             ),
             child: Text(
               '稍后',

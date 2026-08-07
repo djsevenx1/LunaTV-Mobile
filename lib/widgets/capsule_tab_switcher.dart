@@ -143,8 +143,8 @@ class _CapsuleTabSwitcherState extends State<CapsuleTabSwitcher>
             height: 32,
             decoration: BoxDecoration(
               color: themeService.isDarkMode
-                  ? const Color(0xFF121828)
-                  : const Color(0xFFE5E8F2),
+                  ? const Color(0xFF333333)
+                  : const Color(0xFFe0e0e0),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Stack(
@@ -160,7 +160,7 @@ class _CapsuleTabSwitcherState extends State<CapsuleTabSwitcher>
                         height: 32,
                         decoration: BoxDecoration(
                           color: themeService.isDarkMode
-                              ? const Color(0xFF1A2133)
+                              ? const Color(0xFF1e1e1e)
                               : Colors.white,
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
@@ -289,19 +289,19 @@ class _CapsuleTabHoverState extends State<_CapsuleTabHover> {
                 // 选中状态：使用原来的颜色插值逻辑
                 color = Color.lerp(
                   widget.themeService.isDarkMode
-                      ? const Color(0xFF9BA3B5)
-                      : const Color(0xFF9BA3B5),
+                      ? const Color(0xFFb0b0b0)
+                      : const Color(0xFF7f8c8d),
                   widget.themeService.isDarkMode ? Colors.white : Colors.black,
                   progress,
                 )!;
               } else if (widget.isPC && _isHovered) {
                 // PC上未选中且hover：显示绿色
-                color = const Color(0xFF7C5CFF);
+                color = const Color(0xFF27AE60);
               } else {
                 // 未选中且未hover：默认颜色
                 color = widget.themeService.isDarkMode
-                    ? const Color(0xFF9BA3B5)
-                    : const Color(0xFF9BA3B5);
+                    ? const Color(0xFFb0b0b0)
+                    : const Color(0xFF7f8c8d);
               }
 
               final fontWeight =

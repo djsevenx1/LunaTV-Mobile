@@ -1,74 +1,58 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 「极光影院」配色体系
-/// 深色沉浸：极夜蓝黑背景 + 电光紫罗兰→品红渐变主强调 + 青色点缀
 class AppColors {
-  // 主强调色(电光紫罗兰)
-  static const Color primary = Color(0xFF7C5CFF);
-  static const Color primaryLight = Color(0xFF9D8CFF);
-  static const Color primaryDark = Color(0xFF5A3FD9);
+  // 主强调色(绿色)
+  static const Color primary = Color(0xFF22C55E);
+  static const Color primaryLight = Color(0xFF4ADE80);
+  static const Color primaryDark = Color(0xFF16A34A);
 
   // 渐变
   static const LinearGradient primaryGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
+    colors: [Color(0xFF22C55E), Color(0xFF10B981)],
   );
   static const LinearGradient blueGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF2BD9E8), Color(0xFF7C5CFF)],
+    colors: [Color(0xFF3B82F6), Color(0xFF6366F1)],
   );
   static const LinearGradient purpleGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
+    colors: [Color(0xFFA855F7), Color(0xFFEC4899)],
   );
   static const LinearGradient orangeGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFF5B84B), Color(0xFFFF8A3D)],
+    colors: [Color(0xFFF59E0B), Color(0xFFF97316)],
   );
   static const LinearGradient pinkGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFE23B8E), Color(0xFFFF5C7A)],
+    colors: [Color(0xFFEC4899), Color(0xFFF43F5E)],
   );
   static const LinearGradient cyanGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF2BD9E8), Color(0xFF34B3F1)],
+    colors: [Color(0xFF06B6D4), Color(0xFF0EA5E9)],
   );
   static const LinearGradient redGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFFFF4D5E), Color(0xFFE23B8E)],
+    colors: [Color(0xFFEF4444), Color(0xFFF43F5E)],
   );
 
-  // 亮色主题（晨曦）
-  static const Color lightBackground = Color(0xFFF7F8FC);
+  // 亮色主题
+  static const Color lightBackground = Color(0xFFFFFFFF);
   static const Color lightSurface = Color(0xFFFFFFFF);
-  static const Color lightSurfaceVariant = Color(0xFFEEF0F8);
-  static const Color lightText = Color(0xFF1A2133);
-  static const Color lightTextSecondary = Color(0xFF5A6478);
-  static const Color lightTextMuted = Color(0xFF9BA3B5);
-  static const Color lightBorder = Color(0xFFE5E8F2);
+  static const Color lightSurfaceVariant = Color(0xFFF3F4F6);
+  static const Color lightText = Color(0xFF111827);
+  static const Color lightTextSecondary = Color(0xFF4B5563);
+  static const Color lightTextMuted = Color(0xFF9CA3AF);
+  static const Color lightBorder = Color(0xFFE5E7EB);
   static const Color lightCard = Color(0xFFFFFFFF);
 
-  // 暗色主题（极夜）
-  static const Color darkBackground = Color(0xFF0B0F1A);
-  static const Color darkSurface = Color(0xFF121828);
-  static const Color darkSurfaceVariant = Color(0xFF1A2133);
-  static const Color darkText = Color(0xFFEDF0F7);
-  static const Color darkTextSecondary = Color(0xFF9BA3B5);
+  // 暗色主题
+  static const Color darkBackground = Color(0xFF000000);
+  static const Color darkSurface = Color(0xFF111111);
+  static const Color darkSurfaceVariant = Color(0xFF1E1E1E);
+  static const Color darkText = Color(0xFFE5E7EB);
+  static const Color darkTextSecondary = Color(0xFF9CA3AF);
   static const Color darkTextMuted = Color(0xFF6B7280);
-  static const Color darkBorder = Color(0xFF2A3247);
-  static const Color darkCard = Color(0xFF121828);
+  static const Color darkBorder = Color(0xFF374151);
+  static const Color darkCard = Color(0xFF1E1E1E);
 
   // 评分色
-  static const Color ratingAmber = Color(0xFFFFB020);
-  static const Color ratingPink = Color(0xFFFF5C7A);
+  static const Color ratingAmber = Color(0xFFF59E0B);
+  static const Color ratingPink = Color(0xFFEC4899);
 }
 
 class ThemeService extends ChangeNotifier {
@@ -185,7 +169,7 @@ class ThemeService extends ChangeNotifier {
         brightness: Brightness.light,
       ).copyWith(
         primary: AppColors.primary,
-        secondary: AppColors.primaryLight,
+        secondary: AppColors.primary,
       ),
       scaffoldBackgroundColor: AppColors.lightBackground,
       appBarTheme: const AppBarTheme(
@@ -235,7 +219,7 @@ class ThemeService extends ChangeNotifier {
         brightness: Brightness.dark,
       ).copyWith(
         primary: AppColors.primary,
-        secondary: AppColors.primaryLight,
+        secondary: AppColors.primary,
       ),
       scaffoldBackgroundColor: AppColors.darkBackground,
       appBarTheme: const AppBarTheme(

@@ -74,10 +74,10 @@ class _SimpleTabHoverState extends State<_SimpleTabHover> {
     Color color;
     if (widget.isSelected) {
       // 选中状态：绿色
-      color = const Color(0xFF7C5CFF);
+      color = const Color(0xFF27AE60);
     } else if (widget.isPC && _isHovered) {
       // PC上未选中且hover：绿色
-      color = const Color(0xFF7C5CFF);
+      color = const Color(0xFF27AE60);
     } else {
       // 未选中且未hover：默认颜色
       color = widget.themeService.isDarkMode

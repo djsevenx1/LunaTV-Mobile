@@ -368,7 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshHomeData,
       refreshText: '刷新中...',
-      primaryColor: const Color(0xFF7C5CFF),
+      primaryColor: const Color(0xFF27AE60),
       child: SingleChildScrollView(
         child: Column(
           children: [
@@ -516,7 +516,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshHomeData,
       refreshText: '刷新中...',
-      primaryColor: const Color(0xFF7C5CFF),
+      primaryColor: const Color(0xFF27AE60),
       child: SingleChildScrollView(
         child: Column(
           children: [
@@ -536,7 +536,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshHomeData,
       refreshText: '刷新中...',
-      primaryColor: const Color(0xFF7C5CFF),
+      primaryColor: const Color(0xFF27AE60),
       child: SingleChildScrollView(
         child: Column(
           children: [

@@ -114,7 +114,7 @@ class _BilibiliScreenState extends State<BilibiliScreen> {
       builder: (context, themeService, child) {
         return RefreshIndicator(
           onRefresh: _fetchPopularVideos,
-          color: const Color(0xFF7C5CFF),
+          color: const Color(0xFF27ae60),
           child: CustomScrollView(
             controller: _scrollController,
             slivers: [
@@ -385,7 +385,7 @@ class _BilibiliScreenState extends State<BilibiliScreen> {
                         child: const Center(
                           child: Icon(
                             Icons.video_library,
-                            color: Color(0xFF7C5CFF),
+                            color: Color(0xFF27ae60),
                             size: 32,
                           ),
                         ),
@@ -510,7 +510,7 @@ class _BilibiliScreenState extends State<BilibiliScreen> {
                           : Colors.grey[300],
                       child: const Icon(
                         Icons.video_library,
-                        color: Color(0xFF7C5CFF),
+                        color: Color(0xFF27ae60),
                         size: 32,
                       ),
                     ),

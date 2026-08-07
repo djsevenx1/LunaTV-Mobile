@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 import 'package:luna_tv/services/api_service.dart';
 import 'package:luna_tv/services/search_service.dart';
 import 'package:luna_tv/services/theme_service.dart';
@@ -346,13 +347,13 @@ class _MainLayoutState extends State<MainLayout> {
               : themeService.lightTheme,
           child: Scaffold(
             backgroundColor: themeService.isDarkMode
-                ? const Color(0xFF0B0F1A)
+                ? const Color(0xFF000000)
                 : Colors.transparent,
             resizeToAvoidBottomInset: !widget.isSearchMode,
             body: Container(
               decoration: BoxDecoration(
                 color: themeService.isDarkMode
-                    ? const Color(0xFF0B0F1A)
+                    ? const Color(0xFF000000)
                     : null,
                 gradient: themeService.isDarkMode
                     ? null
@@ -360,12 +361,14 @@ class _MainLayoutState extends State<MainLayout> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Color(0xFFF7F8FC),
-                          Color(0xFFF0F1FA),
-                          Color(0xFFF3F1FA),
-                          Color(0xFFEDEEF7),
+                          Color(0xFFe6f3fb),
+                          Color(0xFFeaf3f7),
+                          Color(0xFFf7f7f3),
+                          Color(0xFFe9ecef),
+                          Color(0xFFdbe3ea),
+                          Color(0xFFd3dde6),
                         ],
-                        stops: [0.0, 0.4, 0.75, 1.0],
+                        stops: [0.0, 0.18, 0.38, 0.60, 0.80, 1.0],
                       ),
               ),
               child: Stack(
@@ -413,10 +416,10 @@ class _MainLayoutState extends State<MainLayout> {
       decoration: BoxDecoration(
         color: widget.isSearchMode
             ? themeService.isDarkMode
-                ? const Color(0xFF121828)
-                : const Color(0xFFF0F1FA)
+                ? const Color(0xFF121212)
+                : const Color(0xFFf5f5f5)
             : themeService.isDarkMode
-                ? const Color(0xFF0B0F1A).withOpacity(0.92)
+                ? const Color(0xFF1e1e1e).withOpacity(0.9)
                 : Colors.white.withOpacity(0.8),
       ),
       child: widget.isSearchMode
@@ -430,25 +433,110 @@ class _MainLayoutState extends State<MainLayout> {
       height: 40, // 固定高度，与搜索框高度一致
       child: Stack(
         children: [
-          // 左侧 LUMI 渐变字标（点击回首页）
+          // 左侧搜索图标
           Positioned(
             left: 0,
             top: 4,
+            child: MouseRegion(
+              cursor: DeviceUtils.isPC()
+                  ? SystemMouseCursors.click
+                  : MouseCursor.defer,
+              onEnter: DeviceUtils.isPC()
+                  ? (_) {
+                      setState(() {
+                        _isSearchButtonHovered = true;
+                      });
+                    }
+                  : null,
+              onExit: DeviceUtils.isPC()
+                  ? (_) {
+                      setState(() {
+                        _isSearchButtonHovered = false;
+                      });
+                    }
+                  : null,
+              child: GestureDetector(
+                onTap: () {
+                  // 防止重复点击
+                  if (_isSearchButtonPressed) return;
+
+                  setState(() {
+                    _isSearchButtonPressed = true;
+                  });
+
+                  widget.onSearchTap?.call();
+
+                  // 延迟重置按钮状态，防止快速重复点击
+                  Future.delayed(const Duration(milliseconds: 300), () {
+                    if (mounted) {
+                      setState(() {
+                        _isSearchButtonPressed = false;
+                      });
+                    }
+                  });
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: DeviceUtils.isPC() && _isSearchButtonHovered
+                        ? (themeService.isDarkMode
+                            ? const Color(0xFF333333)
+                            : const Color(0xFFe0e0e0))
+                        : Colors.transparent,
+                  ),
+                  child: Center(
+                    child: Icon(
+                      LucideIcons.search,
+                      color: themeService.isDarkMode
+                          ? const Color(0xFFffffff)
+                          : const Color(0xFF2c3e50),
+                      size: 24,
+                      weight: 1.0,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 完全居中的 Logo
+          Center(
             child: GestureDetector(
               onTap: widget.onHomeTap,
               behavior: HitTestBehavior.opaque,
-              child: ShaderMask(
-                shaderCallback: (bounds) =>
-                    AppColors.primaryGradient.createShader(bounds),
-                child: const Text(
-                  'LUMI',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.5,
-                    color: Colors.white,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF3B82F6), Color(0xFF9333EA)],
+                      ),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: const Icon(Icons.tv, color: Colors.white, size: 18),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [Color(0xFF2563EB), Color(0xFF9333EA)],
+                    ).createShader(bounds),
+                    child: const Text(
+                      'LunaTV',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -553,7 +641,7 @@ class _MainLayoutState extends State<MainLayout> {
                               LucideIcons.search,
                               color: (widget.searchQuery?.trim().isNotEmpty ??
                                       false)
-                                  ? const Color(0xFF7C5CFF)
+                                  ? const Color(0xFF27ae60)
                                   : themeService.isDarkMode
                                       ? const Color(0xFFb0b0b0)
                                       : const Color(0xFF7f8c8d),
@@ -743,72 +831,6 @@ class _MainLayoutState extends State<MainLayout> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 搜索按钮
-        MouseRegion(
-          cursor:
-              DeviceUtils.isPC() ? SystemMouseCursors.click : MouseCursor.defer,
-          onEnter: DeviceUtils.isPC()
-              ? (_) {
-                  setState(() {
-                    _isSearchButtonHovered = true;
-                  });
-                }
-              : null,
-          onExit: DeviceUtils.isPC()
-              ? (_) {
-                  setState(() {
-                    _isSearchButtonHovered = false;
-                  });
-                }
-              : null,
-          child: GestureDetector(
-            onTap: () {
-              // 防止重复点击
-              if (_isSearchButtonPressed) return;
-
-              setState(() {
-                _isSearchButtonPressed = true;
-              });
-
-              widget.onSearchTap?.call();
-
-              // 延迟重置按钮状态，防止快速重复点击
-              Future.delayed(const Duration(milliseconds: 300), () {
-                if (mounted) {
-                  setState(() {
-                    _isSearchButtonPressed = false;
-                  });
-                }
-              });
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: DeviceUtils.isPC() && _isSearchButtonHovered
-                    ? (themeService.isDarkMode
-                        ? const Color(0xFF1A2133)
-                        : const Color(0xFFE5E8F2))
-                    : (themeService.isDarkMode
-                        ? const Color(0xFF121828)
-                        : const Color(0xFFEEF0F8)),
-              ),
-              child: Center(
-                child: Icon(
-                  LucideIcons.search,
-                  color: themeService.isDarkMode
-                      ? const Color(0xFFEDF0F7)
-                      : const Color(0xFF1A2133),
-                  size: 20,
-                  weight: 1.0,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
         // 深浅模式切换按钮
         MouseRegion(
           cursor:
@@ -833,17 +855,15 @@ class _MainLayoutState extends State<MainLayout> {
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 34,
-              height: 34,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
+                shape: BoxShape.circle,
                 color: DeviceUtils.isPC() && _isThemeButtonHovered
                     ? (themeService.isDarkMode
-                        ? const Color(0xFF1A2133)
-                        : const Color(0xFFE5E8F2))
-                    : (themeService.isDarkMode
-                        ? const Color(0xFF121828)
-                        : const Color(0xFFEEF0F8)),
+                        ? const Color(0xFF333333)
+                        : const Color(0xFFe0e0e0))
+                    : Colors.transparent,
               ),
               child: Center(
                 child: AnimatedSwitcher(
@@ -861,9 +881,9 @@ class _MainLayoutState extends State<MainLayout> {
                         : LucideIcons.moon,
                     key: ValueKey(themeService.isDarkMode),
                     color: themeService.isDarkMode
-                        ? const Color(0xFFEDF0F7)
-                        : const Color(0xFF1A2133),
-                    size: 20,
+                        ? const Color(0xFFffffff)
+                        : const Color(0xFF2c3e50),
+                    size: 24,
                     weight: 1.0,
                   ),
                 ),
@@ -902,25 +922,23 @@ class _MainLayoutState extends State<MainLayout> {
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 34,
-              height: 34,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
+                shape: BoxShape.circle,
                 color: DeviceUtils.isPC() && _isUserButtonHovered
                     ? (themeService.isDarkMode
-                        ? const Color(0xFF1A2133)
-                        : const Color(0xFFE5E8F2))
-                    : (themeService.isDarkMode
-                        ? const Color(0xFF121828)
-                        : const Color(0xFFEEF0F8)),
+                        ? const Color(0xFF333333)
+                        : const Color(0xFFe0e0e0))
+                    : Colors.transparent,
               ),
               child: Center(
                 child: Icon(
                   LucideIcons.user,
                   color: themeService.isDarkMode
-                      ? const Color(0xFFEDF0F7)
-                      : const Color(0xFF1A2133),
-                  size: 20,
+                      ? const Color(0xFFffffff)
+                      : const Color(0xFF2c3e50),
+                  size: 24,
                   weight: 1.0,
                 ),
               ),
@@ -941,121 +959,152 @@ class _MainLayoutState extends State<MainLayout> {
       {'icon': LucideIcons.clover, 'label': '综艺'},
     ];
 
+    final isTablet = DeviceUtils.isTablet(context);
     final isPC = DeviceUtils.isPC();
-    final bottomPad = MediaQuery.of(context).padding.bottom + 6;
 
-    // 简洁底部条：半透明深色 + 顶部细边框（无毛玻璃药丸）
-    return Container(
-      decoration: BoxDecoration(
-        color: themeService.isDarkMode
-            ? const Color(0xFF0B0F1A).withOpacity(0.94)
-            : Colors.white.withOpacity(0.88),
-        border: Border(
-          top: BorderSide(
-            color: themeService.isDarkMode
-                ? const Color(0xFF1A2133)
-                : const Color(0xFFE5E8F2),
-            width: 0.5,
+    // 毛玻璃背景：半透明色 + 高斯模糊
+    final glassColor = themeService.isDarkMode
+        ? Colors.black.withOpacity(0.45)
+        : Colors.white.withOpacity(0.55);
+    final borderColor = themeService.isDarkMode
+        ? Colors.white.withOpacity(0.12)
+        : Colors.black.withOpacity(0.08);
+
+    // 药丸式外壳（圆角大、悬浮感）
+    final pill = ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+        child: Container(
+          decoration: BoxDecoration(
+            color: glassColor,
+            border: Border.all(color: borderColor, width: 0.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(navItems.length, (index) {
+                final item = navItems[index];
+                final isSelected =
+                    !widget.isSearchMode &&
+                        widget.currentBottomNavIndex == index;
+                final isHovered = isPC && _hoveredNavIndex == index;
+
+                return _buildPillTab(
+                  item: item,
+                  index: index,
+                  isSelected: isSelected,
+                  isHovered: isHovered,
+                  isPC: isPC,
+                  isTablet: isTablet,
+                  themeService: themeService,
+                );
+              }),
+            ),
           ),
         ),
       ),
-      padding: EdgeInsets.only(bottom: bottomPad),
-      child: Row(
-        children: List.generate(navItems.length, (index) {
-          final item = navItems[index];
-          final isSelected =
-              !widget.isSearchMode && widget.currentBottomNavIndex == index;
-          return _buildNavItem(
-            item: item,
-            index: index,
-            isSelected: isSelected,
-            isPC: isPC,
-            themeService: themeService,
-          );
-        }),
+    );
+
+    // 平板/PC 居中显示，手机撑满大部分宽度
+    if (isTablet) {
+      return Padding(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 4,
+          bottom: MediaQuery.of(context).padding.bottom + 10,
+        ),
+        child: Center(child: pill),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 4,
+        bottom: MediaQuery.of(context).padding.bottom + 10,
       ),
+      child: pill,
     );
   }
 
-  /// 单个底部导航项：图标 + 文字 + 激活渐变下划线
-  Widget _buildNavItem({
+  /// 单个药丸 Tab：选中态显示 icon+文字(绿色背景)，未选中只显示 icon
+  Widget _buildPillTab({
     required Map<String, dynamic> item,
     required int index,
     required bool isSelected,
+    required bool isHovered,
     required bool isPC,
+    required bool isTablet,
     required ThemeService themeService,
   }) {
-    final Color color = isSelected
-        ? (themeService.isDarkMode
-            ? const Color(0xFFEDF0F7)
-            : const Color(0xFF1A2133))
-        : (themeService.isDarkMode
-            ? const Color(0xFF6B7280)
-            : const Color(0xFF9BA3B5));
-
-    return Expanded(
-      child: MouseRegion(
-        cursor: isPC ? SystemMouseCursors.click : MouseCursor.defer,
-        onEnter: isPC
-            ? (_) => setState(() => _hoveredNavIndex = index)
-            : null,
-        onExit: isPC
-            ? (_) => setState(() => _hoveredNavIndex = null)
-            : null,
-        child: GestureDetector(
-          onTap: () => widget.onBottomNavChanged(index),
-          behavior: HitTestBehavior.opaque,
-          child: Column(
+    return MouseRegion(
+      cursor: isPC ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: isPC
+          ? (_) => setState(() => _hoveredNavIndex = index)
+          : null,
+      onExit: isPC
+          ? (_) => setState(() => _hoveredNavIndex = null)
+          : null,
+      child: GestureDetector(
+        onTap: () => widget.onBottomNavChanged(index),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          padding: EdgeInsets.symmetric(
+            horizontal: isSelected ? 14 : 10,
+            vertical: 8,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF27ae60)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(height: 8),
-              // 图标（激活加渐变辉光）
-              AnimatedContainer(
+              Icon(
+                item['icon'],
+                size: 22,
+                color: isSelected
+                    ? Colors.white
+                    : isHovered
+                        ? const Color(0xFF52c77a)
+                        : themeService.isDarkMode
+                            ? const Color(0xFFb0b0b0)
+                            : const Color(0xFF7f8c8d),
+              ),
+              AnimatedSize(
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOut,
-                width: isSelected ? 40 : 36,
-                height: 26,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
-                  gradient: isSelected
-                      ? AppColors.primaryGradient.withOpacity(0.18)
-                      : null,
-                ),
-                child: Icon(
-                  item['icon'],
-                  size: 21,
-                  color: isSelected
-                      ? (themeService.isDarkMode
-                          ? const Color(0xFFEDF0F7)
-                          : AppColors.primary)
-                      : color,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                item['label'],
-                style: TextStyle(
-                  fontSize: 10,
-                  height: 1.1,
-                  color: isSelected
-                      ? (themeService.isDarkMode
-                          ? const Color(0xFFEDF0F7)
-                          : AppColors.primary)
-                      : color,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-              const SizedBox(height: 6),
-              // 激活渐变下划线
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOut,
-                width: isSelected ? 24 : 0,
-                height: 2,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(1),
-                  gradient: isSelected ? AppColors.primaryGradient : null,
-                ),
+                child: isSelected
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Text(
+                          item['label'],
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
             ],
           ),

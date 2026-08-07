@@ -438,7 +438,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
               child: Row(
                 children: [
                   const Icon(Icons.subtitles,
-                      color: Color(0xFF7C5CFF), size: 22),
+                      color: Color(0xFF22C55E), size: 22),
                   const SizedBox(width: 8),
                   const Text(
                     '弹幕',
@@ -466,7 +466,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                   // 开关
                   Switch(
                     value: _enabled,
-                    activeColor: const Color(0xFF7C5CFF),
+                    activeColor: const Color(0xFF22C55E),
                     onChanged: _onToggleChanged,
                   ),
                 ],
@@ -511,7 +511,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
             child: Row(
               children: [
                 Icon(Icons.check_circle,
-                    color: const Color(0xFF7C5CFF), size: 16),
+                    color: const Color(0xFF22C55E), size: 16),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -530,7 +530,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                     height: 14,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Color(0xFF7C5CFF),
+                      color: Color(0xFF22C55E),
                     ),
                   ),
               ],
@@ -555,7 +555,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Color(0xFF7C5CFF),
+                  color: Color(0xFF22C55E),
                 ),
               ),
             ),
@@ -609,7 +609,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
               width: 20,
               child: isSelected
                   ? const Icon(Icons.check,
-                      color: Color(0xFF7C5CFF), size: 18)
+                      color: Color(0xFF22C55E), size: 18)
                   : null,
             ),
             const SizedBox(width: 4),
@@ -617,7 +617,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
             Text(
               media.source.displayName,
               style: TextStyle(
-                color: isSelected ? const Color(0xFF7C5CFF) : Colors.white,
+                color: isSelected ? const Color(0xFF22C55E) : Colors.white,
                 fontSize: 15,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               ),
@@ -641,7 +641,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF7C5CFF).withOpacity(0.15)
+                      ? const Color(0xFF22C55E).withOpacity(0.15)
                       : Colors.white.withOpacity(0.06),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -649,7 +649,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                   showCount,
                   style: TextStyle(
                     color: isSelected
-                        ? const Color(0xFF7C5CFF)
+                        ? const Color(0xFF22C55E)
                         : Colors.grey[400],
                     fontSize: 11,
                   ),
@@ -674,7 +674,7 @@ class _DanmakuControlSheetState extends State<DanmakuControlSheet> {
                 height: 14,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Color(0xFF7C5CFF),
+                  color: Color(0xFF22C55E),
                 ),
               ),
             ],
