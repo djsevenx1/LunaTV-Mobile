@@ -217,7 +217,7 @@ class _NetdiskSearchScreenState extends State<NetdiskSearchScreen> {
             height: 32,
             child: CircularProgressIndicator(
               strokeWidth: 3,
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF27ae60)),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF7C5CFF)),
             ),
           ),
           const SizedBox(height: 16),
@@ -327,7 +327,7 @@ class _NetdiskSearchScreenState extends State<NetdiskSearchScreen> {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF27ae60).withOpacity(0.15),
+                        color: const Color(0xFF7C5CFF).withOpacity(0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -335,7 +335,7 @@ class _NetdiskSearchScreenState extends State<NetdiskSearchScreen> {
                         style: FontUtils.sourceCodePro(context,
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
-                          color: const Color(0xFF27ae60),
+                          color: const Color(0xFF7C5CFF),
                         ),
                       ),
                     ),

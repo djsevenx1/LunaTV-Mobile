@@ -358,7 +358,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   double _totalDragBrightnessDelta = 0;
 
   // LunaTV Web 主题色
-  static const Color kLunaTheme = Color(0xFF22C55E);
+  static const Color kLunaTheme = Color(0xFF7C5CFF);
   static const Color kLunaLoadingColor = Color(0xFF009688);
   static const Color kLunaFloatBtnBg = Color(0x26FFFFFF);
 
@@ -955,7 +955,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         style: const TextStyle(color: Colors.white54, fontSize: 11),
                       ),
                       value: autoIntro,
-                      activeColor: const Color(0xFF22C55E),
+                      activeColor: const Color(0xFF7C5CFF),
                       onChanged: (v) => setDialogState(() => autoIntro = v),
                     ),
                     SwitchListTile(
@@ -971,7 +971,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         style: const TextStyle(color: Colors.white54, fontSize: 11),
                       ),
                       value: autoOutro,
-                      activeColor: const Color(0xFF22C55E),
+                      activeColor: const Color(0xFF7C5CFF),
                       onChanged: (v) => setDialogState(() => autoOutro = v),
                     ),
                     const Divider(color: Colors.white24, height: 24),
@@ -1000,7 +1000,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             minimumSize: const Size(0, 28),
                             tapTargetSize:
                                 MaterialTapTargetSize.shrinkWrap,
-                            foregroundColor: const Color(0xFF22C55E),
+                            foregroundColor: const Color(0xFF7C5CFF),
                           ),
                           onPressed: () {
                             setDialogState(() {
@@ -1018,7 +1018,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       min: 0,
                       max: 300,
                       divisions: 300,
-                      activeColor: const Color(0xFF22C55E),
+                      activeColor: const Color(0xFF7C5CFF),
                       label: intro > 0 ? _formatSkipTime(intro) : '关闭',
                       onChanged: (v) =>
                           setDialogState(() => intro = v.round()),
@@ -1102,7 +1102,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     Navigator.pop(ctx);
                   },
                   child: const Text('保存',
-                      style: TextStyle(color: Color(0xFF22C55E))),
+                      style: TextStyle(color: Color(0xFF7C5CFF))),
                 ),
               ],
             );
@@ -1190,7 +1190,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: isCurrent
-                                    ? const Color(0xFF22C55E)
+                                    ? const Color(0xFF7C5CFF)
                                     : const Color(0xFF374151),
                                 borderRadius: BorderRadius.circular(8),
                               ),
@@ -4309,7 +4309,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   height: 12,
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
-                    color: Color(0xFF22C55E),
+                    color: Color(0xFF7C5CFF),
                   ),
                 ),
             ],
@@ -4354,14 +4354,14 @@ class _PlayerScreenState extends State<PlayerScreen>
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: selected
-              ? const Color(0xFF22C55E).withOpacity(0.15)
+              ? const Color(0xFF7C5CFF).withOpacity(0.15)
               : (isDark
                   ? Colors.white.withOpacity(0.05)
                   : Colors.white.withOpacity(0.6)),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
-                ? const Color(0xFF22C55E)
+                ? const Color(0xFF7C5CFF)
                 : (isDark
                     ? Colors.white.withOpacity(0.1)
                     : Colors.black.withOpacity(0.08)),
@@ -4493,7 +4493,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   Color _stateToColor(PingState state) {
     switch (state) {
       case PingState.fast:
-        return const Color(0xFF22C55E);
+        return const Color(0xFF7C5CFF);
       case PingState.medium:
         return const Color(0xFFF59E0B);
       case PingState.slow:
@@ -4679,7 +4679,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         height: 6,
                         decoration: BoxDecoration(
                           color: isActive
-                              ? const Color(0xFF22C55E)
+                              ? const Color(0xFF7C5CFF)
                               : (isDark
                                   ? Colors.white24
                                   : Colors.black26),
@@ -4761,8 +4761,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           gradient: isCurrent
               ? const LinearGradient(
                   colors: [
-                    Color(0xFF22C55E),
-                    Color(0xFF10B981),
+                    Color(0xFF7C5CFF),
+                    Color(0xFFE23B8E),
                   ],
                 )
               : null,
@@ -4811,7 +4811,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             gradient: const LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0xFF22C55E), Color(0xFF10B981)],
+              colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
             ),
             borderRadius: BorderRadius.circular(2),
           ),
@@ -4861,7 +4861,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           decoration: BoxDecoration(
             gradient: canPlay
                 ? const LinearGradient(
-                    colors: [Color(0xFF22C55E), Color(0xFF10B981)],
+                    colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
                   )
                 : null,
             color: !canPlay ? Colors.grey : null,
@@ -4869,7 +4869,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             boxShadow: canPlay
                 ? [
                     BoxShadow(
-                      color: const Color(0xFF22C55E).withOpacity(0.35),
+                      color: const Color(0xFF7C5CFF).withOpacity(0.35),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -5003,7 +5003,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               //   / _enterPipMode 等 UI 入口同模板.
               _iconBtn(
                 icon: _isCasting ? Icons.cast_connected : Icons.cast,
-                iconColor: _isCasting ? const Color(0xFF22C55E) : Colors.white,
+                iconColor: _isCasting ? const Color(0xFF7C5CFF) : Colors.white,
                 onTap: () => _showDLNACastAction(),
               ),
               // 设置
@@ -5371,7 +5371,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('已投屏到 ${device.info.friendlyName}, 本地播放已停止'),
-          backgroundColor: const Color(0xFF22C55E),
+          backgroundColor: const Color(0xFF7C5CFF),
           duration: const Duration(seconds: 3),
           action: SnackBarAction(
             label: '停止投屏',
@@ -5459,7 +5459,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     style: TextStyle(color: Colors.white)),
                 trailing: Text(
                   _playbackRate == 1.0 ? '1.0x' : '${_playbackRate}x',
-                  style: const TextStyle(color: Color(0xFF22C55E)),
+                  style: const TextStyle(color: Color(0xFF7C5CFF)),
                 ),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -5477,7 +5477,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       : '未设置',
                   style: TextStyle(
                     color: _skipIntroEnd > 0 || _skipOutroStart > 0
-                        ? const Color(0xFF22C55E)
+                        ? const Color(0xFF7C5CFF)
                         : Colors.white54,
                   ),
                 ),
@@ -5772,7 +5772,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       rate == 1.0 ? '1.0x (正常)' : '${rate}x',
                       style: TextStyle(
                         color: selected
-                            ? const Color(0xFF22C55E)
+                            ? const Color(0xFF7C5CFF)
                             : Colors.white,
                         fontSize: 15,
                         fontWeight: selected
@@ -5782,7 +5782,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
                     trailing: selected
                         ? const Icon(Icons.check_circle,
-                            color: Color(0xFF22C55E), size: 20)
+                            color: Color(0xFF7C5CFF), size: 20)
                         : null,
                     onTap: () {
                       _setPlaybackRate(rate);

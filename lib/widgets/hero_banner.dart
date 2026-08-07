@@ -218,11 +218,14 @@ class _HeroBannerState extends State<HeroBanner> {
                               (index) => AnimatedContainer(
                                 duration: const Duration(milliseconds: 300),
                                 margin: const EdgeInsets.symmetric(horizontal: 3),
-                                width: index == _currentPage ? 20 : 5,
+                                width: index == _currentPage ? 22 : 5,
                                 height: 5,
                                 decoration: BoxDecoration(
+                                  gradient: index == _currentPage
+                                      ? AppColors.primaryGradient
+                                      : null,
                                   color: index == _currentPage
-                                      ? Colors.white
+                                      ? null
                                       : Colors.white.withOpacity(0.5),
                                   borderRadius: BorderRadius.circular(3),
                                 ),
@@ -279,7 +282,7 @@ class _HeroBannerState extends State<HeroBanner> {
               );
             },
           ),
-          // 底部柔和渐变遮罩 - 让图片更通透
+          // 底部柔和渐变遮罩 - 极夜蓝黑过渡
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -287,8 +290,8 @@ class _HeroBannerState extends State<HeroBanner> {
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  Colors.black.withOpacity(0.25),
-                  Colors.black.withOpacity(0.55),
+                  const Color(0xFF0B0F1A).withOpacity(0.25),
+                  const Color(0xFF0B0F1A).withOpacity(0.62),
                 ],
                 stops: const [0.0, 0.5, 1.0],
               ),
@@ -301,7 +304,7 @@ class _HeroBannerState extends State<HeroBanner> {
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
                 colors: [
-                  Colors.black.withOpacity(0.35),
+                  const Color(0xFF0B0F1A).withOpacity(0.45),
                   Colors.transparent,
                 ],
                 stops: const [0.0, 0.6],
@@ -381,39 +384,39 @@ class _HeroBannerState extends State<HeroBanner> {
                   // 按钮
                   Row(
                     children: [
-                      // 立即播放
+                      // 立即播放（紫罗兰渐变按钮）
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
+                          gradient: AppColors.primaryGradient,
+                          borderRadius: BorderRadius.circular(22),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
+                              color: AppColors.primary.withOpacity(0.35),
+                              blurRadius: 12,
+                              offset: const Offset(0, 3),
                             ),
                           ],
                         ),
                         child: Material(
                           color: Colors.transparent,
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(22),
                             onTap: () => widget.onTap?.call(item),
                             child: const Padding(
                               padding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 6),
+                                  horizontal: 18, vertical: 7),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(Icons.play_arrow,
-                                      color: Colors.black, size: 18),
+                                      color: Colors.white, size: 20),
                                   SizedBox(width: 4),
                                   Text(
                                     '立即播放',
                                     style: TextStyle(
                                       fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.black,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
                                     ),
                                   ),
                                 ],

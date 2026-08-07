@@ -160,7 +160,7 @@ class _PlayerSourcesPanelState extends State<PlayerSourcesPanel>
                           child: Icon(
                             Icons.refresh,
                             color: _isRefreshing
-                                ? Colors.green
+                                ? Color(0xFF7C5CFF)
                                 : (isDarkMode
                                     ? Colors.grey[400]
                                     : Colors.grey[600]),
@@ -265,7 +265,7 @@ class _SourcePanelItemWithHoverState extends State<_SourcePanelItemWithHover> {
                         : Colors.grey[200])),
             borderRadius: BorderRadius.circular(12),
             border: widget.isCurrent
-                ? Border.all(color: Colors.green, width: 2)
+                ? Border.all(color: Color(0xFF7C5CFF), width: 2)
                 : null,
           ),
           child: Padding(
@@ -392,7 +392,7 @@ class _SourcePanelItemWithHoverState extends State<_SourcePanelItemWithHover> {
                                     Text(
                                       widget.speedInfo!.loadSpeed,
                                       style: widget.theme.textTheme.bodyMedium
-                                          ?.copyWith(color: Colors.green),
+                                          ?.copyWith(color: Color(0xFF7C5CFF)),
                                     ),
                                   if (widget.speedInfo!.loadSpeed.isNotEmpty &&
                                       !widget.speedInfo!.loadSpeed

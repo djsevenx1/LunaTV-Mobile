@@ -584,7 +584,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
           gradient: LinearGradient(
             colors: isDark
                 ? [Colors.grey.shade800, Colors.grey.shade800.withOpacity(0.95)]
-                : [Colors.white, Color(0xFF10B981).withOpacity(0.05)],
+                : [Colors.white, Color(0xFFE23B8E).withOpacity(0.05)],
           ),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
@@ -610,12 +610,12 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                     gradient: const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [const Color(0xFF10B981), Colors.green, Colors.teal],
+                      colors: [const Color(0xFFE23B8E), Color(0xFF7C5CFF), Colors.teal],
                     ),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Color(0xFF10B981).withOpacity(0.4),
+                        color: Color(0xFFE23B8E).withOpacity(0.4),
                         blurRadius: 15,
                         offset: const Offset(0, 4),
                       ),
@@ -631,7 +631,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                       // 渐变标题
                       ShaderMask(
                         shaderCallback: (bounds) => const LinearGradient(
-                          colors: [const Color(0xFF10B981), Colors.green, Colors.teal],
+                          colors: [const Color(0xFFE23B8E), Color(0xFF7C5CFF), Colors.teal],
                         ).createShader(bounds),
                         child: const Text(
                           '源浏览器',
@@ -657,10 +657,10 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Color(0xFF10B981).withOpacity(0.1),
+                      color: Color(0xFFE23B8E).withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: Color(0xFF10B981).withOpacity(0.3),
+                        color: Color(0xFFE23B8E).withOpacity(0.3),
                       ),
                     ),
                     child: Row(
@@ -712,7 +712,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: Color(0xFF10B981).withOpacity(0.15),
+                    color: Color(0xFFE23B8E).withOpacity(0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(Icons.storage, size: 16, color: const Color(0xFF059669)),
@@ -727,7 +727,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Color(0xFF10B981).withOpacity(0.15),
+                      color: Color(0xFFE23B8E).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -855,7 +855,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               // 选中态: emerald → green 渐变 (跟 LOMI 选中态 1:1)
               gradient: selected
                   ? const LinearGradient(
-                      colors: [Color(0xFF10B981), Colors.green],
+                      colors: [Color(0xFFE23B8E), Color(0xFF7C5CFF)],
                     )
                   : null,
               color: selected
@@ -871,7 +871,7 @@ class _SourceBrowserScreenState extends State<SourceBrowserScreen> {
               boxShadow: selected
                   ? [
                       BoxShadow(
-                        color: const Color(0xFF10B981).withOpacity(0.35),
+                        color: const Color(0xFFE23B8E).withOpacity(0.35),
                         blurRadius: 10,
                         offset: const Offset(0, 3),
                       ),
@@ -2011,7 +2011,7 @@ class _PreviewDialogState extends State<_PreviewDialog> {
             ),
             // 评分徽章
             if (_douban?.rate != null && _douban!.rate!.isNotEmpty)
-              _badge('豆瓣 ${_douban!.rate}', Colors.green),
+              _badge('豆瓣 ${_douban!.rate}', Color(0xFF7C5CFF)),
             if (_bangumi != null && _bangumi!.rating.score > 0)
               _badge('Bangumi ${_bangumi!.rating.score.toStringAsFixed(1)}', Colors.purple),
             // 外链

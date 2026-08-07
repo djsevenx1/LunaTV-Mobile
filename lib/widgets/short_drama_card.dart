@@ -314,7 +314,7 @@ class _ShortDramaCardState extends State<ShortDramaCard> {
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     color: _isPlayButtonHovered
-                                        ? const Color(0xFF27ae60)
+                                        ? const Color(0xFF7C5CFF)
                                         : Colors.transparent,
                                     border: Border.all(
                                       color: Colors.white,

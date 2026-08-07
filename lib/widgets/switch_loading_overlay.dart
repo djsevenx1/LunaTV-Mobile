@@ -64,7 +64,7 @@ class SwitchLoadingOverlay extends StatelessWidget {
                           width: 100,
                           height: 100,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF2ecc71).withOpacity(0.3),
+                            color: const Color(0xFF7C5CFF).withOpacity(0.3),
                             borderRadius: BorderRadius.circular(20),
                           ),
                         ),
@@ -77,7 +77,7 @@ class SwitchLoadingOverlay extends StatelessWidget {
                           gradient: const LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
-                            colors: [Color(0xFF2ecc71), Color(0xFF27ae60)],
+                            colors: [Color(0xFF7C5CFF), Color(0xFF7C5CFF)],
                           ),
                           borderRadius: BorderRadius.circular(16),
                         ),

@@ -165,11 +165,11 @@ class _M3uImportScreenState extends State<M3uImportScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: const Color(0xFF7C5CFF).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.shade200),
+                border: Border.all(color: const Color(0xFF7C5CFF).withValues(alpha: 0.3)),
               ),
-              child: Text(_success!, style: TextStyle(color: Colors.green.shade700)),
+              child: Text(_success!, style: TextStyle(color: const Color(0xFF7C5CFF))),
             ),
         ],
       ),

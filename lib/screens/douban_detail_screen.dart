@@ -493,12 +493,12 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
         height: 44,
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF22C55E), Color(0xFF10B981)],
+            colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
           ),
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF22C55E).withOpacity(0.35),
+              color: const Color(0xFF7C5CFF).withOpacity(0.35),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -619,7 +619,7 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
       case TagType.duration:
         return (const Color(0xFFF97316), const Color(0xFFC2410C));
       case TagType.episode:
-        return (const Color(0xFF22C55E), const Color(0xFF15803D));
+        return (const Color(0xFF7C5CFF), const Color(0xFF15803D));
     }
   }
 
@@ -672,7 +672,7 @@ class _DoubanDetailScreenState extends State<DoubanDetailScreen>
                   gradient: const LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color(0xFF22C55E), Color(0xFF10B981)],
+                    colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
                   ),
                   borderRadius: BorderRadius.circular(2),
                 ),

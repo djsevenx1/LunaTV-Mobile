@@ -557,7 +557,7 @@ class _AnimeScreenState extends State<AnimeScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshAnimeData,
       refreshText: '刷新动漫数据...',
-      primaryColor: const Color(0xFF27AE60),
+      primaryColor: const Color(0xFF7C5CFF),
       child: SingleChildScrollView(
         controller: _scrollController,
         child: Column(

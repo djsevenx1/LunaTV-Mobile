@@ -483,7 +483,7 @@ class _ShowScreenState extends State<ShowScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshShowsData,
       refreshText: '刷新综艺数据...',
-      primaryColor: const Color(0xFF27AE60),
+      primaryColor: const Color(0xFF7C5CFF),
       child: SingleChildScrollView(
         controller: _scrollController,
         child: Column(

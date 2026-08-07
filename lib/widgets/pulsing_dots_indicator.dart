@@ -60,7 +60,7 @@ class _PulsingDotsIndicatorState extends State<PulsingDotsIndicator>
                     width: 10.0,
                     height: 10.0,
                     decoration: const BoxDecoration(
-                      color: Color(0xFF27AE60),
+                      color: Color(0xFF7C5CFF),
                       shape: BoxShape.circle,
                     ),
                   ),

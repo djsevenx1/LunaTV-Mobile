@@ -94,8 +94,8 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
             height: 32,
             decoration: BoxDecoration(
               color: themeService.isDarkMode
-                  ? const Color(0xFF333333)
-                  : const Color(0xFFe0e0e0),
+                  ? const Color(0xFF121828)
+                  : const Color(0xFFE5E8F2),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Stack(
@@ -114,7 +114,7 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
                         height: 32,
                         decoration: BoxDecoration(
                           color: themeService.isDarkMode
-                              ? const Color(0xFF1e1e1e)
+                              ? const Color(0xFF1A2133)
                               : Colors.white,
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
@@ -219,11 +219,11 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
                 double progress = 1.0 - (_animation.value * 2).clamp(0.0, 1.0);
                 textColor = Color.lerp(
                   themeService.isDarkMode
-                      ? const Color(0xFFb0b0b0)
-                      : const Color(0xFF7f8c8d),
+                      ? const Color(0xFF9BA3B5)
+                      : const Color(0xFF9BA3B5),
                   themeService.isDarkMode
                       ? const Color(0xFFffffff)
-                      : const Color(0xFF2c3e50),
+                      : const Color(0xFF1A2133),
                   progress,
                 )!;
                 fontWeight = progress > 0.5 ? FontWeight.w600 : FontWeight.w400;
@@ -233,11 +233,11 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
                 progress = progress.clamp(0.0, 1.0);
                 textColor = Color.lerp(
                   themeService.isDarkMode
-                      ? const Color(0xFFb0b0b0)
-                      : const Color(0xFF7f8c8d),
+                      ? const Color(0xFF9BA3B5)
+                      : const Color(0xFF9BA3B5),
                   themeService.isDarkMode
                       ? const Color(0xFFffffff)
-                      : const Color(0xFF2c3e50),
+                      : const Color(0xFF1A2133),
                   progress,
                 )!;
                 fontWeight = progress > 0.5 ? FontWeight.w600 : FontWeight.w400;
@@ -247,11 +247,11 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
                     ((_animation.value - 0.5) * 2).clamp(0.0, 1.0);
                 textColor = Color.lerp(
                   themeService.isDarkMode
-                      ? const Color(0xFFb0b0b0)
-                      : const Color(0xFF7f8c8d),
+                      ? const Color(0xFF9BA3B5)
+                      : const Color(0xFF9BA3B5),
                   themeService.isDarkMode
                       ? const Color(0xFFffffff)
-                      : const Color(0xFF2c3e50),
+                      : const Color(0xFF1A2133),
                   progress,
                 )!;
                 fontWeight = progress > 0.5 ? FontWeight.w600 : FontWeight.w400;
@@ -259,7 +259,7 @@ class _TopTabSwitcherState extends State<TopTabSwitcher>
 
               // PC端悬停时文字变绿色
               if (isPC && isHovering) {
-                textColor = const Color(0xFF27AE60);
+                textColor = const Color(0xFF7C5CFF);
               }
 
               return Center(

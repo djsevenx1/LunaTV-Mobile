@@ -507,7 +507,7 @@ class _TvScreenState extends State<TvScreen> {
     return StyledRefreshIndicator(
       onRefresh: _refreshTvShowsData,
       refreshText: '刷新电视剧数据...',
-      primaryColor: const Color(0xFF27AE60),
+      primaryColor: const Color(0xFF7C5CFF),
       child: SingleChildScrollView(
         controller: _scrollController,
         child: Column(

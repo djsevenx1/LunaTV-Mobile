@@ -85,7 +85,7 @@ class _VideoCardState extends State<VideoCard> {
                         width: width,
                         height: height,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity( 0.1),
@@ -95,7 +95,7 @@ class _VideoCardState extends State<VideoCard> {
                           ],
                         ),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
                           child: CachedNetworkImage(
                             imageUrl: imageUrl,
                             // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
@@ -118,15 +118,15 @@ class _VideoCardState extends State<VideoCard> {
                               height: height,
                               decoration: BoxDecoration(
                                 color: themeService.isDarkMode
-                                    ? const Color(0xFF333333)
+                                    ? const Color(0xFF121828)
                                     : Colors.grey[300],
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(12),
                               ),
                             ),
                             // 错误占位符
                             errorWidget: (context, url, error) => Container(
                               color: themeService.isDarkMode
-                                  ? const Color(0xFF333333)
+                                  ? const Color(0xFF121828)
                                   : Colors.grey[300],
                               child: Icon(
                                 Icons.movie,
@@ -151,7 +151,7 @@ class _VideoCardState extends State<VideoCard> {
                             width: width,
                             height: height,
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(12),
                               gradient: LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
@@ -179,7 +179,7 @@ class _VideoCardState extends State<VideoCard> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 7, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF2c3e50)
+                                color: const Color(0xFF121828)
                                     .withOpacity( 0.8),
                                 borderRadius: BorderRadius.circular(5),
                               ),
@@ -209,7 +209,7 @@ class _VideoCardState extends State<VideoCard> {
                               width: 30,
                               height: 30,
                               decoration: const BoxDecoration(
-                                color: Color(0xFFe91e63), // 粉色圆形背景
+                                color: Color(0xFFE23B8E), // 粉色圆形背景
                                 shape: BoxShape.circle,
                               ),
                               child: Center(
@@ -237,7 +237,7 @@ class _VideoCardState extends State<VideoCard> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 7, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF27ae60),
+                                color: const Color(0xFF7C5CFF),
                                 borderRadius: BorderRadius.circular(5),
                               ),
                               child: Text(
@@ -271,7 +271,7 @@ class _VideoCardState extends State<VideoCard> {
                               widthFactor: widget.videoInfo.progressPercentage,
                               child: Container(
                                 decoration: const BoxDecoration(
-                                  color: Color(0xFF27ae60),
+                                  color: Color(0xFF7C5CFF),
                                   borderRadius: BorderRadius.only(
                                     bottomLeft: Radius.circular(8),
                                     bottomRight: Radius.circular(8),
@@ -307,7 +307,7 @@ class _VideoCardState extends State<VideoCard> {
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         color: _isPlayButtonHovered
-                                            ? const Color(0xFF27ae60)
+                                            ? const Color(0xFF7C5CFF)
                                             : Colors.transparent,
                                         border: Border.all(
                                           color: Colors.white,
@@ -353,7 +353,7 @@ class _VideoCardState extends State<VideoCard> {
                                       width: 33,
                                       height: 33,
                                       decoration: const BoxDecoration(
-                                        color: Color(0xFF27ae60),
+                                        color: Color(0xFF7C5CFF),
                                         shape: BoxShape.circle,
                                       ),
                                       child: const Icon(
@@ -393,7 +393,7 @@ class _VideoCardState extends State<VideoCard> {
                                       height: 30,
                                       decoration: BoxDecoration(
                                         color:
-                                            Colors.grey.withOpacity( 0.8),
+                                            const Color(0xFF121828).withOpacity( 0.9),
                                         shape: BoxShape.circle,
                                       ),
                                       child: Center(
@@ -532,10 +532,10 @@ class _VideoCardState extends State<VideoCard> {
                             fontSize: width < 100 ? 12 : 13, // 根据宽度调整字体大小，调大字体
                             fontWeight: FontWeight.w500,
                             color: isPC && _isHovered
-                                ? Colors.green
+                                ? AppColors.primary
                                 : (themeService.isDarkMode
                                     ? const Color(0xFFffffff)
-                                    : const Color(0xFF2c3e50)),
+                                    : const Color(0xFF121828)),
                           ),
                           textAlign: TextAlign.center,
                           maxLines: widget.from == 'douban'
@@ -560,8 +560,8 @@ class _VideoCardState extends State<VideoCard> {
                             decoration: BoxDecoration(
                               border: Border.all(
                                 color: isPC && _isHovered
-                                    ? Colors.green
-                                    : const Color(0xFF7f8c8d),
+                                    ? AppColors.primary
+                                    : const Color(0xFF9BA3B5),
                                 width: 0.8,
                               ),
                               borderRadius: BorderRadius.circular(3),
@@ -575,10 +575,10 @@ class _VideoCardState extends State<VideoCard> {
                                 fontSize:
                                     width < 100 ? 11 : 12, // 根据宽度调整字体大小，调大字体
                                 color: isPC && _isHovered
-                                    ? Colors.green
+                                    ? AppColors.primary
                                     : (widget.from == 'agg'
-                                        ? const Color(0xFF9b59b6) // 聚合模式用紫色文字
-                                        : const Color(0xFF7f8c8d)), // 其他模式用灰色文字
+                                        ? const Color(0xFF7C5CFF) // 聚合模式用紫色文字
+                                        : const Color(0xFF9BA3B5)), // 其他模式用灰色文字
                                
                               ),
                               textAlign: TextAlign.center,
@@ -854,7 +854,7 @@ class _VideoCardState extends State<VideoCard> {
                                 Navigator.of(context).pop();
                                 widget.onSourceSelected?.call(source);
                               },
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(12),
                               child: Padding(
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 12),

@@ -401,7 +401,7 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                 '播放记录已清空',
                 style: FontUtils.poppins(context, color: Colors.white),
               ),
-              backgroundColor: const Color(0xFF27ae60),
+              backgroundColor: const Color(0xFF7C5CFF),
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -477,12 +477,12 @@ class _ContinueWatchingSectionState extends State<ContinueWatchingSection>
                     gradient: const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [Color(0xFF22C55E), Color(0xFF10B981)],
+                      colors: [Color(0xFF7C5CFF), Color(0xFFE23B8E)],
                     ),
                     borderRadius: BorderRadius.circular(10),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF22C55E).withOpacity(0.3),
+                        color: const Color(0xFF7C5CFF).withOpacity(0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),

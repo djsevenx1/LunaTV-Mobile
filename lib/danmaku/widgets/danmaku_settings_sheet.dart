@@ -83,7 +83,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
         min: 0,
         max: (steps.length - 1).toDouble(),
         divisions: steps.length - 1,
-        activeColor: const Color(0xFF22C55E),
+        activeColor: const Color(0xFF7C5CFF),
         label: labelBuilder(steps[idx]),
         onChanged: (v) {
           final newIdx = v.round();
@@ -118,7 +118,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
         min: 0,
         max: (steps.length - 1).toDouble(),
         divisions: steps.length - 1,
-        activeColor: const Color(0xFF22C55E),
+        activeColor: const Color(0xFF7C5CFF),
         label: labelBuilder(steps[idx]),
         onChanged: (v) {
           final newIdx = v.round();
@@ -167,7 +167,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
           return ChoiceChip(
             label: Text(a.label),
             selected: selected,
-            selectedColor: const Color(0xFF22C55E),
+            selectedColor: const Color(0xFF7C5CFF),
             labelStyle: TextStyle(
               color: selected ? Colors.white : Colors.grey[300],
               fontSize: 13,
@@ -196,7 +196,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
           return ChoiceChip(
             label: Text(m.label),
             selected: selected,
-            selectedColor: const Color(0xFF22C55E),
+            selectedColor: const Color(0xFF7C5CFF),
             labelStyle: TextStyle(
               color: selected ? Colors.white : Colors.grey[300],
               fontSize: 13,
@@ -242,7 +242,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.subtitles, color: Color(0xFF22C55E), size: 22),
+                  const Icon(Icons.subtitles, color: Color(0xFF7C5CFF), size: 22),
                   const SizedBox(width: 8),
                   const Text(
                     '弹幕设置',
@@ -255,7 +255,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
                   const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('完成', style: TextStyle(color: Color(0xFF22C55E))),
+                    child: const Text('完成', style: TextStyle(color: Color(0xFF7C5CFF))),
                   ),
                 ],
               ),
@@ -324,7 +324,7 @@ class _DanmakuSettingsSheetState extends State<DanmakuSettingsSheet> {
                     subtitle: '避免弹幕重叠在一起',
                     trailing: Switch(
                       value: _render.antiOverlap,
-                      activeColor: const Color(0xFF22C55E),
+                      activeColor: const Color(0xFF7C5CFF),
                       onChanged: (v) {
                         setState(() => _render = _render.copyWith(antiOverlap: v));
                         DanmakuSettings.instance.saveRenderSettings(_render);

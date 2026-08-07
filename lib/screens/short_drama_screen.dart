@@ -431,7 +431,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
       builder: (context, themeService, child) {
         return RefreshIndicator(
           onRefresh: _refreshDramaList,
-          color: const Color(0xFF22C55E),
+          color: const Color(0xFF7C5CFF),
           child: CustomScrollView(
             controller: _scrollController,
             slivers: [
@@ -695,7 +695,7 @@ class _ShortDramaScreenState extends State<ShortDramaScreen> {
               style: FontUtils.poppins(context,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: const Color(0xFF27ae60),
+                color: const Color(0xFF7C5CFF),
               ),
             ),
           ),

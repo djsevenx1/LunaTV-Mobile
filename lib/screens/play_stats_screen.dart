@@ -67,7 +67,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
           : _stats.isEmpty
               ? _buildEmptyState(isDark)
               : RefreshIndicator(
-                  color: const Color(0xFF27ae60),
+                  color: const Color(0xFF7C5CFF),
                   onRefresh: _loadData,
                   child: ListView(
                     padding: const EdgeInsets.all(16),
@@ -174,7 +174,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
               Icon(
                 icon,
                 size: 20,
-                color: const Color(0xFF27ae60),
+                color: const Color(0xFF7C5CFF),
               ),
               const SizedBox(width: 6),
               Text(
@@ -286,7 +286,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
                     Icon(
                       Icons.play_arrow_outlined,
                       size: 14,
-                      color: const Color(0xFF27ae60),
+                      color: const Color(0xFF7C5CFF),
                     ),
                     const SizedBox(width: 2),
                     Text(
@@ -303,7 +303,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
                     Icon(
                       Icons.access_time_outlined,
                       size: 14,
-                      color: const Color(0xFF27ae60),
+                      color: const Color(0xFF7C5CFF),
                     ),
                     const SizedBox(width: 2),
                     Text(
@@ -350,7 +350,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: const Color(0xFF27ae60).withOpacity(0.15),
+        color: const Color(0xFF7C5CFF).withOpacity(0.15),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
@@ -358,7 +358,7 @@ class _PlayStatsScreenState extends State<PlayStatsScreen> {
         style: FontUtils.poppins(context, 
           fontSize: 11,
           fontWeight: FontWeight.w500,
-          color: const Color(0xFF27ae60),
+          color: const Color(0xFF7C5CFF),
         ),
       ),
     );

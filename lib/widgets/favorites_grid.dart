@@ -282,7 +282,7 @@ class _FavoritesGridState extends State<FavoritesGrid>
   Widget _buildLoadingState() {
     return RefreshIndicator(
       onRefresh: _loadData,
-      color: const Color(0xFF27ae60),
+      color: const Color(0xFF7C5CFF),
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 平板模式根据宽度动态展示6～9列，手机模式3列
@@ -389,7 +389,7 @@ class _FavoritesGridState extends State<FavoritesGrid>
           ElevatedButton(
             onPressed: _loadFavorites,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF27ae60),
+              backgroundColor: const Color(0xFF7C5CFF),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -446,7 +446,7 @@ class _FavoritesGridState extends State<FavoritesGrid>
   Widget _buildFavoritesGrid() {
     return RefreshIndicator(
       onRefresh: _loadFavorites,
-      color: const Color(0xFF27ae60),
+      color: const Color(0xFF7C5CFF),
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 平板模式根据宽度动态展示6～9列，手机模式3列
