@@ -188,9 +188,11 @@ class VersionService {
   }
   
   /// 比较版本号，判断是否有新版本
+  /// ★ v2.6.53: 去掉 build metadata (+1 等) 再比较, 避免 int.parse 抛异常
   static bool _isNewerVersion(String current, String latest) {
-    final currentParts = current.split('.').map(int.parse).toList();
-    final latestParts = latest.split('.').map(int.parse).toList();
+    String sanitize(String v) => v.contains('+') ? v.substring(0, v.indexOf('+')) : v;
+    final currentParts = sanitize(current).split('.').map(int.parse).toList();
+    final latestParts = sanitize(latest).split('.').map(int.parse).toList();
     
     for (int i = 0; i < 3; i++) {
       final currentPart = i < currentParts.length ? currentParts[i] : 0;
