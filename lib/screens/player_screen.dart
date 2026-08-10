@@ -3882,12 +3882,23 @@ class _PlayerScreenState extends State<PlayerScreen>
         Positioned.fill(
           child: _buildDetailBackground(isDark),
         ),
+        // ★ v2.6.51: 悬浮返回按钮 (覆盖在海报左上)
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 4,
+          left: 8,
+          child: Material(
+            color: Colors.black.withOpacity(0.5),
+            shape: const CircleBorder(),
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+        ),
         // 内容层 — 顶部空出状态栏高度, 内容叠加在背景上
         Column(
           children: [
             SizedBox(height: MediaQuery.of(context).padding.top), // 状态栏高度
-            // 顶部 bar (返回按钮)
-            _buildTopBar(isDark),
             // 内容滚动
             Expanded(
               child: SingleChildScrollView(
