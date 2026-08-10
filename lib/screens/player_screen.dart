@@ -3853,20 +3853,47 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  /// ★ v2.6.51: 背景 URL 优先级 (跟 DoubanDetailHeader 一致)
+  Future<String> _backgroundUrl() async {
+    if (_tmdbBackdropUrl != null && _tmdbBackdropUrl!.isNotEmpty) {
+      return getImageUrl(_tmdbBackdropUrl!, 'tmdb');
+    }
+    if (widget.videoInfo.coverUrl != null && widget.videoInfo.coverUrl!.isNotEmpty) {
+      return getDoubanCoverUrl(widget.videoInfo.coverUrl!);
+    }
+    return getImageUrl(widget.videoInfo.cover, widget.videoInfo.source);
+  }
+
   Widget _buildDetailView(bool isDark) {
     // v2.1.17: 平板判定 — DoubanDetailHeader 用同一标准 (>=600), 用来
     //   决定要不要传 castOverlay (演员横向滚动 ListView).
     final isTablet = MediaQuery.of(context).size.width >= 600;
-    return Column(
+    final source = _selectedSource;
+    final canPlay = source != null && source.episodes.isNotEmpty;
+    final VoidCallback? onPlay = canPlay
+        ? () => _playEpisode(_currentEpisodeIndex)
+        : null;
+    final String? durationText = _currentDuration.inSeconds > 0
+        ? _formatNetflixDuration(_currentDuration.inSeconds)
+        : null;
+    return Stack(
       children: [
-        // 顶部 bar
-        _buildTopBar(isDark),
-        // 内容滚动
-        Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+        // ★ v2.6.51: 海报背景层 — 从屏幕顶部开始铺满 (和系统栏融为一体)
+        Positioned.fill(
+          child: _buildDetailBackground(isDark),
+        ),
+        // 内容层 — 顶部空出状态栏高度, 内容叠加在背景上
+        Column(
+          children: [
+            SizedBox(height: MediaQuery.of(context).padding.top), // 状态栏高度
+            // 顶部 bar (返回按钮)
+            _buildTopBar(isDark),
+            // 内容滚动
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 // v2.0.38: 配了 TMDB key → 大头部 (TMDB backdrop + 海报 + 简介),
                 //            没配 → 原 110x150 小海报 + 标题/年份
                 // v2.0.78: 登录豆瓣 → 大头部 (DoubanDetailHeader)
@@ -3891,33 +3918,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 //   (跟 v2.0.84/v2.0.85 行为一致, 跟 v2.0.78 没 DoubanDetailHeader
                 //   之前的 110x150 小海报完全不一样 — 现在是大头部视觉, 只是
                 //   背景图走豆瓣兜底).
+                // ★ v2.6.51: 前景内容 — 标题/信息/按钮/简介 (无背景, 背景在 Stack 底层)
                 if (widget.videoInfo.cover.isNotEmpty)
-                  // v2.0.84: 传 coverUrl (16:9 横版剧照 l_cover 1280x720)
-                  //   给详情页大头部背景. 平板/横屏缩到 2K 宽不糊.
-                  // v2.0.93: 传 tmdbBackdropUrl (TMDB w1280 16:9 backdrop, 优
-                  //   先级最高, 精准识别结果). 配了 TMDB key + 搜索成功 = 用
-                  //   TMDB backdrop; 否则 = null, 走 coverUrl 兜底 (v2.0.84).
-                  // v2.0.99: tmdbBackdropUrl 不依赖豆瓣登录, 配了 TMDB key 就生效.
-                  DoubanDetailHeader(
-                    title: widget.videoInfo.title,
-                    year: widget.videoInfo.year,
-                    cover: widget.videoInfo.cover,
-                    source: widget.videoInfo.source,
-                    sourceName: widget.videoInfo.sourceName,
-                    coverUrl: widget.videoInfo.coverUrl,
-                    tmdbBackdropUrl: _tmdbBackdropUrl,
-                    // v2.1.8: 传 summary, 平板 header 右侧显示简介填满空白.
-                    // v2.1.10: 手机 header 右侧也显示简介 (上面不够写可左滑),
-                    //   下方不再渲染独立 section.
-                    summary: _summary,
-                    // v2.1.17: 平板传演员横向滚动 ListView (浮在背景图下半部
-                    //   空白处). 手机不传 — DoubanDetailHeader 内部忽略, 跟
-                    //   v2.1.16 视觉一致. _cast 为空 (没配 TMDB key / 拉不到
-                    //   演员) 时不传, header 不渲染演员区.
-                    castOverlay: isTablet && _cast != null
-                        ? _buildCastOverlay(_cast!)
-                        : null,
-                  )
+                  _buildDetailForeground(isDark, onPlay, durationText)
                 else
                   _buildPosterHeader(isDark),
                 // v2.1.10: 下方独立剧情简介 section 删除 — 手机/平板
@@ -3935,6 +3938,173 @@ class _PlayerScreenState extends State<PlayerScreen>
         // 底部播放按钮
         _buildBottomPlayButton(isDark),
       ],
+    );
+  }
+
+  // ★ v2.6.51: 海报背景层 — TMDB 海报全宽到顶 + 底部渐变淡出到页面底色
+  Widget _buildDetailBackground(bool isDark) {
+    final pageBg = isDark ? const Color(0xFF0F1117) : const Color(0xFFF5F7F5);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // TMDB 海报 (全宽, 无圆角)
+        FutureBuilder<String>(
+          future: _backgroundUrl(),
+          builder: (context, snapshot) {
+            final imageUrl = snapshot.data ?? widget.videoInfo.cover;
+            final headers = getImageRequestHeaders(imageUrl, widget.videoInfo.source);
+            return CachedNetworkImage(
+              imageUrl: imageUrl,
+              cacheManager: LunaCacheManager.instance,
+              fit: BoxFit.cover,
+              httpHeaders: headers,
+              placeholder: (c, u) => Container(color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB)),
+              errorWidget: (c, u, e) => Container(color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB)),
+            );
+          },
+        ),
+        // 底部渐变淡出到页面底色
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withOpacity(0.25),
+                Colors.black.withOpacity(0.45),
+                Colors.black.withOpacity(0.75),
+                pageBg.withOpacity(0.92),
+                pageBg,
+              ],
+              stops: const [0.0, 0.35, 0.6, 0.85, 1.0],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ★ v2.6.51: 前景内容 — 标题/信息/按钮/简介 (无背景)
+  Widget _buildDetailForeground(bool isDark, VoidCallback? onPlay, String? durationText) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 大标题
+          Text(
+            widget.videoInfo.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              height: 1.15,
+              shadows: [Shadow(color: Colors.black87, blurRadius: 8)],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // 信息行: 年份 · 时长 · 源
+          Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            children: [
+              if (widget.videoInfo.year.isNotEmpty)
+                _infoText(widget.videoInfo.year),
+              if (durationText != null && durationText.isNotEmpty)
+                _infoText(durationText),
+              if (widget.videoInfo.sourceName != null && widget.videoInfo.sourceName!.isNotEmpty)
+                _infoText(widget.videoInfo.sourceName!),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // 按钮行: 播放 / 我的列表 / 赞
+          Row(
+            children: [
+              if (onPlay != null)
+                Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    onTap: onPlay,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.play_arrow, color: Colors.black, size: 26),
+                          SizedBox(width: 4),
+                          Text('播放', style: TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 10),
+              _buildCircleAction(
+                icon: _isFavorite ? Icons.check : Icons.add,
+                label: '我的列表',
+                highlighted: _isFavorite,
+                onTap: () => _toggleFavorite(),
+              ),
+            ],
+          ),
+          // 简介
+          if (_summary != null && _summary!.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              _summary!.trim(),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: Colors.white.withOpacity(0.92),
+                shadows: const [Shadow(color: Colors.black87, blurRadius: 6)],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _infoText(String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 3, height: 3, decoration: const BoxDecoration(color: Colors.white70, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(text, style: const TextStyle(fontSize: 12, color: Colors.white70, shadows: [Shadow(color: Colors.black87, blurRadius: 4)])),
+      ],
+    );
+  }
+
+  Widget _buildCircleAction({required IconData icon, required String label, required bool highlighted, required VoidCallback onTap}) {
+    final fg = highlighted ? const Color(0xFF22C55E) : Colors.white;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(30),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.35),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white38, width: 1.2),
+            ),
+            child: Icon(icon, color: fg, size: 22),
+          ),
+          const SizedBox(height: 4),
+          Text(label, style: TextStyle(fontSize: 11, color: highlighted ? const Color(0xFF22C55E) : Colors.white70, shadows: const [Shadow(color: Colors.black87, blurRadius: 4)])),
+        ],
+      ),
     );
   }
 
