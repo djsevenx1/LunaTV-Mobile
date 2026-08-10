@@ -4696,7 +4696,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  /// v2.0.51: 单页 GridView (30 集以内), 卡片样式跟 v2.0.43 一致
+  /// v2.6.57: 单页 Wrap 布局 — 按集数位数自适应宽度 (1-9 窄, 10-99 中, 100+ 宽)
   Widget _buildEpisodesGridPage(
     SearchResult source,
     int start,
@@ -4708,27 +4708,30 @@ class _PlayerScreenState extends State<PlayerScreen>
     double cardW,
     double fontSize,
   ) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        childAspectRatio: childAspectRatio,
-        mainAxisSpacing: spacing,
-        crossAxisSpacing: spacing,
-      ),
-      itemCount: end - start,
-      itemBuilder: (context, offset) {
+    final baseW = (cardW * childAspectRatio);
+    return Wrap(
+      spacing: spacing,
+      runSpacing: spacing,
+      children: List.generate(end - start, (offset) {
         final index = start + offset;
-        return _buildEpisodeCard(
-          source,
-          index,
-          isDark,
-          cardW,
-          fontSize,
+        final title = index < source.episodesTitles.length
+            ? source.episodesTitles[index]
+            : '${index + 1}';
+        // 按位数给不同宽度
+        final digits = title.length;
+        final w = digits <= 2 ? baseW * 0.7 : (digits <= 3 ? baseW * 0.85 : baseW);
+        return SizedBox(
+          width: w,
+          height: baseW,
+          child: _buildEpisodeCard(
+            source,
+            index,
+            isDark,
+            w,
+            fontSize,
+          ),
         );
-      },
+      }),
     );
   }
 
