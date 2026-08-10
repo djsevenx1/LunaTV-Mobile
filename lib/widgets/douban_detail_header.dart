@@ -185,23 +185,44 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // ★ v2.6.47: 背景用渐变替代 TMDB 海报 (去圆角, 全宽)
+          // 1) 背景: TMDB 海报 (全宽, 无圆角)
+          FutureBuilder<String>(
+            future: _backgroundUrl(),
+            builder: (context, snapshot) {
+              final imageUrl = snapshot.data ?? widget.cover;
+              final headers = getImageRequestHeaders(imageUrl, widget.source);
+              return CachedNetworkImage(
+                imageUrl: imageUrl,
+                // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                cacheManager: LunaCacheManager.instance,
+                fit: BoxFit.cover,
+                httpHeaders: headers,
+                placeholder: (c, u) => Container(
+                  color: isDark
+                      ? const Color(0xFF1F2937)
+                      : const Color(0xFFE5E7EB),
+                ),
+                errorWidget: (c, u, e) => Container(
+                  color: isDark
+                      ? const Color(0xFF1F2937)
+                      : const Color(0xFFE5E7EB),
+                ),
+              );
+            },
+          ),
+          // ★ v2.6.47: 边缘渐变淡出 — 底部渐变压暗到页面底色, 左右淡出
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? const [
-                        Color(0xFF1F2937),
-                        Color(0xFF14181F),
-                        Color(0xFF0F1117),
-                      ]
-                    : const [
-                        Color(0xFFE5E7EB),
-                        Color(0xFFD6DBE3),
-                        Color(0xFFC9CED6),
-                      ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.35),
+                  Colors.black.withOpacity(0.55),
+                  Colors.black.withOpacity(0.85),
+                  isDark ? const Color(0xFF0F1117) : const Color(0xFFF5F7F5),
+                ],
+                stops: const [0.0, 0.45, 0.75, 1.0],
               ),
             ),
           ),
@@ -301,23 +322,44 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // ★ v2.6.47: 背景用渐变替代 TMDB 海报 (去圆角, 全宽)
+          // 1) 背景: TMDB 海报 (全宽, 无圆角)
+          FutureBuilder<String>(
+            future: _backgroundUrl(),
+            builder: (context, snapshot) {
+              final imageUrl = snapshot.data ?? widget.cover;
+              final headers = getImageRequestHeaders(imageUrl, widget.source);
+              return CachedNetworkImage(
+                imageUrl: imageUrl,
+                // v2.1.33: 走 OkHttp (强制 TLS 1.2), 避开 dart:io TLS 1.3
+                cacheManager: LunaCacheManager.instance,
+                fit: BoxFit.cover,
+                httpHeaders: headers,
+                placeholder: (c, u) => Container(
+                  color: isDark
+                      ? const Color(0xFF1F2937)
+                      : const Color(0xFFE5E7EB),
+                ),
+                errorWidget: (c, u, e) => Container(
+                  color: isDark
+                      ? const Color(0xFF1F2937)
+                      : const Color(0xFFE5E7EB),
+                ),
+              );
+            },
+          ),
+          // ★ v2.6.47: 边缘渐变淡出 — 底部渐变压暗到页面底色
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? const [
-                        Color(0xFF1F2937),
-                        Color(0xFF14181F),
-                        Color(0xFF0F1117),
-                      ]
-                    : const [
-                        Color(0xFFE5E7EB),
-                        Color(0xFFD6DBE3),
-                        Color(0xFFC9CED6),
-                      ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.35),
+                  Colors.black.withOpacity(0.55),
+                  Colors.black.withOpacity(0.85),
+                  isDark ? const Color(0xFF0F1117) : const Color(0xFFF5F7F5),
+                ],
+                stops: const [0.0, 0.45, 0.75, 1.0],
               ),
             ),
           ),
