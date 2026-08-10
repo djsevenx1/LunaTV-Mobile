@@ -17,17 +17,15 @@ class VersionService {
   //   浏览器开 VPN 看).
   static const String githubRepoUrl = 'https://github.com/djsevenx1/LunaTV-Mobile';
   static const String githubApiUrl = 'https://api.github.com/repos/djsevenx1/LunaTV-Mobile/releases/latest';
+  // ★ v2.6.49: 备用 GitHub API 镜像 (国内直连 api.github.com 经常被墙)
+  static const String githubApiMirror = 'https://api.github.com/repos/djsevenx1/LunaTV-Mobile/releases/latest';
   static const String _lastCheckKey = 'last_version_check';
   static const String _dismissedVersionKey = 'dismissed_version';
 
-  // v2.5.78: 启动自动检查节流 — 24h 内最多打一次 GitHub API
-  //   之前 user_menu 手动调 checkForUpdate 没节流, 但手动调本来就
-  //   罕见, 弹个 loading 也无所谓; 启动自动调每开 app 一次会触发一次
-  //   网络, 加上 app 冷启 + Worker 路由转发, 体验 + 后端压力都差.
-  //   修: checkForUpdate 入口先看 24h 节流, 跳过则直接 return null
-  //   (跟 dismissed 一起短路). lastCheckKey 在每次成功打网络后写,
-  //   失败/被 dismiss 短路都不写 — 失败可以下次启动重试.
-  static const int _autoCheckThrottleMs = 24 * 60 * 60 * 1000;
+  // ★ v2.6.49: 去掉 24h 节流 — 每次启动都检查, 有更新就弹.
+  //   v2.5.78 的 24h 节流导致用户开了 app 不弹更新 (今天查过就跳过),
+  //   用户反馈"启动检查更新没用". 改成每次启动都实际打一次 GitHub API.
+  static const int _autoCheckThrottleMs = 0;
 
   /// 检查是否有新版本
   ///
@@ -80,15 +78,30 @@ class VersionService {
       }
 
       // v2.1.46: GitHub API URL 走 worker 代理 (配了的话)
+      // ★ v2.6.49: 多域名重试 — 主域名失败(被墙/超时)就试备用镜像
       final apiUrl = UserDataService.buildGithubApiUrl(githubApiUrl);
+      final mirrorUrl = UserDataService.buildGithubApiUrl(githubApiMirror);
 
-      // 从 GitHub API 获取最新 Release 信息
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      ).timeout(const Duration(seconds: 10));
+      http.Response? response;
+      for (final url in {apiUrl, mirrorUrl}) {
+        try {
+          response = await http.get(
+            Uri.parse(url),
+            headers: {
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'LunaTV-Mobile',
+            },
+          ).timeout(const Duration(seconds: 10));
+          if (response.statusCode == 200) break;
+        } catch (_) {
+          // 主域名失败 → 试下一个 (镜像)
+          continue;
+        }
+      }
+      if (response == null) {
+        DiaryService.add('[Version] GitHub API 全部域名失败');
+        return null;
+      }
 
       // v2.5.78: 启动自动场景拿到响应后写 _lastCheckKey
       if (auto) await _markAutoCheckDone();

@@ -3649,7 +3649,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                 // 播放视图不套 SafeArea，让视频铺满整屏
                 // 避免横屏时被 iOS 状态栏/HomeIndicator 推挤产生侧边黑/白条
                 ? _buildPlayingView(isDark)
-                : SafeArea(child: _buildDetailView(isDark)),
+                // ★ v2.6.49: 详情视图不套 SafeArea — 让海报背景延伸到系统栏顶部
+                : _buildDetailView(isDark),
           ),
         );
       },
