@@ -959,9 +959,8 @@ class _UserMenuState extends State<UserMenu> {
         );
       }
 
-      // v2.5.78: user_menu 是「手动检查」, 走 [checkForUpdateManual]
-      //   跳过节流, 立即打 GitHub API. 启动自动检查路径走 [checkForUpdate].
-      final versionInfo = await VersionService.checkForUpdateManual();
+      // ★ v2.6.55: 无节流, 直接调用 checkForUpdate (跟启动检查同逻辑)
+      final versionInfo = await VersionService.checkForUpdate();
 
       if (!mounted) return;
 

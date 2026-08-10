@@ -204,8 +204,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
     final url = widget.versionInfo.releasePageUrl ??
         VersionService.getReleaseUrl(widget.versionInfo.latestVersion);
     final uri = Uri.parse(url);
-    // v2.1.47: 兜底跳浏览器也算 dismiss, 避免用户重复被问
-    await VersionService.dismissVersion(widget.versionInfo.latestVersion);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -239,7 +237,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
       }
       return;
     }
-    await VersionService.dismissVersion(widget.versionInfo.latestVersion);
     if (!mounted) return;
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
@@ -293,9 +290,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           //   装机成功 (_phase == installed) 时 current == latest,
           //   不写 dismissed 也无副作用, 但仍走统一逻辑.
           onPopInvokedWithResult: (didPop, _) {
-            if (didPop) {
-              VersionService.dismissVersion(widget.versionInfo.latestVersion);
-            }
+            // v2.6.55: 无 dismissed 机制, 关闭弹窗不记录
           },
           child: Dialog(
             shape: RoundedRectangleBorder(
@@ -805,9 +800,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           Expanded(
             child: TextButton(
               onPressed: () async {
-                // v2.1.47: 跳 GitHub 也算 dismiss, 避免重复弹
-                await VersionService.dismissVersion(
-                    widget.versionInfo.latestVersion);
+                // v2.6.55: 无 dismissed 机制
                 if (!mounted) return;
                 await _openReleasePage();
               },
