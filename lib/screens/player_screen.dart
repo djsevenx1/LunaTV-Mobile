@@ -3942,14 +3942,24 @@ class _PlayerScreenState extends State<PlayerScreen>
                 // 源 + 测速
                 _buildSourceSection(isDark),
                 const SizedBox(height: 100),
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
+          ],
         ),
-        // 底部播放按钮
-        _buildBottomPlayButton(isDark),
       ],
     );
+  }
+
+  /// v2.6.51: 时长格式化 — "X 小时 Y 分钟"
+  String _formatNetflixDuration(int seconds) {
+    if (seconds < 60) return '$seconds 秒';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    if (h > 0 && m > 0) return '$h 小时 $m 分钟';
+    if (h > 0) return '$h 小时';
+    return '$m 分钟';
   }
 
   // ★ v2.6.51: 海报背景层 — TMDB 海报全宽到顶 + 底部渐变淡出到页面底色
