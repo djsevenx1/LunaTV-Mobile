@@ -4014,8 +4014,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _buildTopBar(bool isDark) {
+    // ★ v2.6.50: 详情页没套 SafeArea, 手动加状态栏高度 (顶栏不跟状态栏重叠)
+    final statusBarH = MediaQuery.of(context).padding.top;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: EdgeInsets.fromLTRB(8, statusBarH + 4, 8, 4),
       child: Row(
         children: [
           IconButton(
