@@ -157,7 +157,7 @@ class _DoubanDetailHeaderState extends State<DoubanDetailHeader> {
       return const SizedBox.shrink();
     }
 
-    // ★ v2.6.47: 全宽直角 (去 margin / 圆角 / 阴影), 背景用渐变替代 TMDB 海报
+    // ★ v2.6.47+: 全宽直角 (去 margin / 圆角 / 阴影), 背景用 TMDB 海报 + 边缘渐变淡出
     return Container(
       width: double.infinity,
       child: isTablet ? _buildTabletLayout(isDark) : _buildPhoneLayout(isDark),

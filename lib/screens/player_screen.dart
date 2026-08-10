@@ -3876,13 +3876,43 @@ class _PlayerScreenState extends State<PlayerScreen>
     final String? durationText = _currentDuration.inSeconds > 0
         ? _formatNetflixDuration(_currentDuration.inSeconds)
         : null;
+    // ★ v2.6.54: 详情页 — DoubanDetailHeader (TMDB海报全宽到系统栏) + 悬浮返回
     return Stack(
       children: [
-        // ★ v2.6.51: 海报背景层 — 从屏幕顶部开始铺满 (和系统栏融为一体)
-        Positioned.fill(
-          child: _buildDetailBackground(isDark),
+        // 背景大头部 — TMDB 海报全宽直角, 延伸到系统栏顶部
+        if (widget.videoInfo.cover.isNotEmpty)
+          DoubanDetailHeader(
+            title: widget.videoInfo.title,
+            year: widget.videoInfo.year,
+            cover: widget.videoInfo.cover,
+            source: widget.videoInfo.source,
+            sourceName: widget.videoInfo.sourceName,
+            coverUrl: widget.videoInfo.coverUrl,
+            tmdbBackdropUrl: _tmdbBackdropUrl,
+            summary: _summary,
+          )
+        else
+          _buildPosterHeader(isDark),
+        // 内容滚动 (叠加在海报上)
+        Column(
+          children: [
+            SizedBox(height: MediaQuery.of(context).padding.top + 160), // 跳过海报高度
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 选集 + 源
+                    _buildEpisodeSection(isDark),
+                    _buildSourceSection(isDark),
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        // ★ v2.6.51: 悬浮返回按钮 (覆盖在海报左上)
+        // ★ 悬浮返回按钮 (覆盖在海报左上)
         Positioned(
           top: MediaQuery.of(context).padding.top + 4,
           left: 8,
@@ -3894,59 +3924,6 @@ class _PlayerScreenState extends State<PlayerScreen>
               onPressed: () => Navigator.pop(context),
             ),
           ),
-        ),
-        // 内容层 — 顶部空出状态栏高度, 内容叠加在背景上
-        Column(
-          children: [
-            SizedBox(height: MediaQuery.of(context).padding.top), // 状态栏高度
-            // 内容滚动
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                // v2.0.38: 配了 TMDB key → 大头部 (TMDB backdrop + 海报 + 简介),
-                //            没配 → 原 110x150 小海报 + 标题/年份
-                // v2.0.78: 登录豆瓣 → 大头部 (DoubanDetailHeader)
-                //   - 手机: 2:3 竖版海报当背景 + 渐变压暗 + 底部标题
-                //   - 平板: 21:9 横版 + 左侧 150x225 大竖海报 + 右侧标题
-                // v2.0.77 (之前): 走 _buildPosterHeader (110x150 小海报)
-                //   只升了图片质量, 没大头部布局. 用户反馈"豆瓣大海报在
-                //   哪和 tmdb 一样啊" → 加这个.
-                //   海报 URL 通过 getImageUrl 自动升 l_ratio_poster
-                //   (登录态, 见 image_url.dart).
-                // 没登录 = 走 _buildPosterHeader (现有 110x150 小海报,
-                //   行为完全不变, 跟用户要求一致).
-                // v2.0.99 fix: 去 isDoubanLoggedIn() 条件 — TMDB backdrop
-                //   不该跟豆瓣登录绑. v2.0.93 我把 TMDB 写进 DoubanDetailHeader
-                //   (大头部), 大头部又在 v2.0.78 跟豆瓣登录绑 (DoubanDetailHeader
-                //   加的时候没 TMDB, 大头部 = 豆瓣登录态, 当时合理). v2.0.93 加
-                //   TMDB 时保留 isDoubanLoggedIn 条件, 错了 — TMDB 是独立数据源,
-                //   跟登录无关. 用户反馈 "tmdb 还是没显示海报" + 截图显示豆瓣未
-                //   登录 → 走 _buildPosterHeader (小头部) → TMDB 永远不显示.
-                //   改成: 只要 cover 不空 (豆瓣/番剧源都给) 就走大头部, TMDB
-                //   backdrop 独立生效. 没豆瓣登录 = 大头部走 coverUrl/cover 兜底
-                //   (跟 v2.0.84/v2.0.85 行为一致, 跟 v2.0.78 没 DoubanDetailHeader
-                //   之前的 110x150 小海报完全不一样 — 现在是大头部视觉, 只是
-                //   背景图走豆瓣兜底).
-                // ★ v2.6.51: 前景内容 — 标题/信息/按钮/简介 (无背景, 背景在 Stack 底层)
-                if (widget.videoInfo.cover.isNotEmpty)
-                  _buildDetailForeground(isDark, onPlay, durationText)
-                else
-                  _buildPosterHeader(isDark),
-                // v2.1.10: 下方独立剧情简介 section 删除 — 手机/平板
-                //   header 右侧都已显示简介 (上面不够写可左滑). 用户反馈
-                //   "下面画圈的剧情简介去掉, 上面不够写的左滑动".
-                // 集数 (放在源上面,LunaTV Web 风格)
-                _buildEpisodeSection(isDark),
-                // 源 + 测速
-                _buildSourceSection(isDark),
-                const SizedBox(height: 100),
-                  ],
-                ),
-              ),
-            ),
-          ],
         ),
       ],
     );
