@@ -17,17 +17,15 @@ class VersionService {
   //   浏览器开 VPN 看).
   static const String githubRepoUrl = 'https://github.com/djsevenx1/LunaTV-Mobile';
   static const String githubApiUrl = 'https://api.github.com/repos/djsevenx1/LunaTV-Mobile/releases/latest';
-  static const String _lastCheckKey = 'last_version_check';
-  static const String _dismissedVersionKey = 'dismissed_version';
 
-  // v2.5.78: 启动自动检查节流 — 24h 内最多打一次 GitHub API
-  //   之前 user_menu 手动调 checkForUpdate 没节流, 但手动调本来就
-  //   罕见, 弹个 loading 也无所谓; 启动自动调每开 app 一次会触发一次
-  //   网络, 加上 app 冷启 + Worker 路由转发, 体验 + 后端压力都差.
-  //   修: checkForUpdate 入口先看 24h 节流, 跳过则直接 return null
-  //   (跟 dismissed 一起短路). lastCheckKey 在每次成功打网络后写,
-  //   失败/被 dismiss 短路都不写 — 失败可以下次启动重试.
-  static const int _autoCheckThrottleMs = 24 * 60 * 60 * 1000;
+  // ★ v2.6.55: 硬编码当前版本号 (对齐 shiheng_oa_flutter)
+  //   不用 PackageInfo.fromPlatform() 读 (会带 +build 后缀导致解析崩溃)
+  //   每次发版同步更新此值即可
+  static const String _currentVersion = '2.6.55';
+
+  // ★ v2.6.55: 去掉 24h 节流 + dismissed 机制
+  //   每次启动都检查, 有更新就弹窗 (跟 shiheng_oa_flutter 一致)
+  //   用户关闭弹窗不会记录 dismissed, 下次启动仍会提示
 
   /// 检查是否有新版本
   ///
@@ -52,114 +50,66 @@ class VersionService {
   ///   == latest 且 current == latest 时才真正 return null (用户
   ///   装了或 user 真的就是这个版本).
   static Future<VersionInfo?> checkForUpdate() async {
-    return checkForUpdateImpl(auto: true);
-  }
-
-  // v2.5.78: 手动入口 — 跳过 24h 节流, 立即打 GitHub API
-  //   user_menu「检查更新」按钮走这个, 启动自动检查走 [checkForUpdate]
-  static Future<VersionInfo?> checkForUpdateManual() async {
-    return checkForUpdateImpl(auto: false);
-  }
-
-  // v2.5.78: 把节流 + 网络 + dismissed 判断放一起, 用 auto 区分两条路径
-  static Future<VersionInfo?> checkForUpdateImpl({required bool auto}) async {
+    // ★ v2.6.55: 简化 — 无节流, 无 dismissed, 每次启动都检查
     try {
-      // 获取当前版本
-      final packageInfo = await PackageInfo.fromPlatform();
-      final currentVersion = packageInfo.version;
-
-      // v2.5.78: 启动自动检查节流 — 24h 内最多打一次 GitHub API
-      //   只在「启动自动调用」场景节流; 手动 (auto=false) 不节流
-      //   修: 用 [_shouldThrottleAutoCheck] 走 Prefs, 失败 return null
-      if (auto) {
-        final shouldThrottle = await _shouldThrottleAutoCheck();
-        if (shouldThrottle) {
-          DiaryService.add('[Version] auto check throttled (24h 内已查过)');
-          return null;
-        }
-      }
+      // 硬编码当前版本 (避免 PackageInfo 的 +build 后缀)
+      final currentVersion = _currentVersion;
 
       // v2.1.46: GitHub API URL 走 worker 代理 (配了的话)
+      // ★ v2.6.55: 多域名重试 (主域名被墙/超时 → 试 GitHub 直连)
       final apiUrl = UserDataService.buildGithubApiUrl(githubApiUrl);
 
-      // 从 GitHub API 获取最新 Release 信息
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      ).timeout(const Duration(seconds: 10));
+      http.Response? response;
+      for (final url in {apiUrl, githubApiUrl}) {
+        try {
+          response = await http.get(
+            Uri.parse(url),
+            headers: {
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': 'LunaTV-Mobile',
+            },
+          ).timeout(const Duration(seconds: 10));
+          if (response.statusCode == 200) break;
+        } catch (_) {
+          continue; // 主域名失败 → 试下一个
+        }
+      }
+      if (response == null || response.statusCode != 200) {
+        DiaryService.add('[Version] GitHub API 全部域名失败');
+        return null;
+      }
 
-      // v2.5.78: 启动自动场景拿到响应后写 _lastCheckKey
-      if (auto) await _markAutoCheckDone();
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final tagName = data['tag_name'] as String? ?? '';
+      final latestVersion = tagName.startsWith('v') ? tagName.substring(1) : tagName;
+      final releaseNotes = data['body'] as String? ?? '';
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        final tagName = data['tag_name'] as String;
-        final latestVersion = tagName.startsWith('v') ? tagName.substring(1) : tagName;
-        final releaseNotes = data['body'] as String? ?? '';
-
-        // 从 assets 数组里找第一个 .apk 资源,拿 browser_download_url
-        String? apkDownloadUrl;
-        final assets = data['assets'] as List<dynamic>?;
-        if (assets != null) {
-          for (final asset in assets) {
-            if (asset is Map<String, dynamic>) {
-              final name = (asset['name'] as String?) ?? '';
-              final url = (asset['browser_download_url'] as String?) ?? '';
-              if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
-                // v2.1.46: APK 直链也走 worker 代理 (配了的话)
-                apkDownloadUrl =
-                    UserDataService.buildGithubReleaseAssetUrl(url);
-                break;
-              }
+      // 从 assets 数组里找第一个 .apk 资源,拿 browser_download_url
+      String? apkDownloadUrl;
+      final assets = data['assets'] as List<dynamic>?;
+      if (assets != null) {
+        for (final asset in assets) {
+          if (asset is Map<String, dynamic>) {
+            final name = (asset['name'] as String?) ?? '';
+            final url = (asset['browser_download_url'] as String?) ?? '';
+            if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
+              apkDownloadUrl = UserDataService.buildGithubReleaseAssetUrl(url);
+              break;
             }
           }
         }
-        // release 详情页 URL(html_url),作为兜底
-        // v2.1.46: html_url 指向 github.com 详情页, 不走 worker
-        //   (worker 路由不代理这个 — 用户点开用浏览器访问, 让用户
-        //    自己决定是否走 VPN). buildGithubApiUrl 不会改这个 URL.
-        final releasePageUrl = data['html_url'] as String?;
+      }
+      final releasePageUrl = data['html_url'] as String?;
 
-        // v2.1.47 + v2.1.50 改: dismissed == latest 时不弹 (用户
-        //   已知的版本不再骚扰). 之前 dismissed 只在 [UpdateDialog]
-        //   的"忽略"按钮写, 但用户关掉 dialog / 稍后 / 按 back 都
-        //   不写, 导致每次开 app 都弹. 修: 统一在 [UpdateDialog] 的
-        //   所有关闭路径都调 [dismissVersion], 本函数拿 latest 后
-        //   对比 dismissed, 一致就 return null.
-        //   dismissed < latest (有新版本出) → 正常 return VersionInfo.
-        // v2.1.50 改: 上面逻辑导致 dismissed 写后永远不重置, 但
-        //   user 可能 dismiss 后没装 (装失败 / 取消), current < latest
-        //   时不应该继续静默 — 自动清 dismissed, 让 dialog 重弹.
-        final prefs = await SharedPreferences.getInstance();
-        final dismissedVersion = prefs.getString(_dismissedVersionKey);
-        if (dismissedVersion != null && dismissedVersion == latestVersion) {
-          if (_isNewerVersion(currentVersion, latestVersion)) {
-            // v2.1.50: dismissed 但 current < latest → user 没装上,
-            //   清 dismissed, 让 dialog 重弹 (v2.1.47 改过头踩坑:
-            //   "v2.1.47 装后填加速地址拿不到新版本" — 实际 worker
-            //   路由 v2.1.46 漏了 if 块, 但即使 worker 修好, user
-            //   dismiss 一次后也会卡在 dismissed == latest 死循环).
-            await prefs.remove(_dismissedVersionKey);
-            DiaryService.add(
-                '[Version] dismissed=$dismissedVersion == latest=$latestVersion 但 current=$currentVersion < latest, 重置 dismissed 重弹');
-          } else {
-            // current == latest, user 已装或就是这个版本, 静默不弹
-            return null;
-          }
-        }
-
-        // 比较版本号
-        if (_isNewerVersion(currentVersion, latestVersion)) {
-          return VersionInfo(
-            currentVersion: currentVersion,
-            latestVersion: latestVersion,
-            releaseNotes: releaseNotes,
-            apkDownloadUrl: apkDownloadUrl,
-            releasePageUrl: releasePageUrl,
-          );
-        }
+      // ★ v2.6.55: 比较版本号 (硬编码当前版本, 无 PackageInfo +build 后缀问题)
+      if (_isNewerVersion(currentVersion, latestVersion)) {
+        return VersionInfo(
+          currentVersion: currentVersion,
+          latestVersion: latestVersion,
+          releaseNotes: releaseNotes,
+          apkDownloadUrl: apkDownloadUrl,
+          releasePageUrl: releasePageUrl,
+        );
       }
 
       return null;
@@ -190,67 +140,10 @@ class VersionService {
     return false;
   }
   
-  /// 检查是否应该显示更新提示（避免频繁提示）
-  static Future<bool> shouldShowUpdatePrompt(String version) async {
-    final prefs = await SharedPreferences.getInstance();
-    
-    // 检查用户是否已忽略此版本
-    final dismissedVersion = prefs.getString(_dismissedVersionKey);
-    if (dismissedVersion == version) {
-      return false;
-    }
-    
-    // 检查上次检查时间（每天最多提示一次）
-    final lastCheck = prefs.getInt(_lastCheckKey) ?? 0;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final dayInMs = 24 * 60 * 60 * 1000;
-    
-    if (now - lastCheck < dayInMs) {
-      return false;
-    }
-    
-    // 更新最后检查时间
-    await prefs.setInt(_lastCheckKey, now);
-    return true;
-  }
-  
-  /// 标记用户已忽略某个版本
-  static Future<void> dismissVersion(String version) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_dismissedVersionKey, version);
-  }
-
-  /// 清除忽略记录（用于测试或重置）
-  static Future<void> clearDismissedVersion() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_dismissedVersionKey);
-  }
-
-  // v2.5.78: 启动自动检查的 24h 节流 — 检查 24h 内是否已查过
-  //   写在 try 外避免 throw 被吞, 走 Prefs 简单, 不要走 main isolate
-  //   之外的 Channel (PackageInfo 已经在主 isolate 走完了)
-  static Future<bool> _shouldThrottleAutoCheck() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final last = prefs.getInt(_lastCheckKey) ?? 0;
-      if (last <= 0) return false;
-      return (DateTime.now().millisecondsSinceEpoch - last) < _autoCheckThrottleMs;
-    } catch (_) {
-      return false;  // 读失败 → 当作没查过, 放行
-    }
-  }
-
-  // v2.5.78: 启动自动检查成功后写时间戳
-  //   _lastCheckKey 跟 shouldShowUpdatePrompt 共用, 但那个方法已废弃
-  //   (新流程都在 [checkForUpdate] 内做), 互不干扰
-  static Future<void> _markAutoCheckDone() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
-    } catch (_) {
-      // 写失败不影响主流程
-    }
-  }
+  // ★ v2.6.55: 去掉所有废弃方法 (dismissVersion/clearDismissedVersion/
+  //   shouldShowUpdatePrompt/_shouldThrottleAutoCheck/_markAutoCheckDone).
+  //   新流程: 无节流, 无 dismissed, 每次启动都检查, 有更新就弹窗.
+  //   用户关闭弹窗不影响下次启动检查.
 }
 
 class VersionInfo {
