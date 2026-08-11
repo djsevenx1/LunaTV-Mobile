@@ -5734,6 +5734,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   /// 倍速选择底部面板
+  /// v2.6.59: 横屏显示不全 → 改成 Wrap 网格布局 (横屏一行多个, 不裁切)
   Future<void> _showPlaybackRateSheet() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -5742,9 +5743,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
+        final isLandscape = MediaQuery.of(ctx).orientation == Orientation.landscape;
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -5765,23 +5767,35 @@ class _PlayerScreenState extends State<PlayerScreen>
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 8),
-                ..._playbackRates.map((rate) {
-                  final selected = (rate - _playbackRate).abs() < 0.001;
-                  return ListTile(
-                    title: Text(
-                      rate == 1.0 ? '1.0x (正常)' : '${rate}x',
-                      style: TextStyle(
-                        color: selected
-                            ? const Color(0xFF22C55E)
-                            : Colors.white,
-                        fontSize: 15,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
+                const SizedBox(height: 12),
+                // ★ v2.6.59: 横屏用 Wrap 网格, 竖屏用 ListTile
+                if (isLandscape)
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: _playbackRates.map((rate) {
+                      final selected = (rate - _playbackRate).abs() < 0.001;
+                      return _buildRateChip(rate, selected);
+                    }).toList(),
+                  )
+                else
+                  ..._playbackRates.map((rate) {
+                    final selected = (rate - _playbackRate).abs() < 0.001;
+                    return ListTile(
+                      title: Text(
+                        rate == 1.0 ? '1.0x (正常)' : '${rate}x',
+                        style: TextStyle(
+                          color: selected
+                              ? const Color(0xFF22C55E)
+                              : Colors.white,
+                          fontSize: 15,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
                       ),
-                    ),
-                    trailing: selected
+                      trailing: selected
                         ? const Icon(Icons.check_circle,
                             color: Color(0xFF22C55E), size: 20)
                         : null,
@@ -5796,6 +5810,40 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
         );
       },
+    );
+  }
+
+  /// v2.6.59: 倍速 chip — 横屏用 (圆形/椭圆, 选中绿色高亮)
+  Widget _buildRateChip(double rate, bool selected) {
+    final label = rate == 1.0 ? '1.0x' : '${rate}x';
+    return InkWell(
+      onTap: () {
+        _setPlaybackRate(rate);
+        Navigator.of(context).pop();
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF22C55E)
+              : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF22C55E)
+                : Colors.white24,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : Colors.white70,
+            fontSize: 14,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+      ),
     );
   }
 
