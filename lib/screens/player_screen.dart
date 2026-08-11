@@ -331,7 +331,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _hideControlsTimer;
 
   // 倍速档位
-  static const List<double> _playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+  // v2.6.58: 倍速档位 — 0.5X/0.75X/1X/1.25X/1.5X/1.75X/2X
+  static const List<double> _playbackRates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
   // 全屏状态
   bool _isFullscreen = false;
